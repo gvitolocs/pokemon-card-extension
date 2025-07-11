@@ -37,21 +37,25 @@
         },
         'vinted.it': {
             titleSelectors: [
+                '.web_ui__Text__text.web_ui__Text__title',
+                'h1.web_ui__Text__text.web_ui__Text__title',
                 '.web_ui__Text__text',
                 '.web_ui__Text__text--bold',
                 '[data-testid="item-title"]',
                 '.item-box__title'
             ],
-            containerSelector: '.item-box'
+            containerSelector: '.item-box, .summary-max-lines-4'
         },
         'vinted.com': {
             titleSelectors: [
+                '.web_ui__Text__text.web_ui__Text__title',
+                'h1.web_ui__Text__text.web_ui__Text__title',
                 '.web_ui__Text__text',
                 '.web_ui__Text__text--bold',
                 '[data-testid="item-title"]',
                 '.item-box__title'
             ],
-            containerSelector: '.item-box'
+            containerSelector: '.item-box, .summary-max-lines-4'
         }
     };
 
@@ -128,9 +132,14 @@
             // Per Vinted, inserisci dopo il titolo
             if (window.location.hostname.includes('vinted')) {
                 const titleContainer = container.querySelector('.item-box__title') || 
-                                     container.querySelector('[data-testid="item-title"]');
+                                     container.querySelector('[data-testid="item-title"]') ||
+                                     container.querySelector('.web_ui__Text__text.web_ui__Text__title') ||
+                                     container.querySelector('h1.web_ui__Text__text.web_ui__Text__title');
                 if (titleContainer) {
                     insertPosition = titleContainer.parentNode;
+                } else {
+                    // Se non trova un container specifico, usa il container principale
+                    insertPosition = container;
                 }
             }
 
@@ -188,7 +197,9 @@
                             const config = siteConfigs[hostname];
                             if (config && (
                                 node.matches?.(config.containerSelector) ||
-                                node.querySelector?.(config.containerSelector)
+                                node.querySelector?.(config.containerSelector) ||
+                                node.querySelector?.('.summary-max-lines-4') ||
+                                node.querySelector?.('.web_ui__Text__text.web_ui__Text__title')
                             )) {
                                 shouldProcess = true;
                             }
