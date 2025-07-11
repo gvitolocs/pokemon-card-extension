@@ -93,11 +93,17 @@
 
         // Selettori per elementi pubblicitari
         const adSelectors = [
+            '[data-testid="slot-container"]',
             '[data-testid="slot-placeholder"]',
             '[data-testid="slot-placeholder-image"]',
             '[data-testid="slot-placeholder-image--img"]',
+            '[data-testid="main-slot"]',
+            '.slot-container',
+            '.slot-container--leaderboard',
             '.slot-placeholder',
             '.slot-placeholder--leaderboard',
+            '.slot-content',
+            '#slot-leaderboard',
             '.web_ui__Image__image[data-testid="slot-placeholder-image"]',
             '.web_ui__Image__content[data-testid="slot-placeholder-image--img"]',
             '[data-testid*="ad"]',
@@ -281,9 +287,13 @@
                             // Controlla anche se sono stati aggiunti elementi pubblicitari
                             if (window.location.hostname.includes('vinted') && settings.hideAds && (
                                 node.matches?.('[data-testid="slot-placeholder"]') ||
+                                node.matches?.('[data-testid="slot-container"]') ||
                                 node.matches?.('.slot-placeholder') ||
+                                node.matches?.('.slot-container') ||
                                 node.querySelector?.('[data-testid="slot-placeholder"]') ||
-                                node.querySelector?.('.slot-placeholder')
+                                node.querySelector?.('[data-testid="slot-container"]') ||
+                                node.querySelector?.('.slot-placeholder') ||
+                                node.querySelector?.('.slot-container')
                             )) {
                                 setTimeout(hideVintedAds, 100);
                             }
