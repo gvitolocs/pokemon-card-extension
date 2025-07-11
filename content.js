@@ -24,9 +24,11 @@
                 '.x-item-title__mainTitle',
                 '.s-item__title',
                 'h3.s-item__title',
-                '.s-item__link .s-item__title'
+                '.s-item__link .s-item__title',
+                '[data-testid="x-item-title"] h1',
+                '.vim.x-item-title h1'
             ],
-            containerSelector: '.s-item__info, [data-testid="x-item-title"]'
+            containerSelector: '.s-item__info, [data-testid="x-item-title"], .vim.x-item-title'
         },
         'ebay.com': {
             titleSelectors: [
@@ -34,9 +36,11 @@
                 '.x-item-title__mainTitle',
                 '.s-item__title',
                 'h3.s-item__title',
-                '.s-item__link .s-item__title'
+                '.s-item__link .s-item__title',
+                '[data-testid="x-item-title"] h1',
+                '.vim.x-item-title h1'
             ],
-            containerSelector: '.s-item__info, [data-testid="x-item-title"]'
+            containerSelector: '.s-item__info, [data-testid="x-item-title"], .vim.x-item-title'
         },
         'vinted.it': {
             titleSelectors: [
@@ -154,7 +158,9 @@
             if (window.location.hostname.includes('ebay')) {
                 const titleElement = container.querySelector('.x-item-title__mainTitle') || 
                                    container.querySelector('h1.x-item-title__mainTitle') ||
-                                   container.querySelector('.s-item__title');
+                                   container.querySelector('.s-item__title') ||
+                                   container.querySelector('[data-testid="x-item-title"] h1') ||
+                                   container.querySelector('.vim.x-item-title h1');
                 
                 if (titleElement) {
                     // Inserisci il pulsante dopo il titolo
@@ -234,7 +240,9 @@
                                 node.querySelector?.('.summary-max-lines-4') ||
                                 node.querySelector?.('.web_ui__Text__text.web_ui__Text__title') ||
                                 node.querySelector?.('h1.x-item-title__mainTitle') ||
-                                node.querySelector?.('.x-item-title__mainTitle')
+                                node.querySelector?.('.x-item-title__mainTitle') ||
+                                node.querySelector?.('[data-testid="x-item-title"]') ||
+                                node.querySelector?.('.vim.x-item-title')
                             )) {
                                 shouldProcess = true;
                             }
