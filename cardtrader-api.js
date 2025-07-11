@@ -620,10 +620,22 @@ class CardTraderAPI {
                 console.log(`CardTrader API: Cercando Ho-Oh in espansione: ${expansion.name} (ID: ${expansion.id})`);
                 const blueprints = await this.getBlueprintsForExpansion(expansion.id);
                 
-                // Cerca blueprint che contengono "Ho-Oh" (carte vere, non prodotti)
+                // Cerca blueprint che contengono "Ho-Oh" con varianti più specifiche
                 const hoohBlueprints = blueprints.filter(bp => {
                     const bpName = bp.name.toLowerCase();
-                    return (bpName.includes('ho-oh') || bpName.includes('hooh') || bpName.includes('ho oh')) &&
+                    
+                    // Cerca varianti specifiche per "Ho-Oh di Armonio" / "Ethan's Ho-Oh"
+                    const isEthanHooh = bpName.includes('ethan') && bpName.includes('ho-oh');
+                    const isArmonioHooh = bpName.includes('armonio') && bpName.includes('ho-oh');
+                    const isGenericHooh = (bpName.includes('ho-oh') || bpName.includes('hooh') || bpName.includes('ho oh'));
+                    
+                    // Priorità: Ethan's Ho-Oh > Ho-Oh di Armonio > Ho-Oh generico
+                    if (isEthanHooh || isArmonioHooh) {
+                        return true;
+                    }
+                    
+                    // Se non troviamo varianti specifiche, accetta Ho-Oh generico
+                    return isGenericHooh && 
                            !bpName.includes('tin') && 
                            !bpName.includes('playmat') && 
                            !bpName.includes('coin') && 
@@ -644,9 +656,21 @@ class CardTraderAPI {
                             if (products && products.length > 0) {
                                 console.log(`CardTrader API: Trovati ${products.length} prodotti per ${blueprint.name}`);
                                 
-                                // Filtra solo carte Ho-Oh vere
+                                // Filtra carte Ho-Oh con priorità per varianti specifiche
                                 const cardProducts = products.filter(product => {
                                     const productName = (product.name_en || product.name || '').toLowerCase();
+                                    
+                                    // Priorità 1: Ethan's Ho-Oh
+                                    if (productName.includes('ethan') && productName.includes('ho-oh')) {
+                                        return true;
+                                    }
+                                    
+                                    // Priorità 2: Ho-Oh di Armonio
+                                    if (productName.includes('armonio') && productName.includes('ho-oh')) {
+                                        return true;
+                                    }
+                                    
+                                    // Priorità 3: Ho-Oh generico
                                     return productName.includes('ho-oh') && 
                                            !productName.includes('tin') && 
                                            !productName.includes('playmat') && 
@@ -657,9 +681,28 @@ class CardTraderAPI {
                                 
                                 if (cardProducts.length > 0) {
                                     console.log(`CardTrader API: Trovate ${cardProducts.length} carte Ho-Oh per ${blueprint.name}`);
+                                    
+                                    // Ordina per priorità: Ethan's > Armonio > generico
+                                    cardProducts.sort((a, b) => {
+                                        const aName = (a.name_en || a.name || '').toLowerCase();
+                                        const bName = (b.name_en || b.name || '').toLowerCase();
+                                        
+                                        const aIsEthan = aName.includes('ethan') && aName.includes('ho-oh');
+                                        const bIsEthan = bName.includes('ethan') && bName.includes('ho-oh');
+                                        const aIsArmonio = aName.includes('armonio') && aName.includes('ho-oh');
+                                        const bIsArmonio = bName.includes('armonio') && bName.includes('ho-oh');
+                                        
+                                        if (aIsEthan && !bIsEthan) return -1;
+                                        if (!aIsEthan && bIsEthan) return 1;
+                                        if (aIsArmonio && !bIsArmonio) return -1;
+                                        if (!aIsArmonio && bIsArmonio) return 1;
+                                        
+                                        return 0;
+                                    });
+                                    
                                     allProducts.push(...cardProducts);
                                     
-                                    // Se abbiamo trovato carte Ho-Oh, possiamo fermarci
+                                    // Se abbiamo trovato carte Ho-Oh specifiche, possiamo fermarci
                                     if (allProducts.length >= 10) {
                                         break;
                                     }
