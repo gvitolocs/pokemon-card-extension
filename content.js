@@ -205,13 +205,22 @@
             return;
         }
 
+        // Debug: log del titolo trovato
+        console.log('Pokemon Card Trader: Trovato titolo:', title);
+
         // Cerca parole chiave Pokemon dalle impostazioni
         const cleanedTitle = cleanTitle(title);
         const hasPokemonKeywords = settings.pokemonKeywords.some(keyword => 
             cleanedTitle.includes(keyword.toLowerCase())
         );
 
+        // Debug: log del risultato del controllo
+        console.log('Pokemon Card Trader: Titolo pulito:', cleanedTitle);
+        console.log('Pokemon Card Trader: Contiene parole chiave Pokemon:', hasPokemonKeywords);
+        console.log('Pokemon Card Trader: Estensione in pausa:', isPaused);
+
         if (hasPokemonKeywords && !isPaused) {
+            console.log('Pokemon Card Trader: Creando pulsante CT per:', title);
             // Crea e aggiungi il pulsante CT
             const ctButton = createCTButton(title);
             
@@ -254,7 +263,10 @@
 
             // Se il pulsante è stato inserito, marca come processato
             if (insertPosition) {
+                console.log('Pokemon Card Trader: Pulsante CT inserito con successo');
                 titleElement.dataset.cardtraderProcessed = 'true';
+            } else {
+                console.log('Pokemon Card Trader: Impossibile inserire il pulsante CT');
             }
         }
     }
