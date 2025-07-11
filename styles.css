@@ -99,4 +99,40 @@
 .cardtrader-link-badge a:focus {
     outline: 2px solid #667eea;
     outline-offset: 2px;
+}
+
+/* Nascondi elementi pubblicitari di Vinted */
+[data-testid="slot-placeholder-image"],
+[data-testid="slot-placeholder-image--img"],
+.web_ui__Image__image[data-testid="slot-placeholder-image"],
+.web_ui__Image__content[data-testid="slot-placeholder-image--img"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
+}
+
+/* Nascondi altri elementi pubblicitari comuni di Vinted */
+[data-testid*="ad"],
+[data-testid*="advertisement"],
+[data-testid*="promo"],
+[data-testid*="sponsored"],
+[class*="ad-"],
+[class*="advertisement"],
+[class*="promo"],
+[class*="sponsored"],
+[id*="ad-"],
+[id*="advertisement"],
+[id*="promo"],
+[id*="sponsored"] {
+    display: none !important;
+}
+
+/* Nascondi banner pubblicitari specifici di Vinted */
+.web_ui__Image__image[src*="placeholders"],
+.web_ui__Image__image[src*="ads"],
+.web_ui__Image__image[src*="leaderboard"] {
+    display: none !important;
 } 

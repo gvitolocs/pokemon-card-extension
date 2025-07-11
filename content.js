@@ -8,6 +8,7 @@
         autoActivate: true,
         notifications: true,
         newTab: true,
+        hideAds: true,
         pokemonKeywords: [
             'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
             'charizard', 'pikachu', 'blastoise', 'venusaur', 'mewtwo',
@@ -81,6 +82,53 @@
     function loadSettings() {
         chrome.storage.sync.get(settings, function(items) {
             settings = { ...settings, ...items };
+        });
+    }
+
+    // Funzione per nascondere elementi pubblicitari di Vinted
+    function hideVintedAds() {
+        if (!window.location.hostname.includes('vinted')) {
+            return;
+        }
+
+        // Selettori per elementi pubblicitari
+        const adSelectors = [
+            '[data-testid="slot-placeholder-image"]',
+            '[data-testid="slot-placeholder-image--img"]',
+            '.web_ui__Image__image[data-testid="slot-placeholder-image"]',
+            '.web_ui__Image__content[data-testid="slot-placeholder-image--img"]',
+            '[data-testid*="ad"]',
+            '[data-testid*="advertisement"]',
+            '[data-testid*="promo"]',
+            '[data-testid*="sponsored"]',
+            '[class*="ad-"]',
+            '[class*="advertisement"]',
+            '[class*="promo"]',
+            '[class*="sponsored"]',
+            '[id*="ad-"]',
+            '[id*="advertisement"]',
+            '[id*="promo"]',
+            '[id*="sponsored"]'
+        ];
+
+        adSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(element => {
+                element.style.display = 'none';
+                element.style.visibility = 'hidden';
+                element.style.opacity = '0';
+                element.style.height = '0';
+                element.style.width = '0';
+                element.style.overflow = 'hidden';
+            });
+        });
+
+        // Nascondi immagini con URL specifici
+        const adImages = document.querySelectorAll('img[src*="placeholders"], img[src*="ads"], img[src*="leaderboard"]');
+        adImages.forEach(img => {
+            img.style.display = 'none';
+            img.style.visibility = 'hidden';
+            img.style.opacity = '0';
         });
     }
 
@@ -174,6 +222,11 @@
             return;
         }
 
+        // Nascondi pubblicità su Vinted se abilitato
+        if (settings.hideAds) {
+            hideVintedAds();
+        }
+
         // Trova tutti i container delle inserzioni
         const containers = document.querySelectorAll(config.containerSelector);
         
@@ -223,6 +276,12 @@
                 setTimeout(processPage, 100);
             }
         });
+
+        // Nascondi anche pubblicità che potrebbero essere aggiunte dinamicamente
+        if (window.location.hostname.includes('vinted') && settings.hideAds) {
+            setTimeout(hideVintedAds, 500);
+            setTimeout(hideVintedAds, 2000);
+        }
 
         observer.observe(document.body, {
             childList: true,
