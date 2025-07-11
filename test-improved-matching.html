@@ -84,12 +84,26 @@
         </div>
 
         <div class="test-section">
+            <h3>⚙️ Configurazione Supabase (Opzionale)</h3>
+            <p>Inserisci le tue credenziali Supabase per testare con dati reali:</p>
+            <input type="text" id="supabaseUrl" placeholder="URL Supabase (es. https://xxx.supabase.co)" 
+                   style="margin-bottom: 10px;">
+            <input type="text" id="supabaseKey" placeholder="Chiave anonima Supabase" 
+                   style="margin-bottom: 10px;">
+            <button onclick="saveSupabaseConfig()">💾 Salva Configurazione</button>
+            <button onclick="clearSupabaseConfig()">🗑️ Cancella Configurazione</button>
+        </div>
+
+        <div class="test-section">
             <h3>🎯 Test Matching Logica</h3>
             <button onclick="testMatching()">🔍 Testa Matching</button>
             <div id="matchingResult"></div>
         </div>
     </div>
 
+    <!-- Includi Supabase -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    
     <script>
         // Funzione per estrarre il nome del Pokemon (copiata da content.js)
         function extractPokemonName(title) {
@@ -462,6 +476,42 @@
             return info;
         }
 
+        // Funzioni per gestire la configurazione Supabase
+        function saveSupabaseConfig() {
+            const url = document.getElementById('supabaseUrl').value.trim();
+            const key = document.getElementById('supabaseKey').value.trim();
+            
+            if (!url || !key) {
+                alert('Inserisci sia URL che chiave Supabase');
+                return;
+            }
+            
+            localStorage.setItem('supabaseUrl', url);
+            localStorage.setItem('supabaseKey', key);
+            
+            alert('Configurazione Supabase salvata!');
+        }
+        
+        function clearSupabaseConfig() {
+            localStorage.removeItem('supabaseUrl');
+            localStorage.removeItem('supabaseKey');
+            document.getElementById('supabaseUrl').value = '';
+            document.getElementById('supabaseKey').value = '';
+            
+            alert('Configurazione Supabase cancellata!');
+        }
+        
+        function loadSupabaseConfig() {
+            const url = localStorage.getItem('supabaseUrl');
+            const key = localStorage.getItem('supabaseKey');
+            
+            if (url) document.getElementById('supabaseUrl').value = url;
+            if (key) document.getElementById('supabaseKey').value = key;
+        }
+        
+        // Carica configurazione all'avvio
+        window.addEventListener('load', loadSupabaseConfig);
+        
         // Funzione per testare l'estrazione
         function testExtraction() {
             const title = document.getElementById('testTitle').value;
@@ -476,101 +526,181 @@
             `;
         }
 
-        // Funzione per testare il matching (simulato)
-        function testMatching() {
+        // Funzione per testare il matching con dati reali
+        async function testMatching() {
             const title = document.getElementById('testTitle').value;
             const titleInfo = extractTitleInfo(title);
             
-            // Simula alcuni risultati dal database
-            const mockResults = [
-                {
-                    name_en: 'Jolteon',
-                    expansion_name_en: 'Jungle',
-                    collector_number: '4',
-                    blueprint_id: '121470',
-                    image_url: 'https://example.com/jolteon-jungle.jpg'
-                },
-                {
-                    name_en: 'Jolteon ex',
-                    expansion_name_en: 'Terastal Festival ex',
-                    collector_number: '209',
-                    blueprint_id: '123456',
-                    image_url: 'https://example.com/jolteon-ex-terastal.jpg'
-                },
-                {
-                    name_en: 'Jolteon ex',
-                    expansion_name_en: 'EX Delta Species',
-                    collector_number: '105',
-                    blueprint_id: '789012',
-                    image_url: 'https://example.com/jolteon-ex-delta.jpg'
-                }
-            ];
-            
-            // Simula la logica di matching
-            let bestMatch = null;
-            let matchReason = '';
-            
-            // Prima cerca match perfetti con espansione e numero collezionista
-            for (const result of mockResults) {
-                const name = result.name_en.toLowerCase();
-                const expansion = result.expansion_name_en.toLowerCase();
-                
-                if (title.toLowerCase().includes(name) || name.includes(titleInfo.pokemonName)) {
-                    if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
-                        bestMatch = result;
-                        matchReason = 'Match perfetto con espansione';
-                        break;
-                    }
-                    
-                    if (titleInfo.collectorNumber && result.collector_number && 
-                        result.collector_number.toString().includes(titleInfo.collectorNumber)) {
-                        bestMatch = result;
-                        matchReason = 'Match perfetto con numero collezionista';
-                        break;
-                    }
-                }
-            }
-            
-            // Se non trova match perfetti, cerca con espansione specifica
-            if (!bestMatch) {
-                for (const result of mockResults) {
-                    const name = result.name_en.toLowerCase();
-                    const expansion = result.expansion_name_en.toLowerCase();
-                    
-                    if ((title.toLowerCase().includes(name) || name.includes(titleInfo.pokemonName)) && 
-                        titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
-                        bestMatch = result;
-                        matchReason = 'Match con espansione specifica';
-                        break;
-                    }
-                }
-            }
-            
-            // Fallback al primo risultato con immagine
-            if (!bestMatch) {
-                for (const result of mockResults) {
-                    if (result.image_url) {
-                        bestMatch = result;
-                        matchReason = 'Primo risultato con immagine';
-                        break;
-                    }
-                }
-            }
-            
             const resultDiv = document.getElementById('matchingResult');
-            if (bestMatch) {
-                resultDiv.innerHTML = `
-                    <div class="result success">
-                        <h4>✅ Miglior match trovato:</h4>
-                        <p><strong>Motivo:</strong> ${matchReason}</p>
-                        <pre>${JSON.stringify(bestMatch, null, 2)}</pre>
-                        <p><strong>Link generato:</strong> https://www.cardtrader.com/cards/${bestMatch.blueprint_id}</p>
-                    </div>
-                `;
-            } else {
+            resultDiv.innerHTML = '<div class="result warning">🔍 Ricerca in corso...</div>';
+            
+            try {
+                // Inizializza Supabase se disponibile
+                if (typeof window.supabase === 'undefined') {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h4>❌ Supabase non disponibile</h4>
+                            <p>Per testare con dati reali, carica prima la pagina di test Supabase.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Crea client Supabase (usa configurazione salvata)
+                const supabaseUrl = localStorage.getItem('supabaseUrl');
+                const supabaseKey = localStorage.getItem('supabaseKey');
+                
+                if (!supabaseUrl || !supabaseKey) {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h4>❌ Configurazione Supabase mancante</h4>
+                            <p>Inserisci URL e chiave Supabase nella sezione configurazione per testare con dati reali.</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+                
+                // Cerca nel database reale
+                const pokemonName = titleInfo.pokemonName;
+                console.log('🔍 Cercando:', pokemonName);
+                
+                // Cerca nelle tabelle cards e card_variants
+                const { data: cards, error: cardsError } = await supabase
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${pokemonName}%`)
+                    .limit(20);
+                
+                if (cardsError) {
+                    throw new Error(`Errore ricerca cards: ${cardsError.message}`);
+                }
+                
+                const { data: variants, error: variantsError } = await supabase
+                    .from('card_variants')
+                    .select('*')
+                    .ilike('name_en', `%${pokemonName}%`)
+                    .limit(20);
+                
+                if (variantsError) {
+                    throw new Error(`Errore ricerca variants: ${variantsError.message}`);
+                }
+                
+                // Combina i risultati
+                const allResults = [
+                    ...(cards || []).map(card => ({ ...card, source: 'cards' })),
+                    ...(variants || []).map(variant => ({ ...variant, source: 'card_variants' }))
+                ];
+                
+                console.log(`✅ Trovati ${allResults.length} risultati totali`);
+                
+                if (allResults.length === 0) {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h4>❌ Nessun risultato trovato</h4>
+                            <p>Nessuna carta trovata per: ${pokemonName}</p>
+                        </div>
+                    `;
+                    return;
+                }
+                
+                // Applica la logica di matching migliorata
+                let bestMatch = null;
+                let matchReason = '';
+                
+                // Prima cerca match perfetti con espansione e numero collezionista
+                for (const result of allResults) {
+                    const name = (result.name_en || result.pokemon_name || '').toLowerCase();
+                    const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+                    
+                    if (title.toLowerCase().includes(name) || name.includes(titleInfo.pokemonName)) {
+                        if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
+                            bestMatch = result;
+                            matchReason = 'Match perfetto con espansione';
+                            break;
+                        }
+                        
+                        if (titleInfo.collectorNumber && result.collector_number && 
+                            result.collector_number.toString().includes(titleInfo.collectorNumber)) {
+                            bestMatch = result;
+                            matchReason = 'Match perfetto con numero collezionista';
+                            break;
+                        }
+                    }
+                }
+                
+                // Se non trova match perfetti, cerca con espansione specifica
+                if (!bestMatch) {
+                    for (const result of allResults) {
+                        const name = (result.name_en || result.pokemon_name || '').toLowerCase();
+                        const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+                        
+                        if ((title.toLowerCase().includes(name) || name.includes(titleInfo.pokemonName)) && 
+                            titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
+                            bestMatch = result;
+                            matchReason = 'Match con espansione specifica';
+                            break;
+                        }
+                    }
+                }
+                
+                // Poi cerca match esatti con immagini
+                if (!bestMatch) {
+                    for (const result of allResults) {
+                        const name = (result.name_en || result.pokemon_name || '').toLowerCase();
+                        if ((title.toLowerCase().includes(name) || name.includes(titleInfo.pokemonName)) && result.image_url) {
+                            bestMatch = result;
+                            matchReason = 'Match esatto con immagine';
+                            break;
+                        }
+                    }
+                }
+                
+                // Fallback al primo risultato con immagine
+                if (!bestMatch) {
+                    for (const result of allResults) {
+                        if (result.image_url) {
+                            bestMatch = result;
+                            matchReason = 'Primo risultato con immagine';
+                            break;
+                        }
+                    }
+                }
+                
+                // Fallback al primo risultato disponibile
+                if (!bestMatch && allResults.length > 0) {
+                    bestMatch = allResults[0];
+                    matchReason = 'Primo risultato disponibile';
+                }
+                
+                if (bestMatch) {
+                    const blueprintId = bestMatch.blueprint_id || bestMatch.id;
+                    const link = blueprintId ? `https://www.cardtrader.com/cards/${blueprintId}` : 'Link non disponibile';
+                    
+                    resultDiv.innerHTML = `
+                        <div class="result success">
+                            <h4>✅ Miglior match trovato:</h4>
+                            <p><strong>Motivo:</strong> ${matchReason}</p>
+                            <p><strong>Fonte:</strong> ${bestMatch.source}</p>
+                            <pre>${JSON.stringify(bestMatch, null, 2)}</pre>
+                            <p><strong>Link generato:</strong> ${link}</p>
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `
+                        <div class="result error">
+                            <h4>❌ Nessun match trovato</h4>
+                        </div>
+                    `;
+                }
+                
+            } catch (error) {
+                console.error('Errore durante il test:', error);
                 resultDiv.innerHTML = `
                     <div class="result error">
-                        <h4>❌ Nessun match trovato</h4>
+                        <h4>❌ Errore durante la ricerca</h4>
+                        <p>${error.message}</p>
                     </div>
                 `;
             }
