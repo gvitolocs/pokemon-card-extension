@@ -206,9 +206,9 @@
         }
 
         // Cerca parole chiave Pokemon dalle impostazioni
-        const cleanTitle = cleanTitle(title);
+        const cleanedTitle = cleanTitle(title);
         const hasPokemonKeywords = settings.pokemonKeywords.some(keyword => 
-            cleanTitle.includes(keyword.toLowerCase())
+            cleanedTitle.includes(keyword.toLowerCase())
         );
 
         if (hasPokemonKeywords && !isPaused) {
