@@ -89,6 +89,70 @@
         });
     }
 
+    // Funzione per nascondere elementi pubblicitari di Vinted
+    function hideVintedAds() {
+        if (!window.location.hostname.includes('vinted')) {
+            return;
+        }
+
+        // Selettori per elementi pubblicitari
+        const adSelectors = [
+            '[data-testid="slot-container"]',
+            '[data-testid="slot-placeholder"]',
+            '[data-testid="slot-placeholder-image"]',
+            '[data-testid="slot-placeholder-image--img"]',
+            '[data-testid="main-slot"]',
+            '.slot-container',
+            '.slot-container--leaderboard',
+            '.slot-placeholder',
+            '.slot-placeholder--leaderboard',
+            '.slot-content',
+            '#slot-leaderboard',
+            '.web_ui__Image__image[data-testid="slot-placeholder-image"]',
+            '.web_ui__Image__content[data-testid="slot-placeholder-image--img"]',
+            '[data-testid*="ad"]',
+            '[data-testid*="advertisement"]',
+            '[data-testid*="promo"]',
+            '[data-testid*="sponsored"]',
+            '[class*="ad-"]',
+            '[class*="advertisement"]',
+            '[class*="promo"]',
+            '[class*="sponsored"]',
+            '[id*="ad-"]',
+            '[id*="advertisement"]',
+            '[id*="promo"]',
+            '[id*="sponsored"]'
+        ];
+
+        adSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(element => {
+                element.style.display = 'none';
+                element.style.visibility = 'hidden';
+                element.style.opacity = '0';
+                element.style.height = '0';
+                element.style.width = '0';
+                element.style.overflow = 'hidden';
+            });
+        });
+
+        // Nascondi immagini con URL specifici
+        const adImages = document.querySelectorAll('img[src*="placeholders"], img[src*="ads"], img[src*="leaderboard"]');
+        adImages.forEach(img => {
+            img.style.display = 'none';
+            img.style.visibility = 'hidden';
+            img.style.opacity = '0';
+        });
+
+        // Nascondi testo all'interno dei placeholder
+        const adTexts = document.querySelectorAll('.slot-placeholder__text, .slot-placeholder .web_ui__Text__text');
+        adTexts.forEach(text => {
+            text.style.display = 'none';
+            text.style.visibility = 'hidden';
+            text.style.opacity = '0';
+        });
+    }
+
 
 
     // Funzione per creare il pulsante CT
@@ -208,7 +272,8 @@
             return;
         }
 
-
+        // Nascondi pubblicità su Vinted
+        hideVintedAds();
 
         // Trova tutti i container delle inserzioni
         const containers = document.querySelectorAll(config.containerSelector);
@@ -262,9 +327,27 @@
                 // Aspetta un po' per permettere al DOM di stabilizzarsi
                 setTimeout(processPage, 100);
             }
+
+            // Controlla anche se sono stati aggiunti elementi pubblicitari
+            if (window.location.hostname.includes('vinted') && (
+                node.matches?.('[data-testid="slot-placeholder"]') ||
+                node.matches?.('[data-testid="slot-container"]') ||
+                node.matches?.('.slot-placeholder') ||
+                node.matches?.('.slot-container') ||
+                node.querySelector?.('[data-testid="slot-placeholder"]') ||
+                node.querySelector?.('[data-testid="slot-container"]') ||
+                node.querySelector?.('.slot-placeholder') ||
+                node.querySelector?.('.slot-container')
+            )) {
+                setTimeout(hideVintedAds, 100);
+            }
         });
 
-
+        // Nascondi anche pubblicità che potrebbero essere aggiunte dinamicamente
+        if (window.location.hostname.includes('vinted')) {
+            setTimeout(hideVintedAds, 500);
+            setTimeout(hideVintedAds, 2000);
+        }
 
         observer.observe(document.body, {
             childList: true,

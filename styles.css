@@ -101,4 +101,76 @@
     outline-offset: 2px;
 }
 
+/* Nascondi elementi pubblicitari di Vinted */
+[data-testid="slot-container"],
+[data-testid="slot-placeholder"],
+[data-testid="slot-placeholder-image"],
+[data-testid="slot-placeholder-image--img"],
+.slot-container,
+.slot-container--leaderboard,
+.slot-placeholder,
+.slot-placeholder--leaderboard,
+.web_ui__Image__image[data-testid="slot-placeholder-image"],
+.web_ui__Image__content[data-testid="slot-placeholder-image--img"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    height: 0 !important;
+    width: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    left: -9999px !important;
+    top: -9999px !important;
+}
+
+/* Nascondi altri elementi pubblicitari comuni di Vinted */
+[data-testid*="ad"],
+[data-testid*="advertisement"],
+[data-testid*="promo"],
+[data-testid*="sponsored"],
+[class*="ad-"],
+[class*="advertisement"],
+[class*="promo"],
+[class*="sponsored"],
+[id*="ad-"],
+[id*="advertisement"],
+[id*="promo"],
+[id*="sponsored"] {
+    display: none !important;
+}
+
+/* Nascondi banner pubblicitari specifici di Vinted */
+.web_ui__Image__image[src*="placeholders"],
+.web_ui__Image__image[src*="ads"],
+.web_ui__Image__image[src*="leaderboard"] {
+    display: none !important;
+}
+
+/* Nascondi testo all'interno dei placeholder */
+.slot-placeholder__text,
+.slot-placeholder .web_ui__Text__text {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+/* Nascondi contenuto degli slot pubblicitari */
+.slot-content,
+[data-testid="main-slot"],
+#slot-leaderboard {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
+/* Nascondi completamente tutti gli slot pubblicitari di Vinted */
+.slot-container *,
+.slot-placeholder *,
+[data-testid="slot-container"] *,
+[data-testid="slot-placeholder"] * {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+}
+
  
