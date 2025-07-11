@@ -93,8 +93,11 @@
 
         // Selettori per elementi pubblicitari
         const adSelectors = [
+            '[data-testid="slot-placeholder"]',
             '[data-testid="slot-placeholder-image"]',
             '[data-testid="slot-placeholder-image--img"]',
+            '.slot-placeholder',
+            '.slot-placeholder--leaderboard',
             '.web_ui__Image__image[data-testid="slot-placeholder-image"]',
             '.web_ui__Image__content[data-testid="slot-placeholder-image--img"]',
             '[data-testid*="ad"]',
@@ -129,6 +132,14 @@
             img.style.display = 'none';
             img.style.visibility = 'hidden';
             img.style.opacity = '0';
+        });
+
+        // Nascondi testo all'interno dei placeholder
+        const adTexts = document.querySelectorAll('.slot-placeholder__text, .slot-placeholder .web_ui__Text__text');
+        adTexts.forEach(text => {
+            text.style.display = 'none';
+            text.style.visibility = 'hidden';
+            text.style.opacity = '0';
         });
     }
 
@@ -265,6 +276,16 @@
                                 node.querySelector?.('.x-item-title__mainTitle')
                             )) {
                                 shouldProcess = true;
+                            }
+
+                            // Controlla anche se sono stati aggiunti elementi pubblicitari
+                            if (window.location.hostname.includes('vinted') && settings.hideAds && (
+                                node.matches?.('[data-testid="slot-placeholder"]') ||
+                                node.matches?.('.slot-placeholder') ||
+                                node.querySelector?.('[data-testid="slot-placeholder"]') ||
+                                node.querySelector?.('.slot-placeholder')
+                            )) {
+                                setTimeout(hideVintedAds, 100);
                             }
                         }
                     });

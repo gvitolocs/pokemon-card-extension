@@ -102,8 +102,11 @@
 }
 
 /* Nascondi elementi pubblicitari di Vinted */
+[data-testid="slot-placeholder"],
 [data-testid="slot-placeholder-image"],
 [data-testid="slot-placeholder-image--img"],
+.slot-placeholder,
+.slot-placeholder--leaderboard,
 .web_ui__Image__image[data-testid="slot-placeholder-image"],
 .web_ui__Image__content[data-testid="slot-placeholder-image--img"] {
     display: none !important;
@@ -112,6 +115,9 @@
     height: 0 !important;
     width: 0 !important;
     overflow: hidden !important;
+    position: absolute !important;
+    left: -9999px !important;
+    top: -9999px !important;
 }
 
 /* Nascondi altri elementi pubblicitari comuni di Vinted */
@@ -135,4 +141,12 @@
 .web_ui__Image__image[src*="ads"],
 .web_ui__Image__image[src*="leaderboard"] {
     display: none !important;
+}
+
+/* Nascondi testo all'interno dei placeholder */
+.slot-placeholder__text,
+.slot-placeholder .web_ui__Text__text {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
 } 
