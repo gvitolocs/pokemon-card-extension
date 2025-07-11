@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🃏 Test Pokemon Card Trader Linker</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .test-section {
+            margin: 25px 0;
+            padding: 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: #fafafa;
+        }
+        .test-section h3 {
+            color: #444;
+            margin-top: 0;
+            font-size: 1.3em;
+        }
+        .result {
+            background: #f8f9fa;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 8px;
+            border-left: 5px solid #007acc;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .success {
+            background: #d4edda;
+            border-left-color: #28a745;
+            color: #155724;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left-color: #ffc107;
+            color: #856404;
+        }
+        .error {
+            background: #f8d7da;
+            border-left-color: #dc3545;
+            color: #721c24;
+        }
+        .info {
+            background: #d1ecf1;
+            border-left-color: #17a2b8;
+            color: #0c5460;
+        }
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 25px;
+            cursor: pointer;
+            margin: 8px;
+            font-size: 14px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-size: 14px;
+            transition: border-color 0.3s ease;
+        }
+        input[type="text"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 10px rgba(102, 126, 234, 0.3);
+        }
+        pre {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.4;
+        }
+        .config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 15px 0;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-connected {
+            background: #28a745;
+        }
+        .status-disconnected {
+            background: #dc3545;
+        }
+        .status-unknown {
+            background: #ffc107;
+        }
+        .feature-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .feature-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+            text-align: center;
+        }
+        .feature-item h4 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .feature-item p {
+            margin: 0;
+            color: #666;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🃏 Test Pokemon Card Trader Linker</h1>
+        
+        <div class="test-section">
+            <h3>📋 Funzionalità dell'Estensione</h3>
+            <div class="feature-list">
+                <div class="feature-item">
+                    <h4>🔍 Estrazione Intelligente</h4>
+                    <p>Estrae Pokemon, espansione, numero collezionista e rarità dai titoli eBay</p>
+                </div>
+                <div class="feature-item">
+                    <h4>🎯 Matching Avanzato</h4>
+                    <p>Sistema di punteggi per trovare la carta più appropriata</p>
+                </div>
+                <div class="feature-item">
+                    <h4>⚡ Ricerca Veloce</h4>
+                    <p>Integrazione Supabase per ricerche istantanee</p>
+                </div>
+                <div class="feature-item">
+                    <h4>🔗 Link Diretti</h4>
+                    <p>Genera link CardTrader precisi per ogni carta</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="test-section">
+            <h3>⚙️ Configurazione Supabase</h3>
+            <p>Credenziali predefinite configurate per il tuo database:</p>
+            <div class="config-grid">
+                <input type="text" id="supabaseUrl" placeholder="URL Supabase" 
+                       value="https://msngrrrihwudtnyjatlo.supabase.co">
+                <input type="text" id="supabaseKey" placeholder="Chiave anonima Supabase" 
+                       value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo">
+            </div>
+            <button onclick="testConnection()">🔗 Testa Connessione</button>
+            <button onclick="saveConfig()">💾 Salva Configurazione</button>
+            <button onclick="clearConfig()">🗑️ Cancella Configurazione</button>
+            <div id="connectionStatus"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>📝 Test Estrazione Titoli</h3>
+            <input type="text" id="testTitle" placeholder="Inserisci un titolo eBay per testare..." 
+                   value="Carta Pokemon Jolteon ex SAR 209/187 sv8a Terastal Festival ex JP">
+            <button onclick="testExtraction()">🔍 Testa Estrazione</button>
+            <div id="extractionResult"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>🎯 Test Matching e Link</h3>
+            <button onclick="testMatching()">🔗 Genera Link CardTrader</button>
+            <button onclick="testAllVariants()">📋 Mostra Tutte le Varianti</button>
+            <div id="matchingResult"></div>
+        </div>
+
+        <div class="test-section">
+            <h3>📊 Statistiche Database</h3>
+            <button onclick="getDatabaseStats()">📈 Carica Statistiche</button>
+            <div id="statsResult"></div>
+        </div>
+    </div>
+
+    <!-- Includi Supabase -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    
+    <script>
+        // Configurazione
+        let supabaseClient = null;
+        
+        // Funzioni di configurazione
+        function saveConfig() {
+            const url = document.getElementById('supabaseUrl').value.trim();
+            const key = document.getElementById('supabaseKey').value.trim();
+            
+            if (!url || !key) {
+                showResult('connectionStatus', '❌ Inserisci sia URL che chiave Supabase', 'error');
+                return;
+            }
+            
+            localStorage.setItem('supabaseUrl', url);
+            localStorage.setItem('supabaseKey', key);
+            showResult('connectionStatus', '✅ Configurazione salvata!', 'success');
+        }
+        
+        function clearConfig() {
+            localStorage.removeItem('supabaseUrl');
+            localStorage.removeItem('supabaseKey');
+            document.getElementById('supabaseUrl').value = '';
+            document.getElementById('supabaseKey').value = '';
+            showResult('connectionStatus', '🗑️ Configurazione cancellata', 'warning');
+        }
+        
+        function loadConfig() {
+            const url = localStorage.getItem('supabaseUrl');
+            const key = localStorage.getItem('supabaseKey');
+            
+            if (url) document.getElementById('supabaseUrl').value = url;
+            if (key) document.getElementById('supabaseKey').value = key;
+        }
+        
+        async function testConnection() {
+            const url = document.getElementById('supabaseUrl').value.trim();
+            const key = document.getElementById('supabaseKey').value.trim();
+            
+            if (!url || !key) {
+                showResult('connectionStatus', '❌ Inserisci sia URL che chiave Supabase', 'error');
+                return;
+            }
+            
+            try {
+                supabaseClient = window.supabase.createClient(url, key);
+                
+                const { data, error } = await supabaseClient
+                    .from('cards')
+                    .select('count')
+                    .limit(1);
+                
+                if (error) throw error;
+                
+                showResult('connectionStatus', 
+                    '<span class="status-indicator status-connected"></span>✅ Connessione Supabase riuscita!', 'success');
+                
+            } catch (error) {
+                showResult('connectionStatus', 
+                    '<span class="status-indicator status-disconnected"></span>❌ Errore connessione: ' + error.message, 'error');
+            }
+        }
+        
+        // Funzioni di test
+        function extractPokemonName(title) {
+            const titleLower = title.toLowerCase();
+            
+            const pokemonList = [
+                'bulbasaur', 'ivysaur', 'venusaur', 'charmander', 'charmeleon', 'charizard',
+                'squirtle', 'wartortle', 'blastoise', 'caterpie', 'metapod', 'butterfree',
+                'weedle', 'kakuna', 'beedrill', 'pidgey', 'pidgeotto', 'pidgeot',
+                'rattata', 'raticate', 'spearow', 'fearow', 'ekans', 'arbok',
+                'pichu', 'pikachu', 'picachu', 'raichu', 'sandshrew', 'sandslash',
+                'nidoran♀', 'nidorina', 'nidoqueen', 'nidoran♂', 'nidorino', 'nidoking',
+                'cleffa', 'clefairy', 'clefable', 'vulpix', 'ninetales', 'igglybuff',
+                'jigglypuff', 'wigglytuff', 'zubat', 'golbat', 'oddish', 'gloom',
+                'vileplume', 'paras', 'parasect', 'venonat', 'venomoth', 'diglett',
+                'dugtrio', 'meowth', 'persian', 'psyduck', 'golduck', 'mankey',
+                'primeape', 'growlithe', 'arcanine', 'poliwag', 'poliwhirl', 'poliwrath',
+                'abra', 'kadabra', 'alakazam', 'machop', 'machoke', 'machamp',
+                'bellsprout', 'weepinbell', 'victreebel', 'tentacool', 'tentacruel',
+                'geodude', 'graveler', 'golem', 'ponyta', 'rapidash', 'slowpoke',
+                'slowbro', 'magnemite', 'magneton', 'farfetch\'d', 'doduo', 'dodrio',
+                'seel', 'dewgong', 'grimer', 'muk', 'shellder', 'cloyster',
+                'gastly', 'haunter', 'gengar', 'drowzee', 'hypno', 'krabby',
+                'kingler', 'voltorb', 'electrode', 'exeggcute', 'exeggutor', 'cubone',
+                'marowak', 'hitmonlee', 'hitmonchan', 'lickitung', 'koffing', 'weezing',
+                'rhyhorn', 'rhydon', 'chansey', 'tangela', 'kangaskhan', 'horsea',
+                'seadra', 'goldeen', 'seaking', 'staryu', 'starmie', 'mr. mime',
+                'scyther', 'jynx', 'electabuzz', 'magmar', 'pinsir', 'tauros',
+                'magikarp', 'gyarados', 'lapras', 'ditto', 'vaporeon', 'jolteon',
+                'flareon', 'omanyte', 'omastar', 'kabuto', 'kabutops', 'aerodactyl',
+                'snorlax', 'articuno', 'zapdos', 'moltres', 'dratini', 'dragonair',
+                'dragonite', 'mewtwo', 'mew'
+            ];
+            
+            for (const pokemon of pokemonList) {
+                if (titleLower.includes(pokemon.toLowerCase())) {
+                    return pokemon.toLowerCase();
+                }
+            }
+            
+            return null;
+        }
+        
+        function extractTitleInfo(title) {
+            const titleLower = title.toLowerCase();
+            const info = {
+                pokemonName: '',
+                expansion: '',
+                collectorNumber: '',
+                rarity: ''
+            };
+            
+            info.pokemonName = extractPokemonName(title);
+            
+            const expansionPatterns = [
+                /terastal festival ex/i,
+                /sv\d+/i,
+                /scarlet & violet/i,
+                /sword & shield/i,
+                /swsh/i,
+                /sun & moon/i,
+                /sm/i,
+                /xy/i,
+                /black & white/i,
+                /bw/i
+            ];
+            
+            for (const pattern of expansionPatterns) {
+                const match = titleLower.match(pattern);
+                if (match) {
+                    info.expansion = match[0];
+                    break;
+                }
+            }
+            
+            const collectorPattern = /(\d+)\/(\d+)/;
+            const collectorMatch = titleLower.match(collectorPattern);
+            if (collectorMatch) {
+                info.collectorNumber = collectorMatch[1];
+            }
+            
+            const rarityPatterns = [
+                /full art/i,
+                /ultra rare/i,
+                /secret rare/i,
+                /rainbow rare/i,
+                /gold rare/i,
+                /alternate art/i,
+                /alt art/i
+            ];
+            
+            for (const pattern of rarityPatterns) {
+                const match = titleLower.match(pattern);
+                if (match) {
+                    info.rarity = match[0];
+                    break;
+                }
+            }
+            
+            return info;
+        }
+        
+        function testExtraction() {
+            const title = document.getElementById('testTitle').value;
+            const result = extractTitleInfo(title);
+            
+            showResult('extractionResult', `
+                <h4>✅ Informazioni estratte:</h4>
+                <pre>${JSON.stringify(result, null, 2)}</pre>
+            `, 'success');
+        }
+        
+        async function testMatching() {
+            if (!supabaseClient) {
+                showResult('matchingResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            const title = document.getElementById('testTitle').value;
+            const titleInfo = extractTitleInfo(title);
+            
+            if (!titleInfo.pokemonName) {
+                showResult('matchingResult', '❌ Nessun Pokemon trovato nel titolo', 'error');
+                return;
+            }
+            
+            try {
+                const { data: cards, error: cardsError } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .limit(20);
+                
+                if (cardsError) throw cardsError;
+                
+                const { data: variants, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .limit(20);
+                
+                if (variantsError) throw variantsError;
+                
+                const allResults = [
+                    ...(cards || []).map(card => ({ ...card, source: 'cards' })),
+                    ...(variants || []).map(variant => ({ ...variant, source: 'card_variants' }))
+                ];
+                
+                if (allResults.length === 0) {
+                    showResult('matchingResult', '❌ Nessuna carta trovata', 'error');
+                    return;
+                }
+                
+                // Sistema di punteggi
+                const scoredResults = allResults.map(result => {
+                    const name = (result.name_en || result.pokemon_name || '').toLowerCase();
+                    const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+                    const collectorNumber = result.collector_number ? result.collector_number.toString() : '';
+                    
+                    let score = 0;
+                    let reason = '';
+                    
+                    if (title.toLowerCase().includes(name) || name.includes(titleInfo.pokemonName)) {
+                        score += 10;
+                        reason += 'Nome Pokemon ';
+                    }
+                    
+                    if (title.toLowerCase().includes(' ex ') && name.includes(' ex')) {
+                        score += 15;
+                        reason += 'Match ex ';
+                    }
+                    
+                    if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
+                        score += 25;
+                        reason += 'Espansione ';
+                    }
+                    
+                    if (titleInfo.collectorNumber && collectorNumber.includes(titleInfo.collectorNumber)) {
+                        score += 30;
+                        reason += 'Numero collezionista ';
+                    }
+                    
+                    if (result.image_url) score += 5;
+                    if (result.blueprint_id || result.id) score += 5;
+                    
+                    return { result, score, reason: reason.trim() };
+                });
+                
+                scoredResults.sort((a, b) => b.score - a.score);
+                
+                const bestMatch = scoredResults[0];
+                const blueprintId = bestMatch.result.blueprint_id || bestMatch.result.id;
+                const link = blueprintId ? `https://www.cardtrader.com/cards/${blueprintId}` : 'Link non disponibile';
+                
+                let resultHtml = `
+                    <h4>✅ Miglior match trovato:</h4>
+                    <p><strong>Punteggio:</strong> ${bestMatch.score}</p>
+                    <p><strong>Motivo:</strong> ${bestMatch.reason}</p>
+                    <p><strong>Fonte:</strong> ${bestMatch.result.source}</p>
+                    <p><strong>Link:</strong> <a href="${link}" target="_blank">${link}</a></p>
+                    <pre>${JSON.stringify(bestMatch.result, null, 2)}</pre>
+                `;
+                
+                if (scoredResults.length > 1) {
+                    resultHtml += `
+                        <h4>📊 Top 5 Risultati:</h4>
+                        <ol>
+                    `;
+                    scoredResults.slice(0, 5).forEach((item, index) => {
+                        resultHtml += `
+                            <li>${item.result.name_en || item.result.pokemon_name} 
+                                (${item.result.expansion_name_en || item.result.expansion_name}) 
+                                - Punteggio: ${item.score} - ${item.reason}</li>
+                        `;
+                    });
+                    resultHtml += '</ol>';
+                }
+                
+                showResult('matchingResult', resultHtml, 'success');
+                
+            } catch (error) {
+                showResult('matchingResult', '❌ Errore durante la ricerca: ' + error.message, 'error');
+            }
+        }
+        
+        async function testAllVariants() {
+            if (!supabaseClient) {
+                showResult('matchingResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            const title = document.getElementById('testTitle').value;
+            const titleInfo = extractTitleInfo(title);
+            
+            if (!titleInfo.pokemonName) {
+                showResult('matchingResult', '❌ Nessun Pokemon trovato nel titolo', 'error');
+                return;
+            }
+            
+            try {
+                const { data: cards, error: cardsError } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .limit(50);
+                
+                if (cardsError) throw cardsError;
+                
+                const { data: variants, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .limit(50);
+                
+                if (variantsError) throw variantsError;
+                
+                const allResults = [
+                    ...(cards || []).map(card => ({ ...card, source: 'cards' })),
+                    ...(variants || []).map(variant => ({ ...variant, source: 'card_variants' }))
+                ];
+                
+                if (allResults.length === 0) {
+                    showResult('matchingResult', '❌ Nessuna variante trovata', 'error');
+                    return;
+                }
+                
+                // Raggruppa per espansione
+                const groupedByExpansion = {};
+                allResults.forEach(result => {
+                    const expansion = result.expansion_name_en || result.expansion_name || result.expansion_code || 'Sconosciuta';
+                    if (!groupedByExpansion[expansion]) {
+                        groupedByExpansion[expansion] = [];
+                    }
+                    groupedByExpansion[expansion].push(result);
+                });
+                
+                let resultHtml = `
+                    <h4>📋 Tutte le varianti trovate (${allResults.length}):</h4>
+                `;
+                
+                Object.keys(groupedByExpansion).sort().forEach(expansion => {
+                    resultHtml += `<h5>🎯 ${expansion}</h5><ul>`;
+                    groupedByExpansion[expansion].forEach(result => {
+                        const blueprintId = result.blueprint_id || result.id;
+                        const link = blueprintId ? `https://www.cardtrader.com/cards/${blueprintId}` : '#';
+                        const name = result.name_en || result.pokemon_name || 'Nome sconosciuto';
+                        const collectorNum = result.collector_number ? ` - ${result.collector_number}` : '';
+                        
+                        resultHtml += `
+                            <li><a href="${link}" target="_blank">${name}${collectorNum}</a> 
+                                (${result.source})</li>
+                        `;
+                    });
+                    resultHtml += '</ul>';
+                });
+                
+                showResult('matchingResult', resultHtml, 'info');
+                
+            } catch (error) {
+                showResult('matchingResult', '❌ Errore durante la ricerca: ' + error.message, 'error');
+            }
+        }
+        
+        async function getDatabaseStats() {
+            if (!supabaseClient) {
+                showResult('statsResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            try {
+                const { count: cardsCount, error: cardsError } = await supabaseClient
+                    .from('cards')
+                    .select('*', { count: 'exact', head: true });
+                
+                if (cardsError) throw cardsError;
+                
+                const { count: variantsCount, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('*', { count: 'exact', head: true });
+                
+                if (variantsError) throw variantsError;
+                
+                const statsHtml = `
+                    <h4>📊 Statistiche Database:</h4>
+                    <ul>
+                        <li><strong>Carte totali:</strong> ${cardsCount || 0}</li>
+                        <li><strong>Varianti totali:</strong> ${variantsCount || 0}</li>
+                        <li><strong>Totale record:</strong> ${(cardsCount || 0) + (variantsCount || 0)}</li>
+                    </ul>
+                `;
+                
+                showResult('statsResult', statsHtml, 'success');
+                
+            } catch (error) {
+                showResult('statsResult', '❌ Errore durante il caricamento delle statistiche: ' + error.message, 'error');
+            }
+        }
+        
+        function showResult(elementId, content, type) {
+            const element = document.getElementById(elementId);
+            element.innerHTML = `<div class="result ${type}">${content}</div>`;
+        }
+        
+        // Inizializzazione
+        window.addEventListener('load', () => {
+            loadConfig();
+            showResult('connectionStatus', 
+                '<span class="status-indicator status-unknown"></span>Pronto per la connessione', 'info');
+        });
+    </script>
+</body>
+</html> 
