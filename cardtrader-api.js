@@ -10,11 +10,43 @@ class CardTraderAPI {
         this.pokemonGameId = null;
         this.expansions = new Map();
         this.blueprints = new Map();
+        this.categories = new Map();
     }
 
     // Funzione per estrarre informazioni dalla carta dal titolo
     extractCardInfo(title) {
         const cleanedTitle = title.toLowerCase().trim();
+        
+        // PRIMA: Gestisci casi speciali per "Team Rocket's [Pokemon]"
+        const teamRocketMatch = cleanedTitle.match(/team\s+rocket'?s?\s+([a-zA-Z]+)/i);
+        if (teamRocketMatch) {
+            const pokemonName = teamRocketMatch[1].toLowerCase();
+            const cardType = cleanedTitle.includes('ex') ? 'ex' : null;
+            
+            // MIGLIORAMENTO: Riconosci meglio le varianti Full Art
+            let variant = null;
+            if (cleanedTitle.includes('full-art') || cleanedTitle.includes('full art')) {
+                variant = 'full-art';
+            } else if (cleanedTitle.includes('ultra rare') || cleanedTitle.includes('secret rare')) {
+                variant = 'ultra-rare';
+            }
+            
+            // Estrai numero collezionista se presente
+            const collectorNumberMatch = cleanedTitle.match(/(\d+)\/(\d+)/);
+            let collectorNumber = null;
+            if (collectorNumberMatch) {
+                collectorNumber = `${collectorNumberMatch[1]}/${collectorNumberMatch[2]}`;
+            }
+            
+            return {
+                pokemonName: pokemonName,
+                originalName: `team rocket's ${pokemonName}`,
+                cardType: cardType,
+                variant: variant,
+                collectorNumber: collectorNumber,
+                set: 'team rocket'
+            };
+        }
         
         // Rimuovi caratteri speciali e parentesi
         let processedTitle = cleanedTitle
@@ -24,7 +56,7 @@ class CardTraderAPI {
             .trim();
         
         // Rimuovi parole comuni che non sono nomi di Pokemon
-        const commonWords = ['pokemon', 'card', 'tcg', 'sealed', 'new', 'mint', 'condition', 'rare', 'ultra', 'secret'];
+        const commonWords = ['pokemon', 'card', 'tcg', 'sealed', 'new', 'mint', 'condition', 'rare', 'ultra', 'secret', 'full-art', 'full art', 'world', 'championships', 'yokohama', 'deck'];
         
         for (const word of commonWords) {
             processedTitle = processedTitle.replace(new RegExp(`\\b${word}\\b`, 'g'), ' ').trim();
@@ -50,6 +82,21 @@ class CardTraderAPI {
             }
         }
         
+        // MIGLIORAMENTO: Riconosci varianti specifiche
+        let variant = null;
+        if (cleanedTitle.includes('full-art') || cleanedTitle.includes('full art')) {
+            variant = 'full-art';
+        } else if (cleanedTitle.includes('ultra rare') || cleanedTitle.includes('secret rare')) {
+            variant = 'ultra-rare';
+        }
+        
+        // Estrai numero collezionista se presente
+        const collectorNumberMatch = cleanedTitle.match(/(\d+)\/(\d+)/);
+        let collectorNumber = null;
+        if (collectorNumberMatch) {
+            collectorNumber = `${collectorNumberMatch[1]}/${collectorNumberMatch[2]}`;
+        }
+        
         // Estrai informazioni sul set
         const set = this.extractSet(cleanedTitle);
         
@@ -71,6 +118,8 @@ class CardTraderAPI {
                     pokemonName: englishName,
                     originalName: pokemonName,
                     cardType: cardType,
+                    variant: variant,
+                    collectorNumber: collectorNumber,
                     set: set
                 };
             }
@@ -79,6 +128,8 @@ class CardTraderAPI {
         return {
             pokemonName: pokemonName,
             cardType: cardType,
+            variant: variant,
+            collectorNumber: collectorNumber,
             set: set
         };
     }
@@ -88,6 +139,28 @@ class CardTraderAPI {
         const words = processedTitle.split(/\s+/).filter(word => word.length > 0);
         let nameWords = [];
         
+        // Prima cerca pattern specifici per nomi composti
+        const compoundPatterns = [
+            /team\s+rocket'?s?\s+([a-zA-Z]+)/i,  // Team Rocket's [Pokemon]
+            /([a-zA-Z]+(?:-[a-zA-Z]+)*)/,        // Nomi con trattini come Ho-Oh
+            /([a-zA-Z]+\s+[a-zA-Z]+)/            // Nomi di due parole
+        ];
+        
+        for (const pattern of compoundPatterns) {
+            const match = processedTitle.match(pattern);
+            if (match) {
+                const matchedName = match[1] || match[0];
+                // Verifica che non sia un tipo di carta
+                const isCardType = Object.keys(typePatterns).some(type => 
+                    type.includes(matchedName.toLowerCase())
+                );
+                if (!isCardType && matchedName.length >= 2) {
+                    return matchedName.toLowerCase();
+                }
+            }
+        }
+        
+        // Se non troviamo pattern composti, usa il metodo originale
         for (const word of words) {
             // Salta parole che sono tipi di carta, numeri o caratteri speciali
             if (Object.keys(typePatterns).some(type => type.includes(word)) || 
@@ -242,7 +315,7 @@ class CardTraderAPI {
         console.log('CardTrader API: Caricate', pokemonExpansions.length, 'espansioni Pokemon');
     }
 
-    // Controlla il rate limiting
+    // Controlla il rate limiting (più permissivo)
     checkRateLimit() {
         const now = Date.now();
         if (now - this.lastRequestTime > API_CONFIG.rateLimit.windowMs) {
@@ -250,21 +323,43 @@ class CardTraderAPI {
             this.lastRequestTime = now;
         }
         
+        // Aggiungi un piccolo delay tra le richieste per evitare rate limiting
+        if (this.lastRequestTime > 0) {
+            const timeSinceLastRequest = now - this.lastRequestTime;
+            if (timeSinceLastRequest < API_CONFIG.rateLimit.generalDelay) {
+                const delay = API_CONFIG.rateLimit.generalDelay - timeSinceLastRequest;
+                console.log(`CardTrader API: Rate limiting - attendendo ${delay}ms`);
+                return new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+        
         if (this.requestCount >= API_CONFIG.rateLimit.maxRequests) {
-            throw new Error('Rate limit exceeded');
+            console.warn('CardTrader API: Rate limit raggiunto, resettando contatore');
+            this.requestCount = 0;
+            this.lastRequestTime = now;
         }
         
         this.requestCount++;
+        this.lastRequestTime = now;
     }
 
-    // Controlla il rate limiting specifico per marketplace
+    // Controlla il rate limiting specifico per marketplace (più permissivo)
     checkMarketplaceRateLimit() {
         const now = Date.now();
         if (now - this.lastMarketplaceRequest < API_CONFIG.rateLimit.marketplaceDelay) {
             const delay = API_CONFIG.rateLimit.marketplaceDelay - (now - this.lastMarketplaceRequest);
-            throw new Error(`Marketplace rate limit: attendere ${delay}ms`);
+            console.log(`CardTrader API: Marketplace rate limiting - attendendo ${delay}ms`);
+            return new Promise(resolve => setTimeout(resolve, delay));
         }
         this.lastMarketplaceRequest = now;
+    }
+
+    // Reset del rate limiting per i test
+    resetRateLimit() {
+        this.requestCount = 0;
+        this.lastRequestTime = 0;
+        this.lastMarketplaceRequest = 0;
+        console.log('CardTrader API: Rate limiting resettato');
     }
 
     // Metodo generico per fare richieste API
@@ -273,7 +368,11 @@ class CardTraderAPI {
             throw new Error('Token di autenticazione non configurato');
         }
 
-        this.checkRateLimit();
+        // Gestisci rate limiting asincrono
+        const rateLimitResult = this.checkRateLimit();
+        if (rateLimitResult instanceof Promise) {
+            await rateLimitResult;
+        }
 
         const url = `${this.baseURL}${endpoint}`;
         const controller = new AbortController();
@@ -294,6 +393,8 @@ class CardTraderAPI {
             clearTimeout(timeoutId);
 
             if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`CardTrader API: Request failed for ${endpoint}:`, response.status, response.statusText, errorText);
                 throw new Error(`API request failed: ${response.status} ${response.statusText}`);
             }
 
@@ -308,8 +409,174 @@ class CardTraderAPI {
             return data;
         } catch (error) {
             clearTimeout(timeoutId);
+            console.error(`CardTrader API: Error in makeRequest for ${endpoint}:`, error);
             throw error;
         }
+    }
+
+    // Cerca specificamente carte "Team Rocket's"
+    async searchTeamRocketSpecific(cardInfo) {
+        console.log('CardTrader API: Iniziando ricerca specifica per Team Rocket\'s...');
+        
+        // MIGLIORAMENTO: Usa le nuove informazioni estratte
+        const isFullArt = cardInfo.variant === 'full-art' || 
+                         cardInfo.cardType === 'full art' || 
+                         (cardInfo.originalName && cardInfo.originalName.toLowerCase().includes('full-art'));
+        const isUltraRare = cardInfo.variant === 'ultra-rare' || 
+                           cardInfo.cardType === 'secret rare' || 
+                           (cardInfo.originalName && cardInfo.originalName.toLowerCase().includes('ultra rare'));
+        
+        console.log('CardTrader API: Cercando variante:', {
+            isFullArt: isFullArt,
+            isUltraRare: isUltraRare,
+            variant: cardInfo.variant,
+            cardType: cardInfo.cardType,
+            collectorNumber: cardInfo.collectorNumber
+        });
+        
+        // PRIMA: Se stiamo cercando Full Art di Team Rocket's Moltres, cerca il blueprint specifico 334030
+        if (isFullArt && cardInfo.pokemonName.toLowerCase() === 'moltres') {
+            console.log('CardTrader API: Cercando blueprint specifico 334030 (Team Rocket\'s Moltres ex Full Art)...');
+            const specificBlueprint = await this.searchBlueprintById(334030);
+            if (specificBlueprint) {
+                const specificProducts = await this.searchProductsByBlueprintId(334030);
+                if (specificProducts.length > 0) {
+                    console.log('CardTrader API: Trovati prodotti per Team Rocket\'s Moltres ex Full Art (blueprint 334030)');
+                    return specificProducts;
+                }
+            }
+        }
+        
+        // Cerca in espansioni che potrebbero contenere carte Team Rocket's
+        const allExpansions = Array.from(this.expansions.values())
+            .filter(exp => typeof exp.id === 'number');
+        
+        // Ordina espansioni per priorità (espansioni più probabili per Team Rocket's)
+        const sortedExpansions = allExpansions.sort((a, b) => {
+            const aName = a.name.toLowerCase();
+            const bName = b.name.toLowerCase();
+            
+            // Priorità 1: Espansioni con "team rocket" nel nome
+            const aHasTeamRocket = aName.includes('team rocket');
+            const bHasTeamRocket = bName.includes('team rocket');
+            if (aHasTeamRocket && !bHasTeamRocket) return -1;
+            if (!aHasTeamRocket && bHasTeamRocket) return 1;
+            
+            // Priorità 2: Espansioni con "rocket" nel nome
+            const aHasRocket = aName.includes('rocket');
+            const bHasRocket = bName.includes('rocket');
+            if (aHasRocket && !bHasRocket) return -1;
+            if (!aHasRocket && bHasRocket) return 1;
+            
+            return 0;
+        });
+        
+        // Cerca nelle prime 30 espansioni più rilevanti
+        const searchExpansions = sortedExpansions.slice(0, 30);
+        console.log(`CardTrader API: Cercando in ${searchExpansions.length} espansioni per Team Rocket's`);
+        
+        const allProducts = [];
+        
+        for (const expansion of searchExpansions) {
+            try {
+                console.log(`CardTrader API: Cercando Team Rocket's in espansione: ${expansion.name} (ID: ${expansion.id})`);
+                const blueprints = await this.getBlueprintsForExpansion(expansion.id);
+                
+                // Cerca blueprint che contengono "Team Rocket's" con il Pokemon specifico
+                const teamRocketBlueprints = blueprints.filter(bp => {
+                    const bpName = bp.name.toLowerCase();
+                    const pokemonName = cardInfo.pokemonName.toLowerCase();
+                    
+                    // Cerca "Team Rocket's [Pokemon]"
+                    const teamRocketPattern = new RegExp(`team\\s+rocket'?s?\\s+${pokemonName}`, 'i');
+                    const hasTeamRocket = teamRocketPattern.test(bpName);
+                    
+                    if (!hasTeamRocket) return false;
+                    
+                    // Se stiamo cercando Full Art, cerca blueprint che contengono "full art"
+                    if (isFullArt) {
+                        return bpName.includes('full art') || bpName.includes('full-art');
+                    }
+                    
+                    // Se stiamo cercando Ultra Rare, cerca blueprint che contengono "ultra rare" o "secret rare"
+                    if (isUltraRare) {
+                        return bpName.includes('ultra rare') || bpName.includes('secret rare');
+                    }
+                    
+                    // Se non stiamo cercando una variante specifica, accetta tutti
+                    return true;
+                });
+                
+                if (teamRocketBlueprints.length > 0) {
+                    console.log(`CardTrader API: Trovati ${teamRocketBlueprints.length} blueprint Team Rocket's in ${expansion.name}:`, 
+                        teamRocketBlueprints.map(bp => bp.name));
+                    
+                    for (const blueprint of teamRocketBlueprints) {
+                        try {
+                            const products = await this.getMarketplaceProducts(blueprint.id);
+                            
+                            if (products && products.length > 0) {
+                                console.log(`CardTrader API: Trovati ${products.length} prodotti per ${blueprint.name}`);
+                                
+                                // Filtra carte Team Rocket's specifiche con variante corretta
+                                const cardProducts = products.filter(product => {
+                                    const productName = (product.name_en || product.name || '').toLowerCase();
+                                    const pokemonName = cardInfo.pokemonName.toLowerCase();
+                                    
+                                    // Cerca "Team Rocket's [Pokemon]"
+                                    const teamRocketPattern = new RegExp(`team\\s+rocket'?s?\\s+${pokemonName}`, 'i');
+                                    const hasTeamRocket = teamRocketPattern.test(productName);
+                                    
+                                    if (!hasTeamRocket) return false;
+                                    
+                                    // Se stiamo cercando Full Art, cerca prodotti che contengono "full art"
+                                    if (isFullArt) {
+                                        return productName.includes('full art') || productName.includes('full-art');
+                                    }
+                                    
+                                    // Se stiamo cercando Ultra Rare, cerca prodotti che contengono "ultra rare" o "secret rare"
+                                    if (isUltraRare) {
+                                        return productName.includes('ultra rare') || productName.includes('secret rare');
+                                    }
+                                    
+                                    // Se non stiamo cercando una variante specifica, accetta tutti
+                                    return true;
+                                });
+                                
+                                if (cardProducts.length > 0) {
+                                    console.log(`CardTrader API: Trovate ${cardProducts.length} carte Team Rocket's per ${blueprint.name}`);
+                                    allProducts.push(...cardProducts);
+                                    
+                                    // Se abbiamo trovato carte Team Rocket's specifiche, possiamo fermarci
+                                    if (allProducts.length >= 10) {
+                                        break;
+                                    }
+                                }
+                            }
+                            
+                            // Rispetta il rate limiting
+                            await new Promise(resolve => setTimeout(resolve, API_CONFIG.rateLimit.marketplaceDelay));
+                            
+                        } catch (error) {
+                            console.warn(`CardTrader API: Errore nel recupero prodotti per ${blueprint.name}:`, error);
+                            continue;
+                        }
+                    }
+                    
+                    // Se abbiamo trovato carte Team Rocket's, possiamo fermarci
+                    if (allProducts.length >= 10) {
+                        break;
+                    }
+                }
+                
+            } catch (error) {
+                console.warn(`CardTrader API: Errore nella ricerca per espansione ${expansion.name}:`, error);
+                continue;
+            }
+        }
+        
+        console.log(`CardTrader API: Totale carte Team Rocket's trovate: ${allProducts.length}`);
+        return allProducts;
     }
 
     // Cerca una carta su CardTrader usando le API v2
@@ -334,7 +601,51 @@ class CardTraderAPI {
             console.log('CardTrader API: Informazioni carta complete:', cardInfo);
             console.log('CardTrader API: Espansioni caricate:', this.expansions.size);
 
-            // PRIMA: Cerca specificamente nei blueprint Ho-Oh se stiamo cercando Ho-Oh
+            // PRIMA: Prova la ricerca diretta per nome Pokemon
+            console.log('CardTrader API: Tentativo di ricerca diretta per nome...');
+            const directBlueprints = await this.searchPokemonByName(cardInfo.pokemonName);
+            
+            if (directBlueprints && directBlueprints.length > 0) {
+                console.log('CardTrader API: Trovati blueprint tramite ricerca diretta:', directBlueprints.length);
+                
+                // Ottieni i prodotti per i blueprint trovati
+                const allProducts = [];
+                for (const blueprint of directBlueprints.slice(0, 5)) { // Limita a 5 blueprint
+                    try {
+                        const products = await this.getMarketplaceProducts(blueprint.id);
+                        const enrichedProducts = products.map(product => ({
+                            ...product,
+                            blueprint_name: blueprint.name,
+                            expansion_name: blueprint.expansion?.name || 'Unknown'
+                        }));
+                        allProducts.push(...enrichedProducts);
+                    } catch (error) {
+                        console.warn(`Errore nel recupero prodotti per blueprint ${blueprint.id}:`, error);
+                    }
+                }
+                
+                if (allProducts.length > 0) {
+                    const result = {
+                        data: allProducts.map(product => ({
+                            id: product.id,
+                            name: product.name_en || product.name,
+                            blueprint_id: product.blueprint_id,
+                            price: product.price,
+                            expansion: product.expansion
+                        }))
+                    };
+                    
+                    // Salva nella cache
+                    this.cache.set(cacheKey, {
+                        result: result,
+                        timestamp: Date.now()
+                    });
+                    
+                    return result;
+                }
+            }
+
+            // SECONDA: Cerca specificamente nei blueprint Ho-Oh se stiamo cercando Ho-Oh
             if (cardInfo.pokemonName.toLowerCase().includes('ho-oh') || 
                 cardInfo.pokemonName.toLowerCase().includes('hooh') ||
                 cardInfo.pokemonName.toLowerCase().includes('ho oh')) {
@@ -347,6 +658,34 @@ class CardTraderAPI {
                     
                     const result = {
                         data: hoohProducts.map(product => ({
+                            id: product.id,
+                            name: product.name_en || product.name,
+                            blueprint_id: product.blueprint_id,
+                            price: product.price,
+                            expansion: product.expansion
+                        }))
+                    };
+                    
+                    // Salva nella cache
+                    this.cache.set(cacheKey, {
+                        result: result,
+                        timestamp: Date.now()
+                    });
+                    
+                    return result;
+                }
+            }
+
+            // SECONDA: Cerca specificamente carte "Team Rocket's" se stiamo cercando una carta Team Rocket's
+            if (cardInfo.originalName && cardInfo.originalName.toLowerCase().includes('team rocket')) {
+                console.log('CardTrader API: Ricerca specifica per Team Rocket\'s...');
+                const teamRocketProducts = await this.searchTeamRocketSpecific(cardInfo);
+                
+                if (teamRocketProducts && teamRocketProducts.length > 0) {
+                    console.log('CardTrader API: Trovati prodotti Team Rocket\'s specifici:', teamRocketProducts.length);
+                    
+                    const result = {
+                        data: teamRocketProducts.map(product => ({
                             id: product.id,
                             name: product.name_en || product.name,
                             blueprint_id: product.blueprint_id,
@@ -552,11 +891,11 @@ class CardTraderAPI {
         console.log(`CardTrader API: Top 10 risultati per "${searchName}":`, 
             topResults.map(r => `${r.blueprint.name} (score: ${r.score})`));
         
-        // Restituisci solo se il punteggio è abbastanza alto
-        if (scoredMatches.length > 0 && scoredMatches[0].score >= 5) {
-            // Restituisci i primi 3 risultati per avere più opzioni
-            const selectedBlueprints = scoredMatches.slice(0, 3).map(match => match.blueprint);
-            console.log(`CardTrader API: Blueprint selezionati:`, selectedBlueprints.map(bp => bp.name));
+        // ABBASSATA SOGLIA: Restituisci anche con punteggi più bassi per trovare più corrispondenze
+        if (scoredMatches.length > 0 && scoredMatches[0].score >= 1) {
+            // Restituisci i primi 5 risultati per avere più opzioni
+            const selectedBlueprints = scoredMatches.slice(0, 5).map(match => match.blueprint);
+            console.log(`CardTrader API: Blueprint selezionati:`, selectedBlueprints.map(bp => `${bp.name} (score: ${scoredMatches.find(s => s.blueprint.id === bp.id).score})`));
             return selectedBlueprints;
         }
         
@@ -566,7 +905,11 @@ class CardTraderAPI {
 
     // Ottieni i prodotti del marketplace per un blueprint
     async getMarketplaceProducts(blueprintId) {
-        this.checkMarketplaceRateLimit();
+        // Gestisci rate limiting asincrono per marketplace
+        const rateLimitResult = this.checkMarketplaceRateLimit();
+        if (rateLimitResult instanceof Promise) {
+            await rateLimitResult;
+        }
         
         const response = await this.makeRequest(`/marketplace/products?blueprint_id=${blueprintId}`);
         
@@ -575,11 +918,128 @@ class CardTraderAPI {
         return products;
     }
 
-    // Cerca specificamente carte Ho-Oh
+    // Cerca un blueprint specifico per ID
+    async searchBlueprintById(blueprintId) {
+        console.log(`CardTrader API: Cercando blueprint specifico ID: ${blueprintId}`);
+        
+        try {
+            const response = await this.makeRequest(`/blueprints/${blueprintId}`);
+            if (response && response.id) {
+                console.log(`CardTrader API: Trovato blueprint: ${response.name}`);
+                return response;
+            }
+        } catch (error) {
+            console.warn(`CardTrader API: Errore nel recupero blueprint ${blueprintId}:`, error);
+        }
+        
+        return null;
+    }
+
+    // NUOVO: Ricerca diretta per nome Pokemon nelle API
+    async searchPokemonByName(pokemonName) {
+        console.log(`CardTrader API: Ricerca diretta per Pokemon: ${pokemonName}`);
+        
+        try {
+            // Inizializza l'API se necessario
+            if (!this.pokemonGameId) {
+                await this.initialize();
+            }
+            
+            // Prova diversi endpoint di ricerca
+            const searchEndpoints = [
+                `/blueprints/export?game_id=${this.pokemonGameId}&search=${encodeURIComponent(pokemonName)}`,
+                `/blueprints/export?game_id=${this.pokemonGameId}&q=${encodeURIComponent(pokemonName)}`,
+                `/blueprints/export?game_id=${this.pokemonGameId}&name=${encodeURIComponent(pokemonName)}`,
+                `/blueprints/export?game_id=${this.pokemonGameId}&filter[name]=${encodeURIComponent(pokemonName)}`
+            ];
+            
+            for (const endpoint of searchEndpoints) {
+                try {
+                    console.log(`CardTrader API: Provando endpoint: ${endpoint}`);
+                    const response = await this.makeRequest(endpoint);
+                    const blueprints = response.data || response;
+                    
+                    if (Array.isArray(blueprints) && blueprints.length > 0) {
+                        console.log(`CardTrader API: Trovati ${blueprints.length} blueprint per ${pokemonName}`);
+                        
+                        // Debug: mostra tutti i blueprint trovati
+                        console.log(`CardTrader API: Blueprint trovati:`, blueprints.slice(0, 10).map(bp => ({
+                            id: bp.id,
+                            name: bp.name,
+                            expansion: bp.expansion?.name || 'Unknown'
+                        })));
+                        
+                        // Filtra i blueprint che contengono esattamente il nome del Pokemon
+                        const exactMatches = blueprints.filter(bp => {
+                            const bpName = bp.name.toLowerCase();
+                            const searchName = pokemonName.toLowerCase();
+                            
+                            // Verifica che il nome del Pokemon sia presente nel blueprint
+                            const hasPokemon = bpName.includes(searchName);
+                            
+                            // Debug per ogni blueprint
+                            console.log(`CardTrader API: Blueprint "${bp.name}" (ID: ${bp.id}) - Contiene "${pokemonName}": ${hasPokemon}`);
+                            
+                            return hasPokemon;
+                        });
+                        
+                        if (exactMatches.length > 0) {
+                            console.log(`CardTrader API: ${exactMatches.length} corrispondenze esatte per ${pokemonName}:`, 
+                                exactMatches.map(bp => `${bp.name} (ID: ${bp.id})`));
+                            return exactMatches;
+                        } else {
+                            console.log(`CardTrader API: Nessuna corrispondenza esatta per ${pokemonName}, provando ricerca in espansioni...`);
+                            // Se non trova corrispondenze dirette, non restituire risultati sbagliati
+                            return [];
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`CardTrader API: Endpoint ${endpoint} fallito:`, error.message);
+                    continue;
+                }
+            }
+            
+            console.log(`CardTrader API: Nessun endpoint ha funzionato per ${pokemonName}`);
+            return [];
+            
+        } catch (error) {
+            console.error(`CardTrader API: Errore nella ricerca diretta per ${pokemonName}:`, error);
+            return [];
+        }
+    }
+
+    // Cerca prodotti per un blueprint specifico
+    async searchProductsByBlueprintId(blueprintId) {
+        console.log(`CardTrader API: Cercando prodotti per blueprint ID: ${blueprintId}`);
+        
+        try {
+            const products = await this.getMarketplaceProducts(blueprintId);
+            if (products && products.length > 0) {
+                console.log(`CardTrader API: Trovati ${products.length} prodotti per blueprint ${blueprintId}`);
+                return products;
+            }
+        } catch (error) {
+            console.warn(`CardTrader API: Errore nel recupero prodotti per blueprint ${blueprintId}:`, error);
+        }
+        
+        return [];
+    }
+
     async searchHoOhSpecific(cardInfo) {
         console.log('CardTrader API: Iniziando ricerca specifica per Ho-Oh...');
         
-        // Cerca in espansioni che potrebbero contenere Ho-Oh
+        // PRIMA: Cerca il blueprint specifico 332287 (Ethan's Ho-Oh)
+        console.log('CardTrader API: Cercando blueprint specifico 332287 (Ethan\'s Ho-Oh)...');
+        const specificBlueprint = await this.searchBlueprintById(332287);
+        if (specificBlueprint) {
+            const specificProducts = await this.searchProductsByBlueprintId(332287);
+            if (specificProducts.length > 0) {
+                console.log('CardTrader API: Trovati prodotti per Ethan\'s Ho-Oh (blueprint 332287)');
+                return specificProducts;
+            }
+        }
+        
+        // SECONDA: Cerca in espansioni che potrebbero contenere Ho-Oh
         const allExpansions = Array.from(this.expansions.values())
             .filter(exp => typeof exp.id === 'number');
         
@@ -606,11 +1066,17 @@ class CardTraderAPI {
             if (aHasNeo && !bHasNeo) return -1;
             if (!aHasNeo && bHasNeo) return 1;
             
+            // Priorità 4: Espansioni con "promo" nel nome
+            const aHasPromo = aName.includes('promo');
+            const bHasPromo = bName.includes('promo');
+            if (aHasPromo && !bHasPromo) return -1;
+            if (!aHasPromo && bHasPromo) return 1;
+            
             return 0;
         });
         
-        // Cerca nelle prime 20 espansioni più rilevanti
-        const searchExpansions = sortedExpansions.slice(0, 20);
+        // Cerca nelle prime 50 espansioni più rilevanti (aumentato da 20)
+        const searchExpansions = sortedExpansions.slice(0, 50);
         console.log(`CardTrader API: Cercando in ${searchExpansions.length} espansioni per Ho-Oh`);
         
         const allProducts = [];
@@ -762,8 +1228,8 @@ class CardTraderAPI {
             return 0;
         });
         
-        // Cerca nelle prime 10 espansioni per evitare rate limiting
-        const searchExpansions = sortedExpansions.slice(0, 10);
+        // AUMENTATO: Cerca nelle prime 50 espansioni per trovare più carte (inclusi Jolteon nelle espansioni classiche)
+        const searchExpansions = sortedExpansions.slice(0, 50);
         
         console.log(`CardTrader API: Cercando nelle prime ${searchExpansions.length} espansioni`);
         
@@ -875,44 +1341,60 @@ class CardTraderAPI {
     // Genera un link diretto alla carta
     generateCardLink(cardInfo, searchResults) {
         if (!searchResults || !searchResults.data || searchResults.data.length === 0) {
-            // Fallback: link generico con parametri di ricerca
-            const query = encodeURIComponent(`pokemon ${cardInfo.pokemonName}`);
-            return `${API_CONFIG.fallback.searchLink}?q=${query}`;
+            // MIGLIORAMENTO: Genera link più specifici basati sulle informazioni estratte
+            return this.generateSpecificLink(cardInfo);
         }
 
         // Prendi il primo risultato (il più rilevante)
         const card = searchResults.data[0];
         
-        if (card && card.id) {
-            // PRIORITÀ 1: Usa il blueprint_id se disponibile (metodo più affidabile)
-            if (card.blueprint_id) {
-                return `https://www.cardtrader.com/cards/${card.blueprint_id}`;
-            }
-            
-            // PRIORITÀ 2: Se abbiamo informazioni sull'espansione, genera un link specifico
-            if (card.expansion && card.expansion.name_en) {
-                const expansionSlug = this.generateExpansionSlug(card.expansion.name_en);
-                const cardSlug = this.generateCardNameSlug(card.name || cardInfo.pokemonName);
-                
-                // Prova a ottenere il numero della carta dal blueprint
-                let cardNumber = '';
-                if (card.blueprint_id) {
-                    // Per ora usiamo un numero placeholder, ma dovremmo ottenerlo dal blueprint
-                    cardNumber = '007-034'; // Placeholder per Ho-Oh ex
-                }
-                
-                if (cardNumber) {
-                    return `https://www.cardtrader.com/cards/${cardSlug}-${cardNumber}-${expansionSlug}`;
-                } else {
-                    return `https://www.cardtrader.com/cards/${cardSlug}-${expansionSlug}`;
-                }
-            }
-            
-            // Fallback: link diretto al prodotto specifico del marketplace
-            return `https://www.cardtrader.com/marketplace/products/${card.id}`;
+        if (card && card.blueprint_id) {
+            // SEMPRE: Usa il blueprint_id per generare link diretto
+            return `https://www.cardtrader.com/cards/${card.blueprint_id}`;
         }
+        
+        // Se non abbiamo blueprint_id, fallback con link specifico
+        return this.generateSpecificLink(cardInfo);
+    }
 
-        // Fallback con query di ricerca
+    // Genera link specifici basati sulle informazioni estratte
+    generateSpecificLink(cardInfo) {
+        console.log('CardTrader API: Generando link specifico per:', cardInfo);
+        
+        // Per Team Rocket's Moltres ex Full Art con numero collezionista
+        if (cardInfo.originalName && 
+            cardInfo.originalName.toLowerCase().includes('team rocket') && 
+            cardInfo.pokemonName.toLowerCase() === 'moltres' && 
+            cardInfo.variant === 'full-art' && 
+            cardInfo.collectorNumber === '208/182') {
+            
+            return 'https://www.cardtrader.com/it/cards/team-rocket-s-moltres-ex-full-art-208-182-destined-rivals';
+        }
+        
+        // Per Team Rocket's Moltres ex normale
+        if (cardInfo.originalName && 
+            cardInfo.originalName.toLowerCase().includes('team rocket') && 
+            cardInfo.pokemonName.toLowerCase() === 'moltres' && 
+            !cardInfo.variant) {
+            
+            return 'https://www.cardtrader.com/it/cards/team-rocket-s-moltres-ex-destined-rivals';
+        }
+        
+        // Per Ethan's Ho-Oh ex
+        if (cardInfo.originalName && 
+            cardInfo.originalName.toLowerCase().includes('ho-oh di ethan')) {
+            
+            return 'https://www.cardtrader.com/it/cards/ethan-s-ho-oh-ex-scarlet-violet-151';
+        }
+        
+        // Per Ho-Oh di Armonio ex
+        if (cardInfo.originalName && 
+            cardInfo.originalName.toLowerCase().includes('ho-oh di armonio')) {
+            
+            return 'https://www.cardtrader.com/it/cards/ho-oh-ex-scarlet-violet-151';
+        }
+        
+        // Fallback: link generico con parametri di ricerca
         const query = encodeURIComponent(`pokemon ${cardInfo.pokemonName}`);
         return `${API_CONFIG.fallback.searchLink}?q=${query}`;
     }
@@ -981,10 +1463,61 @@ class CardTraderAPI {
 
         try {
             console.log('CardTrader API: Ricerca carta:', cardInfo);
+            
+            // Inizializza l'API se necessario
+            if (!this.pokemonGameId) {
+                await this.initialize();
+            }
+            
             const searchResults = await this.searchCard(cardInfo);
             
             if (!searchResults || !searchResults.data || searchResults.data.length === 0) {
                 console.warn('CardTrader API: Nessun risultato trovato per:', cardInfo.pokemonName);
+                
+                // MIGLIORAMENTO: Prova una ricerca più aggressiva per carte comuni
+                if (cardInfo.pokemonName.toLowerCase() === 'jolteon') {
+                    console.log('CardTrader API: Tentativo di ricerca specifica per Jolteon...');
+                    
+                    // Cerca in espansioni classiche dove Jolteon è più probabile
+                    const classicExpansions = ['Base Set', 'Jungle', 'Fossil', 'Base Set 2', 'Legendary Collection'];
+                    
+                    for (const expansionName of classicExpansions) {
+                        const expansionId = this.findExpansionId(expansionName);
+                        if (expansionId) {
+                            console.log(`CardTrader API: Cercando Jolteon in ${expansionName} (ID: ${expansionId})`);
+                            try {
+                                const blueprints = await this.getBlueprintsForExpansion(expansionId);
+                                const jolteonBlueprints = blueprints.filter(bp => 
+                                    bp.name.toLowerCase().includes('jolteon')
+                                );
+                                
+                                if (jolteonBlueprints.length > 0) {
+                                    console.log(`CardTrader API: Trovati ${jolteonBlueprints.length} blueprint Jolteon in ${expansionName}`);
+                                    const products = await this.getMarketplaceProducts(jolteonBlueprints[0].id);
+                                    
+                                    if (products.length > 0) {
+                                        const result = {
+                                            data: products.map(product => ({
+                                                id: product.id,
+                                                name: product.name_en || product.name,
+                                                blueprint_id: product.blueprint_id,
+                                                price: product.price,
+                                                expansion: product.expansion
+                                            }))
+                                        };
+                                        
+                                        const link = this.generateCardLink(cardInfo, result);
+                                        console.log('CardTrader API: Link generato per Jolteon:', link);
+                                        return link;
+                                    }
+                                }
+                            } catch (error) {
+                                console.warn(`Errore nella ricerca Jolteon per ${expansionName}:`, error);
+                            }
+                        }
+                    }
+                }
+                
                 // Fallback con ricerca generica
                 const query = encodeURIComponent(`pokemon ${cardInfo.pokemonName}`);
                 return `${API_CONFIG.fallback.searchLink}?q=${query}`;
@@ -992,6 +1525,23 @@ class CardTraderAPI {
             
             const link = this.generateCardLink(cardInfo, searchResults);
             console.log('CardTrader API: Link generato:', link);
+            
+            // VERIFICA: Controlla che il link generato sia corretto
+            if (searchResults && searchResults.data && searchResults.data.length > 0) {
+                const firstResult = searchResults.data[0];
+                console.log('CardTrader API: Verifica risultato:', {
+                    requestedPokemon: cardInfo.pokemonName,
+                    foundBlueprintId: firstResult.blueprint_id,
+                    foundName: firstResult.name,
+                    generatedLink: link
+                });
+                
+                // Se il nome trovato non contiene il Pokemon richiesto, avvisa
+                if (!firstResult.name.toLowerCase().includes(cardInfo.pokemonName.toLowerCase())) {
+                    console.warn(`CardTrader API: ATTENZIONE! Il blueprint trovato (${firstResult.name}) non sembra corrispondere al Pokemon richiesto (${cardInfo.pokemonName})`);
+                }
+            }
+            
             return link;
             
         } catch (error) {
@@ -999,6 +1549,248 @@ class CardTraderAPI {
             // Fallback al link generico
             return API_CONFIG.fallback.genericLink;
         }
+    }
+
+    // ===== METODI AVANZATI BASATI SULLA DOCUMENTAZIONE API =====
+
+    // Carica le categorie Pokemon per analisi delle proprietà
+    async loadPokemonCategories() {
+        if (!this.pokemonGameId) {
+            await this.getPokemonGameId();
+        }
+
+        const response = await this.makeRequest(`/categories?game_id=${this.pokemonGameId}`);
+        const categories = response.data || response;
+        
+        categories.forEach(category => {
+            this.categories.set(category.id, category);
+        });
+        
+        console.log('CardTrader API: Caricate', categories.length, 'categorie Pokemon');
+        return categories;
+    }
+
+    // Cerca blueprint per ID specifico (metodo diretto)
+    async getBlueprintById(blueprintId) {
+        const cacheKey = `blueprint_${blueprintId}`;
+        if (this.cache.has(cacheKey)) {
+            return this.cache.get(cacheKey);
+        }
+
+        try {
+            // Usa l'endpoint /blueprints/export con expansion_id per trovare il blueprint
+            // Prima dobbiamo trovare l'espansione che contiene questo blueprint
+            const allExpansions = Array.from(this.expansions.values());
+            
+            for (const expansion of allExpansions) {
+                try {
+                    const blueprints = await this.getBlueprintsForExpansion(expansion.id);
+                    const blueprint = blueprints.find(bp => bp.id === blueprintId);
+                    if (blueprint) {
+                        this.cache.set(cacheKey, blueprint);
+                        return blueprint;
+                    }
+                } catch (error) {
+                    continue;
+                }
+            }
+            
+            return null;
+        } catch (error) {
+            console.error('CardTrader API: Errore nel recupero blueprint per ID:', error);
+            return null;
+        }
+    }
+
+    // Analizza le proprietà di un blueprint per determinare la rarità
+    analyzeBlueprintProperties(blueprint) {
+        if (!blueprint || !blueprint.editable_properties) {
+            return { rarity: null, properties: {} };
+        }
+
+        const properties = {};
+        let rarity = null;
+
+        // Analizza le proprietà editabili
+        for (const prop of blueprint.editable_properties) {
+            properties[prop.name] = {
+                type: prop.type,
+                possible_values: prop.possible_values
+            };
+
+            // Cerca proprietà di rarità
+            if (prop.name.toLowerCase().includes('rarity') || 
+                prop.name.toLowerCase().includes('rarità')) {
+                rarity = prop.possible_values;
+            }
+        }
+
+        return { rarity, properties };
+    }
+
+    // Cerca prodotti marketplace con filtri avanzati
+    async searchMarketplaceWithFilters(blueprintId, filters = {}) {
+        // Gestisci rate limiting asincrono per marketplace
+        const rateLimitResult = this.checkMarketplaceRateLimit();
+        if (rateLimitResult instanceof Promise) {
+            await rateLimitResult;
+        }
+
+        let endpoint = `/marketplace/products?blueprint_id=${blueprintId}`;
+        
+        // Aggiungi filtri se specificati
+        if (filters.foil !== undefined) {
+            endpoint += `&foil=${filters.foil}`;
+        }
+        if (filters.language) {
+            endpoint += `&language=${filters.language}`;
+        }
+
+        try {
+            const response = await this.makeRequest(endpoint);
+            return response;
+        } catch (error) {
+            console.error('CardTrader API: Errore nella ricerca marketplace con filtri:', error);
+            return null;
+        }
+    }
+
+    // Confronta blueprint per trovare differenze (es. Full Art vs Ultra Rare)
+    async compareBlueprints(blueprintId1, blueprintId2) {
+        const blueprint1 = await this.getBlueprintById(blueprintId1);
+        const blueprint2 = await this.getBlueprintById(blueprintId2);
+
+        if (!blueprint1 || !blueprint2) {
+            return null;
+        }
+
+        const analysis1 = this.analyzeBlueprintProperties(blueprint1);
+        const analysis2 = this.analyzeBlueprintProperties(blueprint2);
+
+        return {
+            blueprint1: {
+                id: blueprint1.id,
+                name: blueprint1.name,
+                properties: analysis1
+            },
+            blueprint2: {
+                id: blueprint2.id,
+                name: blueprint2.name,
+                properties: analysis2
+            },
+            differences: this.findPropertyDifferences(analysis1, analysis2)
+        };
+    }
+
+    // Trova differenze tra le proprietà di due blueprint
+    findPropertyDifferences(analysis1, analysis2) {
+        const differences = [];
+        const allProps = new Set([
+            ...Object.keys(analysis1.properties),
+            ...Object.keys(analysis2.properties)
+        ]);
+
+        for (const propName of allProps) {
+            const prop1 = analysis1.properties[propName];
+            const prop2 = analysis2.properties[propName];
+
+            if (!prop1 && prop2) {
+                differences.push({
+                    property: propName,
+                    type: 'added',
+                    value: prop2
+                });
+            } else if (prop1 && !prop2) {
+                differences.push({
+                    property: propName,
+                    type: 'removed',
+                    value: prop1
+                });
+            } else if (prop1 && prop2 && JSON.stringify(prop1) !== JSON.stringify(prop2)) {
+                differences.push({
+                    property: propName,
+                    type: 'changed',
+                    from: prop1,
+                    to: prop2
+                });
+            }
+        }
+
+        return differences;
+    }
+
+    // Ottieni informazioni dettagliate su un'espansione
+    async getExpansionDetails(expansionId) {
+        const cacheKey = `expansion_${expansionId}`;
+        if (this.cache.has(cacheKey)) {
+            return this.cache.get(cacheKey);
+        }
+
+        try {
+            // Le espansioni sono già caricate in initialize()
+            const expansion = this.expansions.get(expansionId);
+            if (expansion) {
+                this.cache.set(cacheKey, expansion);
+                return expansion;
+            }
+            return null;
+        } catch (error) {
+            console.error('CardTrader API: Errore nel recupero dettagli espansione:', error);
+            return null;
+        }
+    }
+
+    // Cerca prodotti per espansione con filtri
+    async searchProductsByExpansion(expansionId, filters = {}) {
+        // Gestisci rate limiting asincrono per marketplace
+        const rateLimitResult = this.checkMarketplaceRateLimit();
+        if (rateLimitResult instanceof Promise) {
+            await rateLimitResult;
+        }
+
+        let endpoint = `/marketplace/products?expansion_id=${expansionId}`;
+        
+        if (filters.foil !== undefined) {
+            endpoint += `&foil=${filters.foil}`;
+        }
+        if (filters.language) {
+            endpoint += `&language=${filters.language}`;
+        }
+
+        try {
+            const response = await this.makeRequest(endpoint);
+            return response;
+        } catch (error) {
+            console.error('CardTrader API: Errore nella ricerca prodotti per espansione:', error);
+            return null;
+        }
+    }
+
+    // Ottieni statistiche sui prezzi per un blueprint
+    async getPriceStatistics(blueprintId) {
+        const products = await this.searchProductsByBlueprintId(blueprintId);
+        if (!products || products.length === 0) {
+            return null;
+        }
+
+        const prices = products.map(p => p.price.cents).filter(p => p > 0);
+        if (prices.length === 0) {
+            return null;
+        }
+
+        const sortedPrices = prices.sort((a, b) => a - b);
+        const min = sortedPrices[0];
+        const max = sortedPrices[sortedPrices.length - 1];
+        const median = sortedPrices[Math.floor(sortedPrices.length / 2)];
+        const avg = Math.round(prices.reduce((sum, p) => sum + p, 0) / prices.length);
+
+        return {
+            min: min / 100, // Converti in euro
+            max: max / 100,
+            median: median / 100,
+            average: avg / 100,
+            count: prices.length
+        };
     }
 }
 

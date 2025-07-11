@@ -22,11 +22,12 @@ const API_CONFIG = {
         'User-Agent': 'Pokemon-Card-Trader-Extension/1.1.0'
     },
     
-    // Configurazione per il rate limiting (1 chiamata/secondo per marketplace)
+    // Configurazione per il rate limiting (più permissivo per i test)
     rateLimit: {
-        maxRequests: 60, // Richieste massime per minuto (più conservativo)
+        maxRequests: 120, // Richieste massime per minuto (più permissivo)
         windowMs: 60 * 1000, // Finestra temporale in millisecondi
-        marketplaceDelay: 1000 // 1 secondo tra chiamate marketplace
+        marketplaceDelay: 500, // 500ms tra chiamate marketplace (più veloce)
+        generalDelay: 100 // 100ms tra chiamate generali
     },
     
     // Configurazione per il fallback

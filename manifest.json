@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pokemon Card Trader Linker",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Converte i titoli delle inserzioni di carte Pokemon da eBay e Vinted in link cliccabili per CardTrader",
   "permissions": [
     "activeTab",

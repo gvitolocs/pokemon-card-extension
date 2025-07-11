@@ -89,11 +89,52 @@ Per testare le API CardTrader v2:
 3. **Esegui i test individuali** o usa "Esegui Tutti i Test"
 4. **Controlla i risultati** per verificare il funzionamento
 
+### Test Avanzati
+Per testare le funzionalità avanzate:
+
+1. **Apri il file `test-api-debug.html`** nel browser
+2. **Esegui i test per metodi avanzati**:
+   - **Categorie Pokemon**: Carica e analizza le categorie disponibili
+   - **Analisi Proprietà**: Esplora le proprietà dei blueprint per determinare rarità
+   - **Confronto Blueprint**: Confronta blueprint per trovare differenze (es. Full Art vs Ultra Rare)
+   - **Statistiche Prezzi**: Calcola statistiche sui prezzi per un blueprint
+   - **Ricerca con Filtri**: Testa la ricerca marketplace con filtri avanzati
+
 ### Test nell'Estensione
 1. **Carica l'estensione** in Chrome
 2. **Configura il token** nelle impostazioni
 3. **Vai su eBay o Vinted** e cerca carte Pokemon
 4. **Verifica che i link generati** siano specifici e funzionanti
+
+## 🔧 Funzionalità Avanzate API
+
+### Integrazione CardTrader API v2 Completa
+
+L'estensione utilizza tutte le funzionalità avanzate dell'API CardTrader v2:
+
+#### 🔍 Ricerca Intelligente
+- **Blueprint-based search**: Ricerca diretta tramite ID blueprint per massima precisione
+- **Expansion filtering**: Filtraggio per espansioni specifiche
+- **Property analysis**: Analisi delle proprietà per distinguere varianti
+- **Advanced matching**: Algoritmi avanzati per il matching delle carte
+
+#### 📊 Analisi Dati
+- **Price statistics**: Calcolo di statistiche sui prezzi (min, max, mediano, medio)
+- **Blueprint comparison**: Confronto tra blueprint per identificare differenze
+- **Property exploration**: Esplorazione delle proprietà disponibili
+- **Category analysis**: Analisi delle categorie Pokemon
+
+#### 🎯 Filtri Avanzati
+- **Foil filtering**: Ricerca specifica per carte foil/non-foil
+- **Language filtering**: Filtraggio per lingua specifica
+- **Condition filtering**: Filtraggio per condizione
+- **Rarity filtering**: Filtraggio basato su proprietà di rarità
+
+#### ⚡ Performance Ottimizzate
+- **Intelligent caching**: Cache intelligente per blueprint e espansioni
+- **Rate limiting**: Rispetto dei limiti API (1 chiamata/secondo per marketplace)
+- **Batch operations**: Operazioni in batch per ottimizzare le chiamate
+- **Error handling**: Gestione errori avanzata con fallback intelligente
 
 ## 🛠️ Sviluppo
 
@@ -155,6 +196,16 @@ pokemon-card-extension/
 3. **Problemi del sito**: CardTrader potrebbe essere temporaneamente non disponibile
 
 ## 📝 Changelog
+
+### v1.3.0
+- ✅ **Funzionalità API Avanzate**: Integrazione completa con CardTrader API v2
+- ✅ **Analisi Proprietà**: Analisi automatica delle proprietà blueprint per determinare rarità
+- ✅ **Confronto Blueprint**: Confronto tra blueprint per distinguere varianti (Full Art vs Ultra Rare)
+- ✅ **Statistiche Prezzi**: Calcolo di statistiche sui prezzi per ogni blueprint
+- ✅ **Filtri Marketplace**: Ricerca marketplace con filtri avanzati (foil, lingua, condizione)
+- ✅ **Test Avanzati**: Pagina di debug completa per testare tutte le funzionalità API
+- ✅ **Gestione Categorie**: Caricamento e analisi delle categorie Pokemon
+- ✅ **Performance Ottimizzate**: Cache intelligente e operazioni batch
 
 ### v1.2.0
 - ✅ Integrazione API CardTrader v2 con autenticazione
