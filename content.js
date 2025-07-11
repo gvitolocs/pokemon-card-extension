@@ -19,21 +19,23 @@
     const siteConfigs = {
         'ebay.it': {
             titleSelectors: [
-                '.s-item__title',
+                'h1.x-item-title__mainTitle',
                 '.x-item-title__mainTitle',
+                '.s-item__title',
                 'h3.s-item__title',
                 '.s-item__link .s-item__title'
             ],
-            containerSelector: '.s-item__info'
+            containerSelector: '.s-item__info, [data-testid="x-item-title"]'
         },
         'ebay.com': {
             titleSelectors: [
-                '.s-item__title',
+                'h1.x-item-title__mainTitle',
                 '.x-item-title__mainTitle',
+                '.s-item__title',
                 'h3.s-item__title',
                 '.s-item__link .s-item__title'
             ],
-            containerSelector: '.s-item__info'
+            containerSelector: '.s-item__info, [data-testid="x-item-title"]'
         },
         'vinted.it': {
             titleSelectors: [
@@ -124,8 +126,14 @@
             // Per eBay, cerca di inserire dopo il titolo
             if (window.location.hostname.includes('ebay')) {
                 const priceElement = container.querySelector('.s-item__price');
+                const titleElement = container.querySelector('.x-item-title__mainTitle') || 
+                                   container.querySelector('h1.x-item-title__mainTitle');
+                
                 if (priceElement) {
                     insertPosition = priceElement.parentNode;
+                } else if (titleElement) {
+                    // Per il nuovo formato, inserisci dopo il titolo
+                    insertPosition = titleElement.parentNode;
                 }
             }
             
@@ -199,7 +207,9 @@
                                 node.matches?.(config.containerSelector) ||
                                 node.querySelector?.(config.containerSelector) ||
                                 node.querySelector?.('.summary-max-lines-4') ||
-                                node.querySelector?.('.web_ui__Text__text.web_ui__Text__title')
+                                node.querySelector?.('.web_ui__Text__text.web_ui__Text__title') ||
+                                node.querySelector?.('h1.x-item-title__mainTitle') ||
+                                node.querySelector?.('.x-item-title__mainTitle')
                             )) {
                                 shouldProcess = true;
                             }
