@@ -77,7 +77,29 @@
             ],
             containerSelector: '.item-box, .summary-max-lines-4'
         },
+        'www.vinted.it': {
+            titleSelectors: [
+                '.web_ui__Text__text.web_ui__Text__title',
+                'h1.web_ui__Text__text.web_ui__Text__title',
+                '.web_ui__Text__text',
+                '.web_ui__Text__text--bold',
+                '[data-testid="item-title"]',
+                '.item-box__title'
+            ],
+            containerSelector: '.item-box, .summary-max-lines-4'
+        },
         'vinted.com': {
+            titleSelectors: [
+                '.web_ui__Text__text.web_ui__Text__title',
+                'h1.web_ui__Text__text.web_ui__Text__title',
+                '.web_ui__Text__text',
+                '.web_ui__Text__text--bold',
+                '[data-testid="item-title"]',
+                '.item-box__title'
+            ],
+            containerSelector: '.item-box, .summary-max-lines-4'
+        },
+        'www.vinted.com': {
             titleSelectors: [
                 '.web_ui__Text__text.web_ui__Text__title',
                 'h1.web_ui__Text__text.web_ui__Text__title',

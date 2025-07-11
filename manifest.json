@@ -10,18 +10,26 @@
   ],
   "host_permissions": [
     "https://www.ebay.it/*",
+    "https://ebay.it/*",
     "https://www.ebay.com/*",
+    "https://ebay.com/*",
     "https://www.vinted.it/*",
+    "https://vinted.it/*",
     "https://www.vinted.com/*",
+    "https://vinted.com/*",
     "https://www.cardtrader.com/*"
   ],
   "content_scripts": [
     {
       "matches": [
         "https://www.ebay.it/*",
+        "https://ebay.it/*",
         "https://www.ebay.com/*",
+        "https://ebay.com/*",
         "https://www.vinted.it/*",
-        "https://www.vinted.com/*"
+        "https://vinted.it/*",
+        "https://www.vinted.com/*",
+        "https://vinted.com/*"
       ],
       "js": ["content.js"],
       "css": ["styles.css"]
