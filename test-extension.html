@@ -410,6 +410,7 @@
             }
             
             try {
+                // Prima cerca le carte che corrispondono al Pokemon
                 const { data: cards, error: cardsError } = await supabaseClient
                     .from('cards')
                     .select('*')
@@ -418,18 +419,43 @@
                 
                 if (cardsError) throw cardsError;
                 
-                const { data: variants, error: variantsError } = await supabaseClient
-                    .from('card_variants')
-                    .select('*')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .limit(20);
+                let allResults = [];
                 
-                if (variantsError) throw variantsError;
-                
-                const allResults = [
-                    ...(cards || []).map(card => ({ ...card, source: 'cards' })),
-                    ...(variants || []).map(variant => ({ ...variant, source: 'card_variants' }))
-                ];
+                // Aggiungi le carte trovate
+                if (cards && cards.length > 0) {
+                    allResults.push(...cards.map(card => ({ ...card, source: 'cards' })));
+                    
+                    // Per ogni carta, cerca le sue varianti
+                    const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
+                    
+                    if (blueprintIds.length > 0) {
+                        const { data: variants, error: variantsError } = await supabaseClient
+                            .from('card_variants')
+                            .select('*')
+                            .in('blueprint_id', blueprintIds)
+                            .limit(50);
+                        
+                        if (variantsError) throw variantsError;
+                        
+                        if (variants && variants.length > 0) {
+                            // Combina i dati delle carte con le varianti
+                            const combinedVariants = variants.map(variant => {
+                                const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
+                                return {
+                                    ...variant,
+                                    name_en: card?.name_en,
+                                    pokemon_name: card?.name_en,
+                                    expansion_name_en: card?.expansion_name_en,
+                                    expansion_name: card?.expansion_name_en,
+                                    expansion_code: card?.expansion_code,
+                                    source: 'card_variants'
+                                };
+                            });
+                            
+                            allResults.push(...combinedVariants);
+                        }
+                    }
+                }
                 
                 if (allResults.length === 0) {
                     showResult('matchingResult', '❌ Nessuna carta trovata', 'error');
@@ -438,7 +464,11 @@
                 
                 // Sistema di punteggi
                 const scoredResults = allResults.map(result => {
-                    const name = (result.name_en || result.pokemon_name || '').toLowerCase();
+                    // Gestisci i nomi delle colonne per entrambe le tabelle
+                    const name = result.source === 'cards' 
+                        ? (result.name_en || result.name || '').toLowerCase()
+                        : (result.pokemon_name || result.name || '').toLowerCase();
+                    
                     const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
                     const collectorNumber = result.collector_number ? result.collector_number.toString() : '';
                     
@@ -492,8 +522,12 @@
                         <ol>
                     `;
                     scoredResults.slice(0, 5).forEach((item, index) => {
+                        const name = item.result.source === 'cards' 
+                            ? (item.result.name_en || item.result.name || 'Nome sconosciuto')
+                            : (item.result.pokemon_name || item.result.name || 'Nome sconosciuto');
+                        
                         resultHtml += `
-                            <li>${item.result.name_en || item.result.pokemon_name} 
+                            <li>${name} 
                                 (${item.result.expansion_name_en || item.result.expansion_name}) 
                                 - Punteggio: ${item.score} - ${item.reason}</li>
                         `;
@@ -523,6 +557,7 @@
             }
             
             try {
+                // Prima cerca le carte che corrispondono al Pokemon
                 const { data: cards, error: cardsError } = await supabaseClient
                     .from('cards')
                     .select('*')
@@ -531,18 +566,43 @@
                 
                 if (cardsError) throw cardsError;
                 
-                const { data: variants, error: variantsError } = await supabaseClient
-                    .from('card_variants')
-                    .select('*')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .limit(50);
+                let allResults = [];
                 
-                if (variantsError) throw variantsError;
-                
-                const allResults = [
-                    ...(cards || []).map(card => ({ ...card, source: 'cards' })),
-                    ...(variants || []).map(variant => ({ ...variant, source: 'card_variants' }))
-                ];
+                // Aggiungi le carte trovate
+                if (cards && cards.length > 0) {
+                    allResults.push(...cards.map(card => ({ ...card, source: 'cards' })));
+                    
+                    // Per ogni carta, cerca le sue varianti
+                    const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
+                    
+                    if (blueprintIds.length > 0) {
+                        const { data: variants, error: variantsError } = await supabaseClient
+                            .from('card_variants')
+                            .select('*')
+                            .in('blueprint_id', blueprintIds)
+                            .limit(100);
+                        
+                        if (variantsError) throw variantsError;
+                        
+                        if (variants && variants.length > 0) {
+                            // Combina i dati delle carte con le varianti
+                            const combinedVariants = variants.map(variant => {
+                                const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
+                                return {
+                                    ...variant,
+                                    name_en: card?.name_en,
+                                    pokemon_name: card?.name_en,
+                                    expansion_name_en: card?.expansion_name_en,
+                                    expansion_name: card?.expansion_name_en,
+                                    expansion_code: card?.expansion_code,
+                                    source: 'card_variants'
+                                };
+                            });
+                            
+                            allResults.push(...combinedVariants);
+                        }
+                    }
+                }
                 
                 if (allResults.length === 0) {
                     showResult('matchingResult', '❌ Nessuna variante trovata', 'error');
