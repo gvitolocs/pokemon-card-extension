@@ -132,8 +132,23 @@
     // Funzione per creare il link CardTrader
     function createCardTraderLink(title) {
         const cleanTitleText = cleanTitle(title);
-        const searchQuery = encodeURIComponent(cleanTitleText);
-        return `https://www.cardtrader.com/cards/search?q=${searchQuery}`;
+        
+        // Estrai parole chiave specifiche per Pokemon
+        const pokemonKeywords = ['pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo', 'jolteon', 'vaporeon', 'flareon', 'snorlax', 'gengar', 'alakazam', 'gyarados', 'dragonite', 'mew', 'celebi', 'rayquaza', 'lucario', 'garchomp', 'dialga', 'palkia', 'giratina', 'reshiram', 'zekrom', 'kyurem', 'xerneas', 'yveltal', 'zygarde', 'solgaleo', 'lunala', 'necrozma', 'zacian', 'zamazenta', 'calyrex'];
+        
+        // Cerca parole chiave Pokemon nel titolo
+        const foundPokemon = pokemonKeywords.find(keyword => 
+            cleanTitleText.includes(keyword.toLowerCase())
+        );
+        
+        if (foundPokemon) {
+            // Se trova un Pokemon specifico, cerca direttamente quel Pokemon
+            return `https://www.cardtrader.com/cards/search?q=${encodeURIComponent(foundPokemon)}&game=2`;
+        } else {
+            // Altrimenti, cerca con il titolo completo
+            const searchQuery = encodeURIComponent(cleanTitleText);
+            return `https://www.cardtrader.com/cards/search?q=${searchQuery}&game=2`;
+        }
     }
 
     // Funzione per caricare le impostazioni
@@ -212,6 +227,7 @@
     // Funzione per creare il pulsante CT
     function createCTButton(title) {
         const link = createCardTraderLink(title);
+        console.log('Pokemon Card Trader: Link CardTrader generato:', link);
         const button = document.createElement('a');
         button.className = 'ct-button';
         button.href = link;
