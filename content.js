@@ -68,47 +68,55 @@
         },
         'vinted.it': {
             titleSelectors: [
-                '.web_ui__Text__text.web_ui__Text__title',
                 'h1.web_ui__Text__text.web_ui__Text__title',
+                '.web_ui__Text__text.web_ui__Text__title',
                 '.web_ui__Text__text',
                 '.web_ui__Text__text--bold',
                 '[data-testid="item-title"]',
-                '.item-box__title'
+                '.item-box__title',
+                '.summary-max-lines-4 h1',
+                '.summary-max-lines-4 .web_ui__Text__text.web_ui__Text__title'
             ],
-            containerSelector: '.item-box, .summary-max-lines-4'
+            containerSelector: '.item-box, .summary-max-lines-4, .box--item-details'
         },
         'www.vinted.it': {
             titleSelectors: [
-                '.web_ui__Text__text.web_ui__Text__title',
                 'h1.web_ui__Text__text.web_ui__Text__title',
+                '.web_ui__Text__text.web_ui__Text__title',
                 '.web_ui__Text__text',
                 '.web_ui__Text__text--bold',
                 '[data-testid="item-title"]',
-                '.item-box__title'
+                '.item-box__title',
+                '.summary-max-lines-4 h1',
+                '.summary-max-lines-4 .web_ui__Text__text.web_ui__Text__title'
             ],
-            containerSelector: '.item-box, .summary-max-lines-4'
+            containerSelector: '.item-box, .summary-max-lines-4, .box--item-details'
         },
         'vinted.com': {
             titleSelectors: [
-                '.web_ui__Text__text.web_ui__Text__title',
                 'h1.web_ui__Text__text.web_ui__Text__title',
+                '.web_ui__Text__text.web_ui__Text__title',
                 '.web_ui__Text__text',
                 '.web_ui__Text__text--bold',
                 '[data-testid="item-title"]',
-                '.item-box__title'
+                '.item-box__title',
+                '.summary-max-lines-4 h1',
+                '.summary-max-lines-4 .web_ui__Text__text.web_ui__Text__title'
             ],
-            containerSelector: '.item-box, .summary-max-lines-4'
+            containerSelector: '.item-box, .summary-max-lines-4, .box--item-details'
         },
         'www.vinted.com': {
             titleSelectors: [
-                '.web_ui__Text__text.web_ui__Text__title',
                 'h1.web_ui__Text__text.web_ui__Text__title',
+                '.web_ui__Text__text.web_ui__Text__title',
                 '.web_ui__Text__text',
                 '.web_ui__Text__text--bold',
                 '[data-testid="item-title"]',
-                '.item-box__title'
+                '.item-box__title',
+                '.summary-max-lines-4 h1',
+                '.summary-max-lines-4 .web_ui__Text__text.web_ui__Text__title'
             ],
-            containerSelector: '.item-box, .summary-max-lines-4'
+            containerSelector: '.item-box, .summary-max-lines-4, .box--item-details'
         }
     };
 
@@ -348,11 +356,16 @@
             let titleElement = null;
             for (const selector of config.titleSelectors) {
                 titleElement = container.querySelector(selector);
-                if (titleElement) break;
+                if (titleElement) {
+                    console.log('Pokemon Card Trader: Trovato titolo con selettore:', selector);
+                    break;
+                }
             }
 
             if (titleElement) {
                 processTitleElement(titleElement, container);
+            } else {
+                console.log('Pokemon Card Trader: Nessun titolo trovato nel container:', container);
             }
         });
     }
