@@ -841,7 +841,12 @@ class CardTraderAPI {
         const card = searchResults.data[0];
         
         if (card && card.id) {
-            // Se abbiamo informazioni sull'espansione, genera un link specifico
+            // PRIORITÀ 1: Usa il blueprint_id se disponibile (metodo più affidabile)
+            if (card.blueprint_id) {
+                return `https://www.cardtrader.com/cards/${card.blueprint_id}`;
+            }
+            
+            // PRIORITÀ 2: Se abbiamo informazioni sull'espansione, genera un link specifico
             if (card.expansion && card.expansion.name_en) {
                 const expansionSlug = this.generateExpansionSlug(card.expansion.name_en);
                 const cardSlug = this.generateCardNameSlug(card.name || cardInfo.pokemonName);
