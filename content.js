@@ -8,7 +8,7 @@
         autoActivate: true,
         notifications: true,
         newTab: true,
-        hideAds: true,
+
         pokemonKeywords: [
             'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
             'charizard', 'pikachu', 'blastoise', 'venusaur', 'mewtwo',
@@ -85,82 +85,44 @@
         });
     }
 
-    // Funzione per nascondere elementi pubblicitari di Vinted
-    function hideVintedAds() {
-        if (!window.location.hostname.includes('vinted')) {
-            return;
-        }
 
-        // Selettori per elementi pubblicitari
-        const adSelectors = [
-            '[data-testid="slot-container"]',
-            '[data-testid="slot-placeholder"]',
-            '[data-testid="slot-placeholder-image"]',
-            '[data-testid="slot-placeholder-image--img"]',
-            '[data-testid="main-slot"]',
-            '.slot-container',
-            '.slot-container--leaderboard',
-            '.slot-placeholder',
-            '.slot-placeholder--leaderboard',
-            '.slot-content',
-            '#slot-leaderboard',
-            '.web_ui__Image__image[data-testid="slot-placeholder-image"]',
-            '.web_ui__Image__content[data-testid="slot-placeholder-image--img"]',
-            '[data-testid*="ad"]',
-            '[data-testid*="advertisement"]',
-            '[data-testid*="promo"]',
-            '[data-testid*="sponsored"]',
-            '[class*="ad-"]',
-            '[class*="advertisement"]',
-            '[class*="promo"]',
-            '[class*="sponsored"]',
-            '[id*="ad-"]',
-            '[id*="advertisement"]',
-            '[id*="promo"]',
-            '[id*="sponsored"]'
-        ];
 
-        adSelectors.forEach(selector => {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach(element => {
-                element.style.display = 'none';
-                element.style.visibility = 'hidden';
-                element.style.opacity = '0';
-                element.style.height = '0';
-                element.style.width = '0';
-                element.style.overflow = 'hidden';
-            });
-        });
-
-        // Nascondi immagini con URL specifici
-        const adImages = document.querySelectorAll('img[src*="placeholders"], img[src*="ads"], img[src*="leaderboard"]');
-        adImages.forEach(img => {
-            img.style.display = 'none';
-            img.style.visibility = 'hidden';
-            img.style.opacity = '0';
-        });
-
-        // Nascondi testo all'interno dei placeholder
-        const adTexts = document.querySelectorAll('.slot-placeholder__text, .slot-placeholder .web_ui__Text__text');
-        adTexts.forEach(text => {
-            text.style.display = 'none';
-            text.style.visibility = 'hidden';
-            text.style.opacity = '0';
-        });
-    }
-
-    // Funzione per creare il badge del link
-    function createLinkBadge(title) {
+    // Funzione per creare il pulsante CT
+    function createCTButton(title) {
         const link = createCardTraderLink(title);
-        const badge = document.createElement('div');
-        badge.className = 'cardtrader-link-badge';
-        badge.innerHTML = `
-            <a href="${link}" target="_blank" title="Cerca su CardTrader">
-                <span class="badge-icon">🎴</span>
-                <span class="badge-text">CardTrader</span>
-            </a>
+        const button = document.createElement('a');
+        button.className = 'ct-button';
+        button.href = link;
+        button.target = '_blank';
+        button.textContent = 'CT';
+        button.title = 'Cerca su CardTrader';
+        button.style.cssText = `
+            cursor: pointer;
+            margin-left: 5px;
+            background-color: rgb(240, 240, 240);
+            border: 1px solid rgb(204, 204, 204);
+            border-radius: 4px;
+            padding: 3px 6px;
+            text-decoration: none;
+            color: black;
+            font-size: 11px;
+            font-weight: bold;
+            display: inline-block;
+            transition: all 0.2s ease;
         `;
-        return badge;
+        
+        // Aggiungi hover effect
+        button.addEventListener('mouseenter', function() {
+            this.style.backgroundColor = 'rgb(220, 220, 220)';
+            this.style.borderColor = 'rgb(180, 180, 180)';
+        });
+        
+        button.addEventListener('mouseleave', function() {
+            this.style.backgroundColor = 'rgb(240, 240, 240)';
+            this.style.borderColor = 'rgb(204, 204, 204)';
+        });
+        
+        return button;
     }
 
     // Funzione per processare un elemento titolo
@@ -182,47 +144,43 @@
         );
 
         if (hasPokemonKeywords && !isPaused) {
-            // Crea e aggiungi il badge
-            const badge = createLinkBadge(title);
+            // Crea e aggiungi il pulsante CT
+            const ctButton = createCTButton(title);
             
-            // Trova la posizione migliore per inserire il badge
-            let insertPosition = container;
+            // Trova la posizione migliore per inserire il pulsante
+            let insertPosition = null;
             
-            // Per eBay, cerca di inserire dopo il titolo
+            // Per eBay, inserisci accanto al titolo
             if (window.location.hostname.includes('ebay')) {
-                const priceElement = container.querySelector('.s-item__price');
                 const titleElement = container.querySelector('.x-item-title__mainTitle') || 
-                                   container.querySelector('h1.x-item-title__mainTitle');
+                                   container.querySelector('h1.x-item-title__mainTitle') ||
+                                   container.querySelector('.s-item__title');
                 
-                if (priceElement) {
-                    insertPosition = priceElement.parentNode;
-                } else if (titleElement) {
-                    // Per il nuovo formato, inserisci dopo il titolo
-                    insertPosition = titleElement.parentNode;
+                if (titleElement) {
+                    // Inserisci il pulsante dopo il titolo
+                    titleElement.appendChild(ctButton);
+                    insertPosition = titleElement;
                 }
             }
             
-            // Per Vinted, inserisci dopo il titolo
+            // Per Vinted, inserisci accanto al titolo
             if (window.location.hostname.includes('vinted')) {
-                const titleContainer = container.querySelector('.item-box__title') || 
-                                     container.querySelector('[data-testid="item-title"]') ||
-                                     container.querySelector('.web_ui__Text__text.web_ui__Text__title') ||
-                                     container.querySelector('h1.web_ui__Text__text.web_ui__Text__title');
-                if (titleContainer) {
-                    insertPosition = titleContainer.parentNode;
-                } else {
-                    // Se non trova un container specifico, usa il container principale
-                    insertPosition = container;
+                const titleElement = container.querySelector('.item-box__title') || 
+                                   container.querySelector('[data-testid="item-title"]') ||
+                                   container.querySelector('.web_ui__Text__text.web_ui__Text__title') ||
+                                   container.querySelector('h1.web_ui__Text__text.web_ui__Text__title');
+                
+                if (titleElement) {
+                    // Inserisci il pulsante dopo il titolo
+                    titleElement.appendChild(ctButton);
+                    insertPosition = titleElement;
                 }
             }
 
-            // Inserisci il badge
+            // Se il pulsante è stato inserito, marca come processato
             if (insertPosition) {
-                insertPosition.appendChild(badge);
+                titleElement.dataset.cardtraderProcessed = 'true';
             }
-
-            // Marca come processato
-            titleElement.dataset.cardtraderProcessed = 'true';
         }
     }
 
@@ -239,10 +197,7 @@
             return;
         }
 
-        // Nascondi pubblicità su Vinted se abilitato
-        if (settings.hideAds) {
-            hideVintedAds();
-        }
+
 
         // Trova tutti i container delle inserzioni
         const containers = document.querySelectorAll(config.containerSelector);
@@ -284,19 +239,7 @@
                                 shouldProcess = true;
                             }
 
-                            // Controlla anche se sono stati aggiunti elementi pubblicitari
-                            if (window.location.hostname.includes('vinted') && settings.hideAds && (
-                                node.matches?.('[data-testid="slot-placeholder"]') ||
-                                node.matches?.('[data-testid="slot-container"]') ||
-                                node.matches?.('.slot-placeholder') ||
-                                node.matches?.('.slot-container') ||
-                                node.querySelector?.('[data-testid="slot-placeholder"]') ||
-                                node.querySelector?.('[data-testid="slot-container"]') ||
-                                node.querySelector?.('.slot-placeholder') ||
-                                node.querySelector?.('.slot-container')
-                            )) {
-                                setTimeout(hideVintedAds, 100);
-                            }
+
                         }
                     });
                 }
@@ -308,11 +251,7 @@
             }
         });
 
-        // Nascondi anche pubblicità che potrebbero essere aggiunte dinamicamente
-        if (window.location.hostname.includes('vinted') && settings.hideAds) {
-            setTimeout(hideVintedAds, 500);
-            setTimeout(hideVintedAds, 2000);
-        }
+
 
         observer.observe(document.body, {
             childList: true,

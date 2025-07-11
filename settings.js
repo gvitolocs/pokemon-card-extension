@@ -3,7 +3,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const autoActivateToggle = document.getElementById('autoActivate');
     const notificationsToggle = document.getElementById('notifications');
     const newTabToggle = document.getElementById('newTab');
-    const hideAdsToggle = document.getElementById('hideAds');
+
     const pokemonKeywords = document.getElementById('pokemonKeywords');
     const saveBtn = document.getElementById('saveBtn');
     const status = document.getElementById('status');
@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', function() {
         autoActivate: true,
         notifications: true,
         newTab: true,
-        hideAds: true,
+
         pokemonKeywords: [
             'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
             'charizard', 'pikachu', 'blastoise', 'venusaur', 'mewtwo',
@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', function() {
             autoActivateToggle.classList.toggle('active', items.autoActivate);
             notificationsToggle.classList.toggle('active', items.notifications);
             newTabToggle.classList.toggle('active', items.newTab);
-            hideAdsToggle.classList.toggle('active', items.hideAds);
+
             pokemonKeywords.value = Array.isArray(items.pokemonKeywords) 
                 ? items.pokemonKeywords.join('\n') 
                 : items.pokemonKeywords;
@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
             autoActivate: autoActivateToggle.classList.contains('active'),
             notifications: notificationsToggle.classList.contains('active'),
             newTab: newTabToggle.classList.contains('active'),
-            hideAds: hideAdsToggle.classList.contains('active'),
+
             pokemonKeywords: pokemonKeywords.value.split('\n').filter(keyword => keyword.trim() !== '')
         };
 
@@ -85,9 +85,7 @@ document.addEventListener('DOMContentLoaded', function() {
         this.classList.toggle('active');
     });
 
-    hideAdsToggle.addEventListener('click', function() {
-        this.classList.toggle('active');
-    });
+
 
     // Salva quando si clicca il pulsante
     saveBtn.addEventListener('click', saveSettings);
