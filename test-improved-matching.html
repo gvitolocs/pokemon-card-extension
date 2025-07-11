@@ -84,14 +84,16 @@
         </div>
 
         <div class="test-section">
-            <h3>⚙️ Configurazione Supabase (Opzionale)</h3>
-            <p>Inserisci le tue credenziali Supabase per testare con dati reali:</p>
+            <h3>⚙️ Configurazione Supabase</h3>
+            <p>Credenziali predefinite già configurate. Puoi personalizzarle se necessario:</p>
             <input type="text" id="supabaseUrl" placeholder="URL Supabase (es. https://xxx.supabase.co)" 
-                   style="margin-bottom: 10px;">
+                   value="https://msngrrrihwudtnyjatlo.supabase.co" style="margin-bottom: 10px;">
             <input type="text" id="supabaseKey" placeholder="Chiave anonima Supabase" 
+                   value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo" 
                    style="margin-bottom: 10px;">
             <button onclick="saveSupabaseConfig()">💾 Salva Configurazione</button>
             <button onclick="clearSupabaseConfig()">🗑️ Cancella Configurazione</button>
+            <button onclick="testConnection()">🔗 Testa Connessione</button>
         </div>
 
         <div class="test-section">
@@ -509,6 +511,37 @@
             if (key) document.getElementById('supabaseKey').value = key;
         }
         
+        async function testConnection() {
+            const url = document.getElementById('supabaseUrl').value.trim();
+            const key = document.getElementById('supabaseKey').value.trim();
+            
+            if (!url || !key) {
+                alert('Inserisci sia URL che chiave Supabase');
+                return;
+            }
+            
+            try {
+                const supabase = window.supabase.createClient(url, key);
+                
+                // Testa la connessione cercando una carta semplice
+                const { data, error } = await supabase
+                    .from('cards')
+                    .select('count')
+                    .limit(1);
+                
+                if (error) {
+                    throw error;
+                }
+                
+                alert('✅ Connessione Supabase riuscita!');
+                console.log('✅ Test connessione Supabase: OK');
+                
+            } catch (error) {
+                alert(`❌ Errore connessione: ${error.message}`);
+                console.error('❌ Test connessione Supabase fallito:', error);
+            }
+        }
+        
         // Carica configurazione all'avvio
         window.addEventListener('load', loadSupabaseConfig);
         
@@ -546,18 +579,15 @@
                     return;
                 }
                 
-                // Crea client Supabase (usa configurazione salvata)
-                const supabaseUrl = localStorage.getItem('supabaseUrl');
-                const supabaseKey = localStorage.getItem('supabaseKey');
+                // Crea client Supabase (usa configurazione salvata o predefinita)
+                let supabaseUrl = localStorage.getItem('supabaseUrl');
+                let supabaseKey = localStorage.getItem('supabaseKey');
                 
+                // Se non c'è configurazione salvata, usa quella predefinita
                 if (!supabaseUrl || !supabaseKey) {
-                    resultDiv.innerHTML = `
-                        <div class="result error">
-                            <h4>❌ Configurazione Supabase mancante</h4>
-                            <p>Inserisci URL e chiave Supabase nella sezione configurazione per testare con dati reali.</p>
-                        </div>
-                    `;
-                    return;
+                    supabaseUrl = 'https://msngrrrihwudtnyjatlo.supabase.co';
+                    supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo';
+                    console.log('🔧 Usando configurazione Supabase predefinita');
                 }
                 
                 const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
