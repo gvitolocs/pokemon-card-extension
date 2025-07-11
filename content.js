@@ -30,7 +30,31 @@
             ],
             containerSelector: '.s-item__info, [data-testid="x-item-title"], .vim.x-item-title'
         },
+        'www.ebay.it': {
+            titleSelectors: [
+                'h1.x-item-title__mainTitle',
+                '.x-item-title__mainTitle',
+                '.s-item__title',
+                'h3.s-item__title',
+                '.s-item__link .s-item__title',
+                '[data-testid="x-item-title"] h1',
+                '.vim.x-item-title h1'
+            ],
+            containerSelector: '.s-item__info, [data-testid="x-item-title"], .vim.x-item-title'
+        },
         'ebay.com': {
+            titleSelectors: [
+                'h1.x-item-title__mainTitle',
+                '.x-item-title__mainTitle',
+                '.s-item__title',
+                'h3.s-item__title',
+                '.s-item__link .s-item__title',
+                '[data-testid="x-item-title"] h1',
+                '.vim.x-item-title h1'
+            ],
+            containerSelector: '.s-item__info, [data-testid="x-item-title"], .vim.x-item-title'
+        },
+        'www.ebay.com': {
             titleSelectors: [
                 'h1.x-item-title__mainTitle',
                 '.x-item-title__mainTitle',
