@@ -326,6 +326,42 @@
             return null;
         }
         
+        // Funzione per calcolare la distanza di Levenshtein (per gestire i typo)
+        function levenshteinDistance(str1, str2) {
+            const matrix = [];
+            
+            for (let i = 0; i <= str2.length; i++) {
+                matrix[i] = [i];
+            }
+            
+            for (let j = 0; j <= str1.length; j++) {
+                matrix[0][j] = j;
+            }
+            
+            for (let i = 1; i <= str2.length; i++) {
+                for (let j = 1; j <= str1.length; j++) {
+                    if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                        matrix[i][j] = matrix[i - 1][j - 1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            matrix[i][j - 1] + 1,
+                            matrix[i - 1][j] + 1
+                        );
+                    }
+                }
+            }
+            
+            return matrix[str2.length][str1.length];
+        }
+        
+        // Funzione per calcolare la similarità tra due stringhe
+        function calculateSimilarity(str1, str2) {
+            const distance = levenshteinDistance(str1.toLowerCase(), str2.toLowerCase());
+            const maxLength = Math.max(str1.length, str2.length);
+            return 1 - (distance / maxLength);
+        }
+        
         function extractTitleInfo(title) {
             const titleLower = title.toLowerCase();
             const info = {
@@ -338,7 +374,8 @@
             info.pokemonName = extractPokemonName(title);
             
                     const expansionPatterns = [
-            // Scarlet & Violet - priorità alta per Terastal Festival ex
+            // Scarlet & Violet - priorità alta per Terastal Festival
+            /terastal festival/i,
             /terastal festival ex/i,
             /sv\d+/i,
             /scarlet & violet/i,
@@ -589,14 +626,26 @@
                         reason += 'Match ex ';
                     }
                     
-                    if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
-                        score += 50; // Aumentato significativamente il peso dell'espansione
-                        reason += 'Espansione ';
+                    if (titleInfo.expansion && expansion) {
+                        // Calcola la similarità tra l'espansione del titolo e quella del database
+                        const similarity = calculateSimilarity(titleInfo.expansion, expansion);
                         
-                        // Bonus extra per match esatto dell'espansione
-                        if (expansion === titleInfo.expansion) {
-                            score += 25;
-                            reason += 'Espansione esatta ';
+                        if (similarity >= 0.8) { // Match molto simile (80%+ similarità)
+                            score += 50;
+                            reason += `Espansione simile (${Math.round(similarity * 100)}%) `;
+                            
+                            // Bonus extra per match esatto o molto simile
+                            if (similarity >= 0.95) {
+                                score += 25;
+                                reason += 'Espansione quasi esatta ';
+                            } else if (similarity >= 0.9) {
+                                score += 15;
+                                reason += 'Espansione molto simile ';
+                            }
+                        } else if (expansion.includes(titleInfo.expansion) || titleInfo.expansion.includes(expansion)) {
+                            // Fallback per match parziale
+                            score += 30;
+                            reason += 'Espansione parziale ';
                         }
                     }
                     
@@ -605,9 +654,12 @@
                         reason += 'Numero collezionista ';
                         
                         // Bonus extra se abbiamo anche l'espansione corretta
-                        if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
-                            score += 20;
-                            reason += 'Numero+Espansione ';
+                        if (titleInfo.expansion && expansion) {
+                            const similarity = calculateSimilarity(titleInfo.expansion, expansion);
+                            if (similarity >= 0.8) {
+                                score += 20;
+                                reason += 'Numero+Espansione ';
+                            }
                         }
                     }
                     
@@ -615,9 +667,15 @@
                     if (result.blueprint_id || result.id) score += 5;
                     
                     // Penalità per espansioni che non corrispondono
-                    if (titleInfo.expansion && expansion && !expansion.includes(titleInfo.expansion)) {
-                        score -= 30;
-                        reason += 'Espansione diversa ';
+                    if (titleInfo.expansion && expansion) {
+                        const similarity = calculateSimilarity(titleInfo.expansion, expansion);
+                        if (similarity < 0.5) { // Molto diversa (meno del 50% similarità)
+                            score -= 30;
+                            reason += `Espansione diversa (${Math.round(similarity * 100)}%) `;
+                        } else if (similarity < 0.7) { // Abbastanza diversa
+                            score -= 15;
+                            reason += `Espansione leggermente diversa (${Math.round(similarity * 100)}%) `;
+                        }
                     }
                     
                     return { result, score, reason: reason.trim() };
