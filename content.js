@@ -273,7 +273,10 @@
 
     // Funzione principale per processare la pagina
     function processPage() {
+        console.log('Pokemon Card Trader: processPage chiamata');
+        
         if (isPaused || !settings.autoActivate) {
+            console.log('Pokemon Card Trader: Estensione in pausa o autoActivate disabilitato');
             return;
         }
 
@@ -281,14 +284,18 @@
         const config = siteConfigs[hostname];
 
         if (!config) {
+            console.log('Pokemon Card Trader: Nessuna configurazione trovata per', hostname);
             return;
         }
+        
+        console.log('Pokemon Card Trader: Configurazione trovata per', hostname);
 
         // Nascondi pubblicità su Vinted
         hideVintedAds();
 
         // Trova tutti i container delle inserzioni
         const containers = document.querySelectorAll(config.containerSelector);
+        console.log('Pokemon Card Trader: Trovati', containers.length, 'container');
         
         containers.forEach(container => {
             // Trova il titolo usando i selettori configurati
@@ -369,6 +376,9 @@
 
     // Inizializzazione
     function init() {
+        console.log('Pokemon Card Trader: Estensione inizializzata su', window.location.hostname);
+        console.log('Pokemon Card Trader: Impostazioni caricate:', settings);
+        
         // Processa la pagina corrente
         processPage();
         
