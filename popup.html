@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokemon Card Trader Linker</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .logo {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+
+        .title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .subtitle {
+            font-size: 12px;
+            opacity: 0.8;
+        }
+
+        .status {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+
+        .status.active {
+            background: rgba(76, 175, 80, 0.2);
+            border: 1px solid rgba(76, 175, 80, 0.3);
+        }
+
+        .status.inactive {
+            background: rgba(244, 67, 54, 0.2);
+            border: 1px solid rgba(244, 67, 54, 0.3);
+        }
+
+        .status-icon {
+            font-size: 16px;
+            margin-right: 8px;
+        }
+
+        .controls {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+
+        .info {
+            margin-top: 16px;
+            font-size: 11px;
+            opacity: 0.7;
+            line-height: 1.4;
+        }
+
+        .supported-sites {
+            margin-top: 12px;
+            font-size: 10px;
+            opacity: 0.6;
+        }
+
+        .site-list {
+            list-style: none;
+            padding: 0;
+            margin: 4px 0 0 0;
+        }
+
+        .site-list li {
+            padding: 2px 0;
+        }
+
+        .site-list li::before {
+            content: "✓ ";
+            color: #4CAF50;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🎴</div>
+        <div class="title">Pokemon Card Trader Linker</div>
+        <div class="subtitle">Trova le tue carte su CardTrader</div>
+    </div>
+
+    <div class="status" id="status">
+        <span class="status-icon">⏳</span>
+        <span id="status-text">Controllando...</span>
+    </div>
+
+    <div class="controls">
+        <button class="btn" id="refreshBtn">🔄 Ricarica Pagina</button>
+        <button class="btn" id="toggleBtn">⏸️ Pausa/Riprendi</button>
+        <button class="btn" id="settingsBtn">⚙️ Impostazioni</button>
+    </div>
+
+    <div class="info">
+        Questa estensione aggiunge automaticamente link cliccabili ai titoli delle inserzioni di carte Pokemon su eBay e Vinted, reindirizzandoti alla ricerca su CardTrader.
+    </div>
+
+    <div class="supported-sites">
+        <strong>Siti supportati:</strong>
+        <ul class="site-list">
+            <li>eBay (Italia e Internazionale)</li>
+            <li>Vinted (Italia e Internazionale)</li>
+        </ul>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html> 

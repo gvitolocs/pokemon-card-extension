@@ -1,0 +1,39 @@
+{
+  "name": "pokemon-card-trader-linker",
+  "version": "1.0.0",
+  "description": "Chrome extension that converts Pokemon card listings from eBay and Vinted into clickable links pointing to CardTrader",
+  "main": "content.js",
+  "scripts": {
+    "build": "echo 'No build process needed for Chrome extension'",
+    "test": "echo 'Open test.html in browser to test the extension'",
+    "package": "zip -r pokemon-card-trader-linker.zip . -x '*.git*' 'node_modules/*' '*.DS_Store'",
+    "clean": "rm -f pokemon-card-trader-linker.zip"
+  },
+  "keywords": [
+    "chrome-extension",
+    "pokemon",
+    "cards",
+    "ebay",
+    "vinted",
+    "cardtrader",
+    "trading-cards"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tuousername/pokemon-card-extension.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tuousername/pokemon-card-extension/issues"
+  },
+  "homepage": "https://github.com/tuousername/pokemon-card-extension#readme",
+  "devDependencies": {},
+  "dependencies": {},
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "browserslist": [
+    "Chrome >= 88"
+  ]
+} 

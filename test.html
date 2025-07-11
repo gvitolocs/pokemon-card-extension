@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Pokemon Card Trader Linker</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-section h3 {
+            color: #667eea;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        .item {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 6px;
+            background: #fafafa;
+        }
+
+        .item-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .item-price {
+            color: #28a745;
+            font-weight: 500;
+        }
+
+        .instructions {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .instructions h4 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🎴 Test Pokemon Card Trader Linker</h1>
+        <p>Pagina di test per verificare il funzionamento dell'estensione</p>
+    </div>
+
+    <div class="instructions">
+        <h4>📋 Istruzioni per il test</h4>
+        <ol>
+            <li>Assicurati che l'estensione sia installata e attiva</li>
+            <li>Questa pagina simula le inserzioni di eBay/Vinted</li>
+            <li>L'estensione dovrebbe aggiungere badge "CardTrader" ai titoli Pokemon</li>
+            <li>I badge dovrebbero essere cliccabili e portare a CardTrader</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h3>🔍 Test eBay Style</h3>
+        
+        <div class="item s-item__info">
+            <div class="s-item__title">Pokemon Charizard Holo 1st Edition Base Set</div>
+            <div class="s-item__price">€150.00</div>
+        </div>
+
+        <div class="item s-item__info">
+            <div class="s-item__title">Pikachu Full Art Secret Rare Pokemon Card</div>
+            <div class="s-item__price">€45.00</div>
+        </div>
+
+        <div class="item s-item__info">
+            <div class="s-item__title">Blastoise Reverse Holo Pokemon Trading Card</div>
+            <div class="s-item__price">€25.00</div>
+        </div>
+
+        <div class="item s-item__info">
+            <div class="s-item__title">iPhone 14 Pro Max - Nuovo</div>
+            <div class="s-item__price">€999.00</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>🛍️ Test Vinted Style</h3>
+        
+        <div class="item item-box">
+            <div class="item-box__title">Carta Pokemon Mewtwo Ultra Rare</div>
+            <div class="item-price">€80.00</div>
+        </div>
+
+        <div class="item item-box">
+            <div class="item-box__title">Venusaur Holo Pokemon TCG</div>
+            <div class="item-price">€35.00</div>
+        </div>
+
+        <div class="item item-box">
+            <div class="item-box__title">Nike Air Max 270 - Scarpe Sportive</div>
+            <div class="item-price">€120.00</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>✅ Risultati attesi</h3>
+        
+        <div class="status success">
+            ✅ <strong>Successo:</strong> I badge "CardTrader" dovrebbero apparire accanto ai titoli delle carte Pokemon
+        </div>
+        
+        <div class="status warning">
+            ⚠️ <strong>Attenzione:</strong> I badge NON dovrebbero apparire per inserzioni non-Pokemon (iPhone, Nike)
+        </div>
+        
+        <div class="status success">
+            ✅ <strong>Funzionalità:</strong> I badge dovrebbero essere cliccabili e aprire CardTrader in una nuova tab
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>🐛 Debug</h3>
+        <p>Se l'estensione non funziona:</p>
+        <ul>
+            <li>Apri gli strumenti di sviluppo (F12)</li>
+            <li>Controlla la console per errori</li>
+            <li>Verifica che l'estensione sia attiva su questa pagina</li>
+            <li>Prova a ricaricare la pagina</li>
+        </ul>
+    </div>
+
+    <script>
+        // Simula il caricamento dinamico di contenuti
+        setTimeout(() => {
+            const testSection = document.createElement('div');
+            testSection.className = 'test-section';
+            testSection.innerHTML = `
+                <h3>🔄 Test Contenuto Dinamico</h3>
+                <div class="item s-item__info">
+                    <div class="s-item__title">Pokemon Gyarados Secret Rare - Caricato dinamicamente</div>
+                    <div class="s-item__price">€95.00</div>
+                </div>
+            `;
+            document.body.appendChild(testSection);
+        }, 2000);
+    </script>
+</body>
+</html> 

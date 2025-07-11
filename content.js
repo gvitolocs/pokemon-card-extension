@@ -1,0 +1,265 @@
+// Pokemon Card Trader Linker - Content Script
+(function() {
+    'use strict';
+
+    // Variabili globali
+    let isPaused = false;
+    let settings = {
+        autoActivate: true,
+        notifications: true,
+        newTab: true,
+        pokemonKeywords: [
+            'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
+            'charizard', 'pikachu', 'blastoise', 'venusaur', 'mewtwo',
+            'holo', 'reverse holo', 'full art', 'secret rare', 'ultra rare'
+        ]
+    };
+
+    // Configurazione per i diversi siti
+    const siteConfigs = {
+        'ebay.it': {
+            titleSelectors: [
+                '.s-item__title',
+                '.x-item-title__mainTitle',
+                'h3.s-item__title',
+                '.s-item__link .s-item__title'
+            ],
+            containerSelector: '.s-item__info'
+        },
+        'ebay.com': {
+            titleSelectors: [
+                '.s-item__title',
+                '.x-item-title__mainTitle',
+                'h3.s-item__title',
+                '.s-item__link .s-item__title'
+            ],
+            containerSelector: '.s-item__info'
+        },
+        'vinted.it': {
+            titleSelectors: [
+                '.web_ui__Text__text',
+                '.web_ui__Text__text--bold',
+                '[data-testid="item-title"]',
+                '.item-box__title'
+            ],
+            containerSelector: '.item-box'
+        },
+        'vinted.com': {
+            titleSelectors: [
+                '.web_ui__Text__text',
+                '.web_ui__Text__text--bold',
+                '[data-testid="item-title"]',
+                '.item-box__title'
+            ],
+            containerSelector: '.item-box'
+        }
+    };
+
+    // Funzione per pulire il testo del titolo
+    function cleanTitle(title) {
+        return title
+            .replace(/[^\w\s]/g, ' ') // Rimuove caratteri speciali
+            .replace(/\s+/g, ' ') // Sostituisce spazi multipli con uno solo
+            .trim()
+            .toLowerCase();
+    }
+
+    // Funzione per creare il link CardTrader
+    function createCardTraderLink(title) {
+        const cleanTitleText = cleanTitle(title);
+        const searchQuery = encodeURIComponent(cleanTitleText);
+        return `https://www.cardtrader.com/cards/search?q=${searchQuery}`;
+    }
+
+    // Funzione per caricare le impostazioni
+    function loadSettings() {
+        chrome.storage.sync.get(settings, function(items) {
+            settings = { ...settings, ...items };
+        });
+    }
+
+    // Funzione per creare il badge del link
+    function createLinkBadge(title) {
+        const link = createCardTraderLink(title);
+        const badge = document.createElement('div');
+        badge.className = 'cardtrader-link-badge';
+        badge.innerHTML = `
+            <a href="${link}" target="_blank" title="Cerca su CardTrader">
+                <span class="badge-icon">🎴</span>
+                <span class="badge-text">CardTrader</span>
+            </a>
+        `;
+        return badge;
+    }
+
+    // Funzione per processare un elemento titolo
+    function processTitleElement(titleElement, container) {
+        // Controlla se è già stato processato
+        if (titleElement.dataset.cardtraderProcessed) {
+            return;
+        }
+
+        const title = titleElement.textContent || titleElement.innerText;
+        if (!title || title.trim().length === 0) {
+            return;
+        }
+
+        // Cerca parole chiave Pokemon dalle impostazioni
+        const cleanTitle = cleanTitle(title);
+        const hasPokemonKeywords = settings.pokemonKeywords.some(keyword => 
+            cleanTitle.includes(keyword.toLowerCase())
+        );
+
+        if (hasPokemonKeywords && !isPaused) {
+            // Crea e aggiungi il badge
+            const badge = createLinkBadge(title);
+            
+            // Trova la posizione migliore per inserire il badge
+            let insertPosition = container;
+            
+            // Per eBay, cerca di inserire dopo il titolo
+            if (window.location.hostname.includes('ebay')) {
+                const priceElement = container.querySelector('.s-item__price');
+                if (priceElement) {
+                    insertPosition = priceElement.parentNode;
+                }
+            }
+            
+            // Per Vinted, inserisci dopo il titolo
+            if (window.location.hostname.includes('vinted')) {
+                const titleContainer = container.querySelector('.item-box__title') || 
+                                     container.querySelector('[data-testid="item-title"]');
+                if (titleContainer) {
+                    insertPosition = titleContainer.parentNode;
+                }
+            }
+
+            // Inserisci il badge
+            if (insertPosition) {
+                insertPosition.appendChild(badge);
+            }
+
+            // Marca come processato
+            titleElement.dataset.cardtraderProcessed = 'true';
+        }
+    }
+
+    // Funzione principale per processare la pagina
+    function processPage() {
+        if (isPaused || !settings.autoActivate) {
+            return;
+        }
+
+        const hostname = window.location.hostname;
+        const config = siteConfigs[hostname];
+
+        if (!config) {
+            return;
+        }
+
+        // Trova tutti i container delle inserzioni
+        const containers = document.querySelectorAll(config.containerSelector);
+        
+        containers.forEach(container => {
+            // Trova il titolo usando i selettori configurati
+            let titleElement = null;
+            for (const selector of config.titleSelectors) {
+                titleElement = container.querySelector(selector);
+                if (titleElement) break;
+            }
+
+            if (titleElement) {
+                processTitleElement(titleElement, container);
+            }
+        });
+    }
+
+    // Osserva i cambiamenti nella pagina (per pagine dinamiche)
+    function observePageChanges() {
+        const observer = new MutationObserver((mutations) => {
+            let shouldProcess = false;
+            
+            mutations.forEach((mutation) => {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    // Controlla se sono stati aggiunti nuovi elementi di inserzioni
+                    mutation.addedNodes.forEach((node) => {
+                        if (node.nodeType === Node.ELEMENT_NODE) {
+                            const hostname = window.location.hostname;
+                            const config = siteConfigs[hostname];
+                            if (config && (
+                                node.matches?.(config.containerSelector) ||
+                                node.querySelector?.(config.containerSelector)
+                            )) {
+                                shouldProcess = true;
+                            }
+                        }
+                    });
+                }
+            });
+
+            if (shouldProcess) {
+                // Aspetta un po' per permettere al DOM di stabilizzarsi
+                setTimeout(processPage, 100);
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+    }
+
+    // Inizializzazione
+    function init() {
+        // Processa la pagina corrente
+        processPage();
+        
+        // Osserva i cambiamenti per pagine dinamiche
+        observePageChanges();
+        
+        // Processa di nuovo dopo un breve delay per assicurarsi che tutto sia caricato
+        setTimeout(processPage, 1000);
+    }
+
+    // Avvia quando il DOM è pronto
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
+
+    // Processa anche quando la pagina cambia (per SPA)
+    window.addEventListener('load', processPage);
+    
+    // Processa periodicamente per assicurarsi che tutto sia processato
+    setInterval(processPage, 3000);
+
+    // Gestione dei messaggi dal popup e dalle impostazioni
+    chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
+        switch (request.action) {
+            case 'toggle':
+                isPaused = !isPaused;
+                sendResponse({paused: isPaused});
+                break;
+            
+            case 'updateSettings':
+                settings = { ...settings, ...request.settings };
+                // Ricarica la pagina per applicare le nuove impostazioni
+                setTimeout(processPage, 100);
+                sendResponse({success: true});
+                break;
+            
+            case 'getStatus':
+                sendResponse({
+                    paused: isPaused,
+                    autoActivate: settings.autoActivate,
+                    site: window.location.hostname
+                });
+                break;
+        }
+    });
+
+    // Carica le impostazioni all'avvio
+    loadSettings();
+
+})(); 
