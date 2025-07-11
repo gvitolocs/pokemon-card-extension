@@ -238,11 +238,53 @@
     function findBestMatch(supabaseResults, title) {
         const titleLower = title.toLowerCase();
         
-        // Prima cerca match esatti con immagini
+        // Estrai informazioni specifiche dal titolo
+        const titleInfo = extractTitleInfo(title);
+        console.log('🔍 Informazioni estratte dal titolo:', titleInfo);
+        
+        // Prima cerca match perfetti con espansione e numero collezionista
         for (const tableResult of supabaseResults) {
             for (const result of tableResult.results) {
                 const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
-                if ((titleLower.includes(name) || name.includes(titleLower)) && result.image_url) {
+                const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+                
+                // Verifica se il nome del Pokemon corrisponde
+                if (titleLower.includes(name) || name.includes(titleInfo.pokemonName)) {
+                    // Verifica se l'espansione corrisponde
+                    if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
+                        console.log('✅ Match perfetto con espansione:', result);
+                        return result;
+                    }
+                    
+                    // Verifica se il numero collezionista corrisponde
+                    if (titleInfo.collectorNumber && result.collector_number && 
+                        result.collector_number.toString().includes(titleInfo.collectorNumber)) {
+                        console.log('✅ Match perfetto con numero collezionista:', result);
+                        return result;
+                    }
+                }
+            }
+        }
+        
+        // Poi cerca match con espansione specifica
+        for (const tableResult of supabaseResults) {
+            for (const result of tableResult.results) {
+                const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
+                const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+                
+                if ((titleLower.includes(name) || name.includes(titleInfo.pokemonName)) && 
+                    titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
+                    console.log('✅ Match con espansione specifica:', result);
+                    return result;
+                }
+            }
+        }
+        
+        // Poi cerca match esatti con immagini
+        for (const tableResult of supabaseResults) {
+            for (const result of tableResult.results) {
+                const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
+                if ((titleLower.includes(name) || name.includes(titleInfo.pokemonName)) && result.image_url) {
                     console.log('✅ Match esatto trovato con immagine:', result);
                     return result;
                 }
@@ -253,7 +295,7 @@
         for (const tableResult of supabaseResults) {
             for (const result of tableResult.results) {
                 const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
-                if (titleLower.includes(name) || name.includes(titleLower)) {
+                if (titleLower.includes(name) || name.includes(titleInfo.pokemonName)) {
                     console.log('✅ Match esatto trovato senza immagine:', result);
                     return result;
                 }
@@ -277,6 +319,184 @@
         }
         
         return null;
+    }
+    
+    function extractTitleInfo(title) {
+        const titleLower = title.toLowerCase();
+        const info = {
+            pokemonName: '',
+            expansion: '',
+            collectorNumber: '',
+            rarity: ''
+        };
+        
+        // Estrai il nome del Pokemon
+        info.pokemonName = extractPokemonName(title);
+        
+        // Estrai l'espansione (cerca pattern comuni)
+        const expansionPatterns = [
+            /terastal festival ex/i,
+            /scarlet & violet/i,
+            /sv\d+/i,
+            /sword & shield/i,
+            /swsh/i,
+            /sun & moon/i,
+            /sm/i,
+            /xy/i,
+            /black & white/i,
+            /bw/i,
+            /heartgold & soulsilver/i,
+            /hgss/i,
+            /platinum/i,
+            /diamond & pearl/i,
+            /dp/i,
+            /ex delta species/i,
+            /ex unseen forces/i,
+            /ex sandstorm/i,
+            /ex power keepers/i,
+            /ex ruby & sapphire/i,
+            /ex fire red & leaf green/i,
+            /ex team rocket returns/i,
+            /ex deoxys/i,
+            /ex emerald/i,
+            /ex holon phantoms/i,
+            /ex crystal guardians/i,
+            /ex dragon frontiers/i,
+            /ex power keepers/i,
+            /ex diamond & pearl/i,
+            /ex mysterious treasures/i,
+            /ex secret wonders/i,
+            /ex great encounters/i,
+            /ex majestic dawn/i,
+            /ex legends awakened/i,
+            /ex stormfront/i,
+            /ex platinum/i,
+            /ex rising rivals/i,
+            /ex supreme victors/i,
+            /ex arceus/i,
+            /ex heartgold & soulsilver/i,
+            /ex unleashed/i,
+            /ex undaunted/i,
+            /ex triumphant/i,
+            /ex call of legends/i,
+            /bw black star promos/i,
+            /bw next destinies/i,
+            /bw noble victories/i,
+            /bw emerging powers/i,
+            /bw black & white/i,
+            /bw emerging powers/i,
+            /bw noble victories/i,
+            /bw next destinies/i,
+            /bw dark explorers/i,
+            /bw dragons exalted/i,
+            /bw boundaries crossed/i,
+            /bw plasma storm/i,
+            /bw plasma freeze/i,
+            /bw plasma blast/i,
+            /bw legendary treasures/i,
+            /bw xy/i,
+            /xy kalos starter set/i,
+            /xy xy/i,
+            /xy flashfire/i,
+            /xy furious fists/i,
+            /xy phantom forces/i,
+            /xy primal clash/i,
+            /xy double crisis/i,
+            /xy roaring skies/i,
+            /xy ancient origins/i,
+            /xy breakthrough/i,
+            /xy breakthrough/i,
+            /xy breakpoint/i,
+            /xy generations/i,
+            /xy fates collide/i,
+            /xy steam siege/i,
+            /xy evolutions/i,
+            /sm sun & moon/i,
+            /sm guardians rising/i,
+            /sm burning shadows/i,
+            /sm shining legends/i,
+            /sm crimson invasion/i,
+            /sm ultra prism/i,
+            /sm forbidden light/i,
+            /sm celestial storm/i,
+            /sm dragon majesty/i,
+            /sm lost thunder/i,
+            /sm team up/i,
+            /sm detective pikachu/i,
+            /sm unbroken bonds/i,
+            /sm unified minds/i,
+            /sm hidden fates/i,
+            /sm cosmic eclipse/i,
+            /swsh sword & shield/i,
+            /swsh rebel clash/i,
+            /swsh darkness ablaze/i,
+            /swsh champions path/i,
+            /swsh vivid voltage/i,
+            /swsh shining fates/i,
+            /swsh battle styles/i,
+            /swsh chilling reign/i,
+            /swsh evolving skies/i,
+            /swsh fusion strike/i,
+            /swsh brilliant stars/i,
+            /swsh astral radiance/i,
+            /swsh lost origin/i,
+            /swsh silver tempest/i,
+            /swsh crown zenith/i,
+            /sv scarlet & violet/i,
+            /sv base set/i,
+            /sv paldea evolved/i,
+            /sv obsidian flames/i,
+            /sv 151/i,
+            /sv paradox rift/i,
+            /sv temporal forces/i,
+            /sv paldean fates/i,
+            /sv terastal festival ex/i
+        ];
+        
+        for (const pattern of expansionPatterns) {
+            const match = titleLower.match(pattern);
+            if (match) {
+                info.expansion = match[0];
+                break;
+            }
+        }
+        
+        // Estrai il numero collezionista (pattern: XXX/YYY)
+        const collectorPattern = /(\d+)\/(\d+)/;
+        const collectorMatch = titleLower.match(collectorPattern);
+        if (collectorMatch) {
+            info.collectorNumber = collectorMatch[1]; // Prendi solo il primo numero
+        }
+        
+        // Estrai la rarità
+        const rarityPatterns = [
+            /full art/i,
+            /ultra rare/i,
+            /secret rare/i,
+            /rainbow rare/i,
+            /gold rare/i,
+            /alternate art/i,
+            /alt art/i,
+            /special art/i,
+            /special illustration/i,
+            /illustration rare/i,
+            /character rare/i,
+            /character super rare/i,
+            /super rare/i,
+            /rare/i,
+            /uncommon/i,
+            /common/i
+        ];
+        
+        for (const pattern of rarityPatterns) {
+            const match = titleLower.match(pattern);
+            if (match) {
+                info.rarity = match[0];
+                break;
+            }
+        }
+        
+        return info;
     }
 
     // Funzione per caricare le impostazioni

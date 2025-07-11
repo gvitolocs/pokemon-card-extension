@@ -120,10 +120,18 @@ Charizard Full Art Secret Rare"></textarea>
                 
                 try {
                     // Estrai nome Pokemon dal titolo
-                    const pokemonName = extractPokemonName(title);
+                    const pokemonName = await extractPokemonName(title);
                     
                     if (pokemonName) {
-                        log(`🎯 Pokemon estratto: ${pokemonName}`, 'success');
+                        // Controlla se è un fuzzy match
+                        const isFuzzyMatch = !title.toLowerCase().includes(pokemonName) && 
+                                           !title.toLowerCase().split(/\s+/).some(word => word === pokemonName);
+                        
+                        if (isFuzzyMatch) {
+                            log(`🎯 Pokemon estratto: ${pokemonName} (fuzzy match)`, 'warning');
+                        } else {
+                            log(`🎯 Pokemon estratto: ${pokemonName}`, 'success');
+                        }
                         
                         // Cerca nel database - ricerca più inclusiva
                         let searchTerms = [pokemonName];
@@ -209,7 +217,7 @@ Charizard Full Art Secret Rare"></textarea>
                         }
                         
                         if (allCards && allCards.length > 0) {
-                            // Ordina i risultati per priorità (match esatti prima, poi base, poi varianti)
+                            // Ordina i risultati per priorità (match esatti prima, poi numeri, poi base, poi varianti)
                             allCards.sort((a, b) => {
                                 const titleLower = title.toLowerCase();
                                 const aName = a.name_en.toLowerCase();
@@ -221,6 +229,31 @@ Charizard Full Art Secret Rare"></textarea>
                                 
                                 if (aExactMatch && !bExactMatch) return -1;
                                 if (!aExactMatch && bExactMatch) return 1;
+                                
+                                // Poi priorità per numeri di collezione nel titolo
+                                const numbersInTitle = titleLower.match(/\d+/g) || [];
+                                if (numbersInTitle.length > 0) {
+                                    const aHasNumber = numbersInTitle.some(num => 
+                                        aName.includes(num) || (a.variant_info && a.variant_info.includes(num))
+                                    );
+                                    const bHasNumber = numbersInTitle.some(num => 
+                                        bName.includes(num) || (b.variant_info && b.variant_info.includes(num))
+                                    );
+                                    
+                                    if (aHasNumber && !bHasNumber) return -1;
+                                    if (!aHasNumber && bHasNumber) return 1;
+                                    
+                                    // Se entrambi hanno numeri, priorità per match esatto del numero
+                                    if (aHasNumber && bHasNumber) {
+                                        for (const num of numbersInTitle) {
+                                            const aExactNum = aName.includes(num) || (a.variant_info && a.variant_info.includes(num));
+                                            const bExactNum = bName.includes(num) || (b.variant_info && b.variant_info.includes(num));
+                                            
+                                            if (aExactNum && !bExactNum) return -1;
+                                            if (!aExactNum && bExactNum) return 1;
+                                        }
+                                    }
+                                }
                                 
                                 // Poi priorità per carte "base" (solo nome Pokemon, senza modificatori)
                                 const aIsBase = aName === pokemonName.toLowerCase();
@@ -254,12 +287,12 @@ Charizard Full Art Secret Rare"></textarea>
                                 return a.name_en.localeCompare(b.name_en);
                             });
                             
-                            // Prendi il miglior risultato
-                            const card = allCards[0];
-                            const link = `https://www.cardtrader.com/cards/${card.blueprint_id}`;
+                            // Prendi il miglior risultato (primo dopo l'ordinamento)
+                            const bestCard = allCards[0];
+                            const link = `https://www.cardtrader.com/cards/${bestCard.blueprint_id}`;
                             
                             log(`✅ <strong>Link CardTrader:</strong> <a href="${link}" target="_blank">${link}</a>`, 'success');
-                            log(`📋 Dettagli: ${card.name_en} | ${card.expansion_name_en} | ID: ${card.blueprint_id}`, 'info');
+                            log(`📋 Dettagli: ${bestCard.name_en} | ${bestCard.expansion_name_en} | ID: ${bestCard.blueprint_id}`, 'info');
                             log(`🔍 Trovate ${allCards.length} varianti totali di ${pokemonName}`, 'info');
                             
                             // Mostra tutte le opzioni disponibili
@@ -286,22 +319,115 @@ Charizard Full Art Secret Rare"></textarea>
             log('\n✅ Processamento completato!', 'success');
         }
         
-        function extractPokemonName(title) {
+        // Funzione per calcolare la distanza di Levenshtein (similarità tra stringhe)
+        function levenshteinDistance(str1, str2) {
+            const matrix = [];
+            
+            for (let i = 0; i <= str2.length; i++) {
+                matrix[i] = [i];
+            }
+            
+            for (let j = 0; j <= str1.length; j++) {
+                matrix[0][j] = j;
+            }
+            
+            for (let i = 1; i <= str2.length; i++) {
+                for (let j = 1; j <= str1.length; j++) {
+                    if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
+                        matrix[i][j] = matrix[i - 1][j - 1];
+                    } else {
+                        matrix[i][j] = Math.min(
+                            matrix[i - 1][j - 1] + 1,
+                            matrix[i][j - 1] + 1,
+                            matrix[i - 1][j] + 1
+                        );
+                    }
+                }
+            }
+            
+            return matrix[str2.length][str1.length];
+        }
+        
+        // Funzione per calcolare la similarità (0-1, dove 1 è identico)
+        function calculateSimilarity(str1, str2) {
+            const distance = levenshteinDistance(str1.toLowerCase(), str2.toLowerCase());
+            const maxLength = Math.max(str1.length, str2.length);
+            return 1 - (distance / maxLength);
+        }
+        
+        async function extractPokemonName(title) {
             const titleLower = title.toLowerCase();
             
-            // Lista di Pokemon comuni
-            const pokemonNames = [
-                'jolteon', 'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo',
-                'mew', 'lugia', 'ho-oh', 'rayquaza', 'garchomp', 'lucario',
-                'gengar', 'dragonite', 'gyarados', 'snorlax', 'tyranitar',
-                'salamence', 'metagross', 'dialga', 'palkia', 'giratina',
-                'reshiram', 'zekrom', 'kyurem', 'xerneas', 'yveltal'
+            // Prima prova con una lista di Pokemon comuni per velocità
+            const commonPokemon = [
+                'jolteon', 'flareon', 'vaporeon', 'espeon', 'umbreon', 'leafeon', 'glaceon', 'sylveon',
+                'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo', 'mew', 'lugia', 'ho-oh',
+                'rayquaza', 'garchomp', 'lucario', 'gengar', 'dragonite', 'gyarados', 'snorlax', 'tyranitar'
             ];
             
-            for (const pokemon of pokemonNames) {
+            // Ricerca esatta
+            for (const pokemon of commonPokemon) {
                 if (titleLower.includes(pokemon)) {
                     return pokemon;
                 }
+            }
+            
+            // Fuzzy search nella lista comune
+            const words = titleLower.split(/\s+/).filter(word => word.length >= 3);
+            for (const word of words) {
+                for (const pokemon of commonPokemon) {
+                    const similarity = calculateSimilarity(word, pokemon);
+                    if (similarity >= 0.7) { // 70% di similarità
+                        console.log(`Fuzzy match: "${word}" → "${pokemon}" (${Math.round(similarity * 100)}%)`);
+                        return pokemon;
+                    }
+                }
+            }
+            
+            // Se non trova nella lista comune, cerca nel database
+            try {
+                for (const word of words) {
+                    // Cerca nel database se questa parola corrisponde a un Pokemon
+                    const { data: cards, error } = await supabase
+                        .from('cards')
+                        .select('name_en')
+                        .ilike('name_en', `%${word}%`)
+                        .limit(5);
+                    
+                    if (cards && cards.length > 0) {
+                        // Estrai il nome del Pokemon dal risultato
+                        const cardName = cards[0].name_en.toLowerCase();
+                        const pokemonName = cardName.split(' ')[0]; // Prendi la prima parola
+                        
+                        if (pokemonName.length >= 3) {
+                            return pokemonName;
+                        }
+                    }
+                }
+                
+                // Fuzzy search nel database per parole non trovate
+                for (const word of words) {
+                    const { data: allCards, error } = await supabase
+                        .from('cards')
+                        .select('name_en')
+                        .limit(50);
+                    
+                    if (allCards && !error) {
+                        const pokemonNames = [...new Set(allCards.map(card => 
+                            card.name_en.toLowerCase().split(' ')[0]
+                        ).filter(name => name.length >= 3))];
+                        
+                        for (const pokemonName of pokemonNames) {
+                            const similarity = calculateSimilarity(word, pokemonName);
+                            if (similarity >= 0.7) {
+                                console.log(`Fuzzy DB match: "${word}" → "${pokemonName}" (${Math.round(similarity * 100)}%)`);
+                                return pokemonName;
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log('Errore nella ricerca Pokemon nel database:', error);
             }
             
             return null;

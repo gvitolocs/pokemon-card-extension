@@ -286,9 +286,9 @@ class SupabasePokemonDB {
             // First, search in the cards table to get blueprint_ids
             const { data: cards, error: cardsError } = await this.supabase
                 .from('cards')
-                .select('blueprint_id, name_en, expansion_name_en, expansion_code')
+                .select('blueprint_id, name_en, expansion_name_en, expansion_code, collector_number')
                 .ilike('name_en', `%${pokemonNameLower}%`)
-                .limit(20);
+                .limit(50); // Increased limit to get more results
             
             if (cardsError) {
                 console.log('Error searching cards table:', cardsError.message);
@@ -296,6 +296,8 @@ class SupabasePokemonDB {
             }
             
             if (cards && cards.length > 0) {
+                console.log(`✅ Found ${cards.length} base cards for ${pokemonName}`);
+                
                 // Get blueprint_ids from found cards
                 const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
                 
@@ -304,7 +306,8 @@ class SupabasePokemonDB {
                     const { data: variants, error: variantsError } = await this.supabase
                         .from('card_variants')
                         .select('*')
-                        .in('blueprint_id', blueprintIds);
+                        .in('blueprint_id', blueprintIds)
+                        .limit(100); // Increased limit for variants
                     
                     if (!variantsError && variants && variants.length > 0) {
                         // Combine card data with variant data
@@ -312,10 +315,13 @@ class SupabasePokemonDB {
                             const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
                             return {
                                 ...variant,
+                                name_en: card?.name_en,
                                 card_name: card?.name_en,
                                 pokemon_name: card?.name_en,
+                                expansion_name_en: card?.expansion_name_en,
                                 expansion_name: card?.expansion_name_en,
                                 expansion_code: card?.expansion_code,
+                                collector_number: card?.collector_number,
                                 source_table: 'card_variants'
                             };
                         });
@@ -324,6 +330,19 @@ class SupabasePokemonDB {
                         console.log(`✅ Found ${combinedResults.length} variants for ${pokemonName}`);
                     }
                 }
+                
+                // Also add the base cards themselves
+                const baseCards = cards.map(card => ({
+                    ...card,
+                    name_en: card.name_en,
+                    pokemon_name: card.name_en,
+                    expansion_name_en: card.expansion_name_en,
+                    expansion_name: card.expansion_name_en,
+                    source_table: 'cards'
+                }));
+                
+                results.push(...baseCards);
+                console.log(`✅ Added ${baseCards.length} base cards to results`);
             }
             
             return results;
@@ -347,6 +366,38 @@ class SupabasePokemonDB {
                 regularResults.push({
                     table: 'card_variants',
                     results: variantResults
+                });
+            }
+            
+            // Sort all results by relevance (cards with images first, then by expansion match)
+            if (regularResults.length > 0) {
+                regularResults.forEach(tableResult => {
+                    if (tableResult.results && tableResult.results.length > 0) {
+                        tableResult.results.sort((a, b) => {
+                            // First priority: cards with images
+                            const aHasImage = a.image_url ? 1 : 0;
+                            const bHasImage = b.image_url ? 1 : 0;
+                            if (aHasImage !== bHasImage) {
+                                return bHasImage - aHasImage;
+                            }
+                            
+                            // Second priority: cards with collector numbers
+                            const aHasNumber = a.collector_number ? 1 : 0;
+                            const bHasNumber = b.collector_number ? 1 : 0;
+                            if (aHasNumber !== bHasNumber) {
+                                return bHasNumber - aHasNumber;
+                            }
+                            
+                            // Third priority: cards with expansion names
+                            const aHasExpansion = a.expansion_name_en || a.expansion_name || a.expansion_code ? 1 : 0;
+                            const bHasExpansion = b.expansion_name_en || b.expansion_name || b.expansion_code ? 1 : 0;
+                            if (aHasExpansion !== bHasExpansion) {
+                                return bHasExpansion - aHasExpansion;
+                            }
+                            
+                            return 0;
+                        });
+                    }
                 });
             }
             
