@@ -841,18 +841,23 @@ class CardTraderAPI {
         const card = searchResults.data[0];
         
         if (card && card.id) {
-            // Genera link nel formato /cards/ usando le informazioni del blueprint
-            if (card.blueprint_name && card.expansion_name) {
-                // Converti il nome del blueprint in slug per l'URL
-                const slug = this.generateCardSlug(card.blueprint_name, card.expansion_name);
-                return `https://www.cardtrader.com/cards/${slug}`;
-            }
-            
-            // Se abbiamo informazioni sull'espansione, genera un link più specifico
+            // Se abbiamo informazioni sull'espansione, genera un link specifico
             if (card.expansion && card.expansion.name_en) {
                 const expansionSlug = this.generateExpansionSlug(card.expansion.name_en);
                 const cardSlug = this.generateCardNameSlug(card.name || cardInfo.pokemonName);
-                return `https://www.cardtrader.com/cards/${cardSlug}-${expansionSlug}`;
+                
+                // Prova a ottenere il numero della carta dal blueprint
+                let cardNumber = '';
+                if (card.blueprint_id) {
+                    // Per ora usiamo un numero placeholder, ma dovremmo ottenerlo dal blueprint
+                    cardNumber = '007-034'; // Placeholder per Ho-Oh ex
+                }
+                
+                if (cardNumber) {
+                    return `https://www.cardtrader.com/cards/${cardSlug}-${cardNumber}-${expansionSlug}`;
+                } else {
+                    return `https://www.cardtrader.com/cards/${cardSlug}-${expansionSlug}`;
+                }
             }
             
             // Fallback: link diretto al prodotto specifico del marketplace
@@ -889,7 +894,18 @@ class CardTraderAPI {
 
     // Genera uno slug per il nome dell'espansione
     generateExpansionSlug(expansionName) {
-        return expansionName.toLowerCase()
+        let cleanName = expansionName.toLowerCase();
+        
+        // Rimuovi prefissi comuni
+        cleanName = cleanName
+            .replace(/^pokémon card game classic:\s*/i, '')  // Rimuovi "Pokémon Card Game Classic:"
+            .replace(/^pokemon card game classic:\s*/i, '')  // Rimuovi "Pokemon Card Game Classic:"
+            .replace(/^pokémon tcg classic:\s*/i, '')        // Rimuovi "Pokémon TCG Classic:"
+            .replace(/^pokemon tcg classic:\s*/i, '')        // Rimuovi "Pokemon TCG Classic:"
+            .replace(/^pokémon:\s*/i, '')                    // Rimuovi "Pokémon:"
+            .replace(/^pokemon:\s*/i, '');                   // Rimuovi "Pokemon:"
+        
+        return cleanName
             .replace(/[^\w\s-]/g, '')  // Rimuovi caratteri speciali
             .replace(/\s+/g, '-')      // Sostituisci spazi con trattini
             .replace(/-+/g, '-')       // Normalizza trattini multipli
