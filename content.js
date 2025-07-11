@@ -133,10 +133,54 @@
 
     // Istanza globale dell'API CardTrader
     let cardTraderAPI = null;
+    
+    // Istanza globale di Supabase
+    let supabaseDB = null;
 
-    // Funzione per creare il link CardTrader
+    // Funzione per inizializzare Supabase
+    async function initializeSupabase() {
+        try {
+            if (window.SUPABASE_CONFIG && window.SUPABASE_CONFIG.enabled) {
+                const supabaseClient = await window.initializeSupabase();
+                if (supabaseClient) {
+                    supabaseDB = new SupabasePokemonDB(window.SUPABASE_CONFIG.url, window.SUPABASE_CONFIG.anonKey);
+                    console.log('✅ Supabase integrato per ricerche veloci');
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ Supabase non disponibile, usando solo CardTrader API');
+        }
+    }
+
+    // Funzione per creare il link CardTrader con integrazione Supabase
     async function createCardTraderLink(title) {
-        // Se le API avanzate non sono abilitate ma abbiamo un token configurato, usalo
+        // Prima prova a cercare nel database Supabase (molto più veloce)
+        if (supabaseDB) {
+            try {
+                console.log('🔍 Ricerca veloce in Supabase per:', title);
+                
+                // Estrai il nome del Pokemon dal titolo
+                const pokemonName = extractPokemonName(title);
+                if (pokemonName) {
+                    // Usa la ricerca migliorata che include le varianti
+                    const supabaseResults = await supabaseDB.searchPokemonWithVariants(pokemonName);
+                    
+                    if (supabaseResults && supabaseResults.length > 0) {
+                        // Trova il miglior match
+                        const bestMatch = findBestMatch(supabaseResults, title);
+                        if (bestMatch) {
+                            const link = supabaseDB.generateCardTraderLink(bestMatch);
+                            console.log('✅ Link generato da Supabase:', link);
+                            return link;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.log('⚠️ Ricerca Supabase fallita, usando CardTrader API:', error.message);
+            }
+        }
+
+        // Fallback all'API CardTrader
         const shouldUseAPI = settings.useAdvancedAPI || (API_CONFIG.authToken && !settings.apiToken);
         
         if (!shouldUseAPI) {
@@ -160,6 +204,79 @@
             // Fallback al link generico
             return API_CONFIG.fallback.genericLink;
         }
+    }
+
+    // Funzione per estrarre il nome del Pokemon dal titolo
+    function extractPokemonName(title) {
+        const pokemonNames = [
+            'jolteon', 'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo',
+            'mew', 'lugia', 'ho-oh', 'rayquaza', 'garchomp', 'lucario',
+            'gengar', 'dragonite', 'tyranitar', 'metagross', 'salamence',
+            'moltres', 'articuno', 'zapdos', 'entei', 'raikou', 'suicune'
+        ];
+        
+        const titleLower = title.toLowerCase();
+        
+        for (const pokemon of pokemonNames) {
+            if (titleLower.includes(pokemon)) {
+                return pokemon;
+            }
+        }
+        
+        // Se non trova un nome specifico, prova a estrarre parole che potrebbero essere Pokemon
+        const words = titleLower.split(/\s+/);
+        for (const word of words) {
+            if (word.length > 3 && /^[a-z]+$/.test(word)) {
+                return word;
+            }
+        }
+        
+        return null;
+    }
+
+    // Funzione per trovare il miglior match nei risultati Supabase
+    function findBestMatch(supabaseResults, title) {
+        const titleLower = title.toLowerCase();
+        
+        // Prima cerca match esatti con immagini
+        for (const tableResult of supabaseResults) {
+            for (const result of tableResult.results) {
+                const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
+                if ((titleLower.includes(name) || name.includes(titleLower)) && result.image_url) {
+                    console.log('✅ Match esatto trovato con immagine:', result);
+                    return result;
+                }
+            }
+        }
+        
+        // Poi cerca match esatti senza immagini
+        for (const tableResult of supabaseResults) {
+            for (const result of tableResult.results) {
+                const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
+                if (titleLower.includes(name) || name.includes(titleLower)) {
+                    console.log('✅ Match esatto trovato senza immagine:', result);
+                    return result;
+                }
+            }
+        }
+        
+        // Se non trova match esatti, restituisce il primo risultato con immagine
+        for (const tableResult of supabaseResults) {
+            for (const result of tableResult.results) {
+                if (result.image_url) {
+                    console.log('✅ Primo risultato con immagine:', result);
+                    return result;
+                }
+            }
+        }
+        
+        // Fallback al primo risultato disponibile
+        if (supabaseResults.length > 0 && supabaseResults[0].results.length > 0) {
+            console.log('✅ Primo risultato disponibile:', supabaseResults[0].results[0]);
+            return supabaseResults[0].results[0];
+        }
+        
+        return null;
     }
 
     // Funzione per caricare le impostazioni
@@ -465,10 +582,13 @@
     }
 
     // Inizializzazione
-    function init() {
+    async function init() {
         console.log('Pokemon Card Trader: Estensione inizializzata su', window.location.hostname);
         console.log('Pokemon Card Trader: Impostazioni caricate:', settings);
         console.log('Pokemon Card Trader: Parole chiave Pokemon:', settings.pokemonKeywords);
+        
+        // Inizializza Supabase per ricerche veloci
+        await initializeSupabase();
         
         // Processa la pagina corrente
         processPage().catch(console.error);

@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Supabase Connection</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .result {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .success {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+        button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1976d2;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Supabase Database Connection</h1>
+    
+    <div>
+        <button onclick="testConnection()">Test Connection</button>
+        <button onclick="exploreTables()">Explore Tables</button>
+        <button onclick="searchPokemon()">Search Pokemon</button>
+    </div>
+    
+    <div id="results"></div>
+
+    <script>
+        // Extract Supabase URL and key from the connection string
+        const connectionString = 'postgresql://postgres.msngrrrihwudtnyjatlo:Gi17!NoV1199@aws-0-eu-central-1.pooler.supabase.com:6543/postgres';
+        
+        // Parse connection string to get Supabase URL
+        const urlMatch = connectionString.match(/@([^:]+)/);
+        const supabaseUrl = urlMatch ? `https://${urlMatch[1]}` : null;
+        
+        // For now, we'll need to get the anon key from Supabase dashboard
+        // This is a placeholder - you'll need to replace with your actual anon key
+        const supabaseKey = 'YOUR_SUPABASE_ANON_KEY'; // Replace with actual key
+        
+        const supabase = supabaseUrl ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
+        
+        function log(message, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = message;
+            resultsDiv.appendChild(div);
+        }
+        
+        async function testConnection() {
+            if (!supabase) {
+                log('❌ Cannot create Supabase client. Please check the connection string and add your anon key.', 'error');
+                return;
+            }
+            
+            try {
+                log('🔗 Testing Supabase connection...');
+                
+                // Try a simple query to test connection
+                const { data, error } = await supabase
+                    .from('information_schema.tables')
+                    .select('table_name')
+                    .eq('table_schema', 'public')
+                    .limit(1);
+                
+                if (error) {
+                    log(`❌ Connection failed: ${error.message}`, 'error');
+                    log('💡 You may need to add your Supabase anon key to the script.', 'error');
+                } else {
+                    log('✅ Connection successful!', 'success');
+                    log(`📊 Found ${data.length} tables in public schema`);
+                }
+                
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function exploreTables() {
+            if (!supabase) {
+                log('❌ Supabase client not available', 'error');
+                return;
+            }
+            
+            try {
+                log('🔍 Exploring database tables...');
+                
+                // Get all tables in public schema
+                const { data: tables, error } = await supabase
+                    .from('information_schema.tables')
+                    .select('table_name')
+                    .eq('table_schema', 'public')
+                    .order('table_name');
+                
+                if (error) {
+                    log(`❌ Error getting tables: ${error.message}`, 'error');
+                    return;
+                }
+                
+                log(`📋 Found ${tables.length} tables:`, 'success');
+                tables.forEach(table => {
+                    log(`  - ${table.table_name}`);
+                });
+                
+                // If we have tables, explore the first one
+                if (tables.length > 0) {
+                    const firstTable = tables[0].table_name;
+                    log(`\n🔍 Exploring table: ${firstTable}`);
+                    
+                    // Get columns
+                    const { data: columns, error: colError } = await supabase
+                        .from('information_schema.columns')
+                        .select('column_name, data_type')
+                        .eq('table_name', firstTable)
+                        .eq('table_schema', 'public')
+                        .order('ordinal_position');
+                    
+                    if (!colError && columns.length > 0) {
+                        log('Columns:');
+                        columns.forEach(col => {
+                            log(`  - ${col.column_name}: ${col.data_type}`);
+                        });
+                        
+                        // Get sample data
+                        const { data: sampleData, error: dataError } = await supabase
+                            .from(firstTable)
+                            .select('*')
+                            .limit(3);
+                        
+                        if (!dataError && sampleData.length > 0) {
+                            log(`\nSample data (${sampleData.length} rows):`);
+                            sampleData.forEach((row, i) => {
+                                log(`  Row ${i + 1}: ${JSON.stringify(row, null, 2)}`);
+                            });
+                        }
+                    }
+                }
+                
+            } catch (error) {
+                log(`❌ Error exploring tables: ${error.message}`, 'error');
+            }
+        }
+        
+        async function searchPokemon() {
+            if (!supabase) {
+                log('❌ Supabase client not available', 'error');
+                return;
+            }
+            
+            try {
+                log('🔍 Searching for Pokemon data...');
+                
+                // Try to find a table that might contain Pokemon data
+                const { data: tables, error } = await supabase
+                    .from('information_schema.tables')
+                    .select('table_name')
+                    .eq('table_schema', 'public')
+                    .ilike('table_name', '%pokemon%');
+                
+                if (error) {
+                    log(`❌ Error searching for Pokemon tables: ${error.message}`, 'error');
+                    return;
+                }
+                
+                if (tables.length > 0) {
+                    log(`🎯 Found ${tables.length} Pokemon-related tables:`, 'success');
+                    tables.forEach(table => {
+                        log(`  - ${table.table_name}`);
+                    });
+                } else {
+                    log('🔍 No Pokemon-specific tables found. Checking all tables for Pokemon data...');
+                    
+                    // Get all tables and check for Pokemon data
+                    const { data: allTables, error: allError } = await supabase
+                        .from('information_schema.tables')
+                        .select('table_name')
+                        .eq('table_schema', 'public');
+                    
+                    if (!allError) {
+                        for (const table of allTables.slice(0, 5)) { // Check first 5 tables
+                            try {
+                                const { data: sampleData } = await supabase
+                                    .from(table.table_name)
+                                    .select('*')
+                                    .limit(1);
+                                
+                                if (sampleData && sampleData.length > 0) {
+                                    const row = sampleData[0];
+                                    const rowStr = JSON.stringify(row).toLowerCase();
+                                    if (rowStr.includes('pokemon') || rowStr.includes('jolteon') || rowStr.includes('pikachu')) {
+                                        log(`🎯 Found Pokemon data in table: ${table.table_name}`, 'success');
+                                        log(`Sample: ${JSON.stringify(row, null, 2)}`);
+                                    }
+                                }
+                            } catch (e) {
+                                // Skip tables we can't access
+                            }
+                        }
+                    }
+                }
+                
+            } catch (error) {
+                log(`❌ Error searching Pokemon: ${error.message}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html> 

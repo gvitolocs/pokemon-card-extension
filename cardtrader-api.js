@@ -935,6 +935,77 @@ class CardTraderAPI {
         return null;
     }
 
+    // NUOVO: Trova tutte le varianti di un Pokemon in tutte le espansioni
+    async findAllPokemonVariants(pokemonName) {
+        console.log(`CardTrader API: Cercando tutte le varianti di: ${pokemonName}`);
+        
+        try {
+            // Inizializza l'API se necessario
+            if (!this.pokemonGameId) {
+                await this.initialize();
+            }
+            
+            const allVariants = [];
+            const searchName = pokemonName.toLowerCase();
+            
+            // Ottieni tutte le espansioni Pokemon
+            const allExpansions = Array.from(this.expansions.values())
+                .filter(exp => typeof exp.id === 'number');
+            
+            console.log(`CardTrader API: Cercando in ${allExpansions.length} espansioni per ${pokemonName}`);
+            
+            // Cerca in tutte le espansioni
+            for (const expansion of allExpansions) {
+                try {
+                    console.log(`CardTrader API: Cercando in espansione: ${expansion.name} (ID: ${expansion.id})`);
+                    const blueprints = await this.getBlueprintsForExpansion(expansion.id);
+                    
+                    // Filtra i blueprint che contengono il nome del Pokemon
+                    const pokemonBlueprints = blueprints.filter(bp => {
+                        const bpName = bp.name.toLowerCase();
+                        return bpName.includes(searchName);
+                    });
+                    
+                    if (pokemonBlueprints.length > 0) {
+                        console.log(`CardTrader API: Trovati ${pokemonBlueprints.length} blueprint di ${pokemonName} in ${expansion.name}`);
+                        
+                        // Aggiungi informazioni sull'espansione a ogni blueprint
+                        const variantsWithExpansion = pokemonBlueprints.map(bp => ({
+                            ...bp,
+                            expansion_name: expansion.name,
+                            expansion_id: expansion.id,
+                            expansion_code: expansion.code
+                        }));
+                        
+                        allVariants.push(...variantsWithExpansion);
+                    }
+                    
+                    // Rispetta il rate limiting
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    
+                } catch (error) {
+                    console.warn(`CardTrader API: Errore per espansione ${expansion.name}:`, error.message);
+                    continue;
+                }
+            }
+            
+            // Ordina per espansione e poi per nome
+            allVariants.sort((a, b) => {
+                if (a.expansion_name !== b.expansion_name) {
+                    return a.expansion_name.localeCompare(b.expansion_name);
+                }
+                return a.name.localeCompare(b.name);
+            });
+            
+            console.log(`CardTrader API: Trovate ${allVariants.length} varianti totali di ${pokemonName}`);
+            return allVariants;
+            
+        } catch (error) {
+            console.error(`CardTrader API: Errore nella ricerca varianti per ${pokemonName}:`, error);
+            return [];
+        }
+    }
+
     // NUOVO: Ricerca diretta per nome Pokemon nelle API
     async searchPokemonByName(pokemonName) {
         console.log(`CardTrader API: Ricerca diretta per Pokemon: ${pokemonName}`);

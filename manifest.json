@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Pokemon Card Trader Linker",
-  "version": "1.3.0",
-  "description": "Converte i titoli delle inserzioni di carte Pokemon da eBay e Vinted in link cliccabili per CardTrader",
+  "version": "1.4.0",
+  "description": "Converte i titoli delle inserzioni di carte Pokemon da eBay e Vinted in link cliccabili per CardTrader con integrazione Supabase",
   "permissions": [
     "activeTab",
     "scripting",
@@ -18,7 +18,8 @@
     "https://www.vinted.com/*",
     "https://vinted.com/*",
     "https://www.cardtrader.com/*",
-    "https://api.cardtrader.com/*"
+    "https://api.cardtrader.com/*",
+    "https://*.supabase.co/*"
   ],
   "content_scripts": [
     {
@@ -32,12 +33,18 @@
         "https://www.vinted.com/*",
         "https://vinted.com/*"
       ],
-      "js": ["api-config.js", "cardtrader-api.js", "content.js"],
+      "js": ["api-config.js", "supabase-config.js", "cardtrader-api.js", "supabase-integration.js", "content.js"],
       "css": ["styles.css"]
     }
   ],
   "action": {
     "default_popup": "popup.html",
     "default_title": "Pokemon Card Trader Linker"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["supabase-integration.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 } 

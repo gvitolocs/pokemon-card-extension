@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>eBay Title to CardTrader Link</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .input-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        .warning { color: #ffc107; }
+        .info { color: #17a2b8; }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        .result {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        textarea {
+            width: 100%;
+            height: 100px;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-family: Arial, sans-serif;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🃏 eBay Title to CardTrader Link</h1>
+        <p>Inserisci titoli di inserzioni eBay per generare link CardTrader diretti</p>
+        
+        <div class="input-section">
+            <h3>📝 Titoli eBay</h3>
+            <p>Inserisci un titolo per volta o più titoli separati da righe vuote:</p>
+            <textarea id="ebayTitles" placeholder="Esempio:
+Pokemon Jolteon Holo Rare Jungle Set
+Pikachu EX Ultra Rare Scarlet Violet
+Charizard Full Art Secret Rare"></textarea>
+            <button onclick="generateLinks()">🔗 Genera Link CardTrader</button>
+        </div>
+        
+        <div class="input-section">
+            <h3>📊 Risultati</h3>
+            <div id="results"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <script>
+        // Configurazione Supabase
+        const SUPABASE_URL = "https://msngrrrihwudtnyjatlo.supabase.co";
+        const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo";
+        
+        // Inizializza Supabase
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        function log(message, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.innerHTML = message;
+            resultsDiv.appendChild(div);
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+        
+        async function generateLinks() {
+            clearResults();
+            
+            const titles = document.getElementById('ebayTitles').value.trim();
+            if (!titles) {
+                log('❌ Inserisci almeno un titolo eBay', 'error');
+                return;
+            }
+            
+            const titleList = titles.split('\n').filter(t => t.trim());
+            log(`🔍 Processando ${titleList.length} titolo/i...`, 'info');
+            
+            for (let i = 0; i < titleList.length; i++) {
+                const title = titleList[i].trim();
+                if (!title) continue;
+                
+                log(`\n📦 <strong>Titolo ${i + 1}:</strong> ${title}`, 'info');
+                
+                try {
+                    // Estrai nome Pokemon dal titolo
+                    const pokemonName = extractPokemonName(title);
+                    
+                    if (pokemonName) {
+                        log(`🎯 Pokemon estratto: ${pokemonName}`, 'success');
+                        
+                        // Cerca nel database - ricerca più inclusiva
+                        let searchTerms = [pokemonName];
+                        
+                        // Aggiungi termini di ricerca specifici basati sul titolo
+                        const titleLower = title.toLowerCase();
+                        if (titleLower.includes(' ex')) {
+                            searchTerms.push(`${pokemonName} ex`);
+                        }
+                        if (titleLower.includes('light')) {
+                            searchTerms.push(`light ${pokemonName}`);
+                        }
+                        if (titleLower.includes('dark')) {
+                            searchTerms.push(`dark ${pokemonName}`);
+                        }
+                        if (titleLower.includes('lt. surge')) {
+                            searchTerms.push(`lt. surge's ${pokemonName}`);
+                        }
+                        
+                        // Cerca prima nella tabella cards con tutti i termini
+                        let allCards = [];
+                        let hasError = false;
+                        
+                        for (const term of searchTerms) {
+                            try {
+                                const { data: cards, error } = await supabase
+                                    .from('cards')
+                                    .select('*')
+                                    .ilike('name_en', `%${term}%`)
+                                    .limit(20);
+                                
+                                if (error) {
+                                    log(`❌ Errore ricerca per "${term}": ${error.message}`, 'error');
+                                    hasError = true;
+                                } else if (cards) {
+                                    allCards.push(...cards);
+                                }
+                            } catch (err) {
+                                log(`❌ Errore ricerca per "${term}": ${err.message}`, 'error');
+                                hasError = true;
+                            }
+                        }
+                        
+                        // Rimuovi duplicati basati su blueprint_id
+                        allCards = allCards.filter((card, index, self) => 
+                            index === self.findIndex(c => c.blueprint_id === card.blueprint_id)
+                        );
+                        
+                        // Cerca anche nelle varianti per trovare più risultati
+                        try {
+                            const { data: variants, error: variantsError } = await supabase
+                                .from('card_variants')
+                                .select('*, cards!inner(*)')
+                                .ilike('cards.name_en', `%${pokemonName}%`)
+                                .limit(20);
+                            
+                            if (variantsError) {
+                                log(`❌ Errore ricerca varianti: ${variantsError.message}`, 'error');
+                                hasError = true;
+                            } else if (variants) {
+                                // Converti le varianti in formato compatibile
+                                const variantCards = variants.map(variant => ({
+                                    ...variant.cards,
+                                    blueprint_id: variant.blueprint_id,
+                                    variant_info: `${variant.collector_number || 'N/A'} (${variant.language || 'en'})`
+                                }));
+                                
+                                // Aggiungi solo varianti non duplicate
+                                variantCards.forEach(variantCard => {
+                                    if (!allCards.find(card => card.blueprint_id === variantCard.blueprint_id)) {
+                                        allCards.push(variantCard);
+                                    }
+                                });
+                            }
+                        } catch (err) {
+                            log(`❌ Errore ricerca varianti: ${err.message}`, 'error');
+                            hasError = true;
+                        }
+                        
+                        // Se ci sono stati errori critici, salta questo titolo
+                        if (hasError && allCards.length === 0) {
+                            continue;
+                        }
+                        
+                        if (allCards && allCards.length > 0) {
+                            // Ordina i risultati per priorità (match esatti prima, poi base, poi varianti)
+                            allCards.sort((a, b) => {
+                                const titleLower = title.toLowerCase();
+                                const aName = a.name_en.toLowerCase();
+                                const bName = b.name_en.toLowerCase();
+                                
+                                // Match esatti hanno priorità massima
+                                const aExactMatch = aName === titleLower || aName.includes(titleLower);
+                                const bExactMatch = bName === titleLower || bName.includes(titleLower);
+                                
+                                if (aExactMatch && !bExactMatch) return -1;
+                                if (!aExactMatch && bExactMatch) return 1;
+                                
+                                // Poi priorità per carte "base" (solo nome Pokemon, senza modificatori)
+                                const aIsBase = aName === pokemonName.toLowerCase();
+                                const bIsBase = bName === pokemonName.toLowerCase();
+                                if (aIsBase && !bIsBase) return -1;
+                                if (!aIsBase && bIsBase) return 1;
+                                
+                                // Poi priorità per "light", "dark", "lt. surge's"
+                                const aHasLight = aName.includes('light');
+                                const bHasLight = bName.includes('light');
+                                if (aHasLight && !bHasLight) return -1;
+                                if (!aHasLight && bHasLight) return 1;
+                                
+                                const aHasDark = aName.includes('dark');
+                                const bHasDark = bName.includes('dark');
+                                if (aHasDark && !bHasDark) return -1;
+                                if (!aHasDark && bHasDark) return 1;
+                                
+                                const aHasLtSurge = aName.includes('lt. surge');
+                                const bHasLtSurge = bName.includes('lt. surge');
+                                if (aHasLtSurge && !bHasLtSurge) return -1;
+                                if (!aHasLtSurge && bHasLtSurge) return 1;
+                                
+                                // Poi priorità per "ex"
+                                const aHasEx = aName.includes(' ex');
+                                const bHasEx = bName.includes(' ex');
+                                if (aHasEx && !bHasEx) return -1;
+                                if (!aHasEx && bHasEx) return 1;
+                                
+                                // Infine ordine alfabetico
+                                return a.name_en.localeCompare(b.name_en);
+                            });
+                            
+                            // Prendi il miglior risultato
+                            const card = allCards[0];
+                            const link = `https://www.cardtrader.com/cards/${card.blueprint_id}`;
+                            
+                            log(`✅ <strong>Link CardTrader:</strong> <a href="${link}" target="_blank">${link}</a>`, 'success');
+                            log(`📋 Dettagli: ${card.name_en} | ${card.expansion_name_en} | ID: ${card.blueprint_id}`, 'info');
+                            log(`🔍 Trovate ${allCards.length} varianti totali di ${pokemonName}`, 'info');
+                            
+                            // Mostra tutte le opzioni disponibili
+                            if (allCards.length > 1) {
+                                log(`📋 Tutte le varianti trovate (${allCards.length}):`, 'info');
+                                allCards.forEach((altCard, index) => {
+                                    const altLink = `https://www.cardtrader.com/cards/${altCard.blueprint_id}`;
+                                    const prefix = index === 0 ? '🎯 ' : '   ';
+                                    const variantInfo = altCard.variant_info ? ` - ${altCard.variant_info}` : '';
+                                    log(`${prefix}<a href="${altLink}" target="_blank">${altCard.name_en} (${altCard.expansion_name_en})${variantInfo}</a>`, 'info');
+                                });
+                            }
+                        } else {
+                            log('❌ Nessuna carta trovata nel database', 'error');
+                        }
+                    } else {
+                        log('❌ Nessun Pokemon riconosciuto nel titolo', 'error');
+                    }
+                } catch (error) {
+                    log(`❌ Errore nel processing: ${error.message}`, 'error');
+                }
+            }
+            
+            log('\n✅ Processamento completato!', 'success');
+        }
+        
+        function extractPokemonName(title) {
+            const titleLower = title.toLowerCase();
+            
+            // Lista di Pokemon comuni
+            const pokemonNames = [
+                'jolteon', 'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo',
+                'mew', 'lugia', 'ho-oh', 'rayquaza', 'garchomp', 'lucario',
+                'gengar', 'dragonite', 'gyarados', 'snorlax', 'tyranitar',
+                'salamence', 'metagross', 'dialga', 'palkia', 'giratina',
+                'reshiram', 'zekrom', 'kyurem', 'xerneas', 'yveltal'
+            ];
+            
+            for (const pokemon of pokemonNames) {
+                if (titleLower.includes(pokemon)) {
+                    return pokemon;
+                }
+            }
+            
+            return null;
+        }
+        
+        // Test connessione al caricamento
+        window.addEventListener('load', async () => {
+            try {
+                const { data, error } = await supabase.from('cards').select('count').limit(1);
+                if (error) {
+                    log('❌ Errore connessione Supabase', 'error');
+                } else {
+                    log('✅ Supabase connesso e pronto!', 'success');
+                }
+            } catch (e) {
+                log('❌ Errore connessione Supabase', 'error');
+            }
+            log('🚀 Inserisci titoli eBay e genera i link!', 'info');
+        });
+    </script>
+</body>
+</html> 

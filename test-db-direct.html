@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Direct PostgreSQL Connection</title>
+    <script src="https://unpkg.com/pg@8.11.3/lib/index.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .result {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            white-space: pre-wrap;
+        }
+        .error {
+            background: #ffebee;
+            color: #c62828;
+        }
+        .success {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+        button {
+            background: #2196f3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #1976d2;
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Direct PostgreSQL Connection</h1>
+    
+    <div>
+        <label for="connectionString">Connection String:</label>
+        <input type="text" id="connectionString" value="postgresql://postgres.msngrrrihwudtnyjatlo:Gi17!NoV1199@aws-0-eu-central-1.pooler.supabase.com:6543/postgres" style="font-family: monospace; font-size: 12px;">
+        <br>
+        <button onclick="testConnection()">Test Connection</button>
+        <button onclick="exploreTables()">Explore Tables</button>
+        <button onclick="searchPokemon()">Search Pokemon</button>
+        <button onclick="searchSpecificPokemon()">Search Specific Pokemon</button>
+    </div>
+    
+    <div>
+        <label for="pokemonName">Pokemon Name:</label>
+        <input type="text" id="pokemonName" placeholder="e.g., Jolteon, Pikachu" value="Jolteon">
+    </div>
+    
+    <div id="results"></div>
+
+    <script>
+        function log(message, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = `result ${type}`;
+            div.textContent = message;
+            resultsDiv.appendChild(div);
+        }
+        
+        async function testConnection() {
+            const connectionString = document.getElementById('connectionString').value;
+            
+            try {
+                log('🔗 Testing PostgreSQL connection...');
+                
+                // Note: This won't work directly in browser due to CORS restrictions
+                // We'll need to use a different approach
+                log('⚠️ Direct PostgreSQL connection from browser is not possible due to CORS restrictions.', 'error');
+                log('💡 We need to either:', 'info');
+                log('   1. Use Supabase client with anon key', 'info');
+                log('   2. Create a backend API', 'info');
+                log('   3. Use a CORS proxy (not recommended for production)', 'info');
+                
+            } catch (error) {
+                log(`❌ Error: ${error.message}`, 'error');
+            }
+        }
+        
+        async function exploreTables() {
+            log('🔍 This would explore database tables...', 'info');
+            log('💡 Need to implement with proper backend or Supabase client', 'info');
+        }
+        
+        async function searchPokemon() {
+            log('🔍 This would search for Pokemon data...', 'info');
+            log('💡 Need to implement with proper backend or Supabase client', 'info');
+        }
+        
+        async function searchSpecificPokemon() {
+            const pokemonName = document.getElementById('pokemonName').value;
+            log(`🔍 This would search for: ${pokemonName}`, 'info');
+            log('💡 Need to implement with proper backend or Supabase client', 'info');
+        }
+    </script>
+</body>
+</html> 
