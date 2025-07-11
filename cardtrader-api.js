@@ -842,10 +842,17 @@ class CardTraderAPI {
         
         if (card && card.id) {
             // Genera link nel formato /cards/ usando le informazioni del blueprint
-            if (card.blueprint_name) {
+            if (card.blueprint_name && card.expansion_name) {
                 // Converti il nome del blueprint in slug per l'URL
                 const slug = this.generateCardSlug(card.blueprint_name, card.expansion_name);
                 return `https://www.cardtrader.com/cards/${slug}`;
+            }
+            
+            // Se abbiamo informazioni sull'espansione, genera un link più specifico
+            if (card.expansion && card.expansion.name_en) {
+                const expansionSlug = this.generateExpansionSlug(card.expansion.name_en);
+                const cardSlug = this.generateCardNameSlug(card.name || cardInfo.pokemonName);
+                return `https://www.cardtrader.com/cards/${cardSlug}-${expansionSlug}`;
             }
             
             // Fallback: link diretto al prodotto specifico del marketplace
@@ -878,6 +885,24 @@ class CardTraderAPI {
         }
         
         return slug;
+    }
+
+    // Genera uno slug per il nome dell'espansione
+    generateExpansionSlug(expansionName) {
+        return expansionName.toLowerCase()
+            .replace(/[^\w\s-]/g, '')  // Rimuovi caratteri speciali
+            .replace(/\s+/g, '-')      // Sostituisci spazi con trattini
+            .replace(/-+/g, '-')       // Normalizza trattini multipli
+            .trim();
+    }
+
+    // Genera uno slug per il nome della carta
+    generateCardNameSlug(cardName) {
+        return cardName.toLowerCase()
+            .replace(/[^\w\s-]/g, '')  // Rimuovi caratteri speciali
+            .replace(/\s+/g, '-')      // Sostituisci spazi con trattini
+            .replace(/-+/g, '-')       // Normalizza trattini multipli
+            .trim();
     }
 
     // Funzione principale per generare il link
