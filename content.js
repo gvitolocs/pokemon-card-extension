@@ -156,16 +156,21 @@
             
             // Per eBay, inserisci accanto al titolo
             if (window.location.hostname.includes('ebay')) {
-                const titleElement = container.querySelector('.x-item-title__mainTitle') || 
-                                   container.querySelector('h1.x-item-title__mainTitle') ||
-                                   container.querySelector('.s-item__title') ||
-                                   container.querySelector('[data-testid="x-item-title"] h1') ||
-                                   container.querySelector('.vim.x-item-title h1');
-                
-                if (titleElement) {
-                    // Inserisci il pulsante dopo il titolo
-                    titleElement.appendChild(ctButton);
-                    insertPosition = titleElement;
+                // Per il nuovo formato con data-testid, inserisci nel container principale
+                if (container.matches('[data-testid="x-item-title"]') || container.matches('.vim.x-item-title')) {
+                    // Inserisci il pulsante nel container principale, come fa HISTORY
+                    container.appendChild(ctButton);
+                    insertPosition = container;
+                } else {
+                    // Per i formati classici, inserisci nell'elemento titolo
+                    const titleElement = container.querySelector('.x-item-title__mainTitle') || 
+                                       container.querySelector('h1.x-item-title__mainTitle') ||
+                                       container.querySelector('.s-item__title');
+                    
+                    if (titleElement) {
+                        titleElement.appendChild(ctButton);
+                        insertPosition = titleElement;
+                    }
                 }
             }
             
