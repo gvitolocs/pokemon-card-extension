@@ -11,7 +11,7 @@
 
         pokemonKeywords: [
             'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
-            'charizard', 'pikachu', 'blastoise', 'venusaur', 'mewtwo',
+            'charizard', 'pikachu', 'picachu', 'blastoise', 'venusaur', 'mewtwo',
             'holo', 'reverse holo', 'full art', 'secret rare', 'ultra rare'
         ]
     };
@@ -437,6 +437,7 @@
     function init() {
         console.log('Pokemon Card Trader: Estensione inizializzata su', window.location.hostname);
         console.log('Pokemon Card Trader: Impostazioni caricate:', settings);
+        console.log('Pokemon Card Trader: Parole chiave Pokemon:', settings.pokemonKeywords);
         
         // Processa la pagina corrente
         processPage();
