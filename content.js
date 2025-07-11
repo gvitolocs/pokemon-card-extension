@@ -242,79 +242,100 @@
         const titleInfo = extractTitleInfo(title);
         console.log('🔍 Informazioni estratte dal titolo:', titleInfo);
         
-        // Prima cerca match perfetti con espansione e numero collezionista
+        // Calcola punteggi per ogni risultato
+        const scoredResults = [];
+        
         for (const tableResult of supabaseResults) {
             for (const result of tableResult.results) {
                 const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
                 const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+                const collectorNumber = result.collector_number ? result.collector_number.toString() : '';
                 
-                // Verifica se il nome del Pokemon corrisponde
-                if (titleLower.includes(name) || name.includes(titleInfo.pokemonName)) {
-                    // Verifica se l'espansione corrisponde
-                    if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
-                        console.log('✅ Match perfetto con espansione:', result);
-                        return result;
-                    }
-                    
-                    // Verifica se il numero collezionista corrisponde
-                    if (titleInfo.collectorNumber && result.collector_number && 
-                        result.collector_number.toString().includes(titleInfo.collectorNumber)) {
-                        console.log('✅ Match perfetto con numero collezionista:', result);
-                        return result;
-                    }
-                }
-            }
-        }
-        
-        // Poi cerca match con espansione specifica
-        for (const tableResult of supabaseResults) {
-            for (const result of tableResult.results) {
-                const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
-                const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+                let score = 0;
+                let matchReason = '';
                 
-                if ((titleLower.includes(name) || name.includes(titleInfo.pokemonName)) && 
-                    titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
-                    console.log('✅ Match con espansione specifica:', result);
-                    return result;
-                }
-            }
-        }
-        
-        // Poi cerca match esatti con immagini
-        for (const tableResult of supabaseResults) {
-            for (const result of tableResult.results) {
-                const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
-                if ((titleLower.includes(name) || name.includes(titleInfo.pokemonName)) && result.image_url) {
-                    console.log('✅ Match esatto trovato con immagine:', result);
-                    return result;
-                }
-            }
-        }
-        
-        // Poi cerca match esatti senza immagini
-        for (const tableResult of supabaseResults) {
-            for (const result of tableResult.results) {
-                const name = (result.name_en || result.name || result.pokemon_name || '').toLowerCase();
+                // Punteggio base per match del nome Pokemon
                 if (titleLower.includes(name) || name.includes(titleInfo.pokemonName)) {
-                    console.log('✅ Match esatto trovato senza immagine:', result);
-                    return result;
+                    score += 10;
+                    matchReason += 'Nome Pokemon ';
                 }
-            }
-        }
-        
-        // Se non trova match esatti, restituisce il primo risultato con immagine
-        for (const tableResult of supabaseResults) {
-            for (const result of tableResult.results) {
+                
+                // Bonus per match esatto del nome
+                if (name === titleInfo.pokemonName) {
+                    score += 20;
+                    matchReason += 'Nome esatto ';
+                }
+                
+                // Bonus per match con "ex" se il titolo contiene "ex"
+                if (titleLower.includes(' ex ') && name.includes(' ex')) {
+                    score += 15;
+                    matchReason += 'Match ex ';
+                }
+                
+                // Bonus per match dell'espansione
+                if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
+                    score += 25;
+                    matchReason += 'Espansione ';
+                }
+                
+                // Bonus per match del numero collezionista
+                if (titleInfo.collectorNumber && collectorNumber.includes(titleInfo.collectorNumber)) {
+                    score += 30;
+                    matchReason += 'Numero collezionista ';
+                }
+                
+                // Bonus per presenza di immagine
                 if (result.image_url) {
-                    console.log('✅ Primo risultato con immagine:', result);
-                    return result;
+                    score += 5;
+                    matchReason += 'Con immagine ';
+                }
+                
+                // Bonus per presenza di blueprint_id
+                if (result.blueprint_id || result.id) {
+                    score += 5;
+                    matchReason += 'Con blueprint_id ';
+                }
+                
+                // Penalità per espansioni non corrispondenti
+                if (titleInfo.expansion && !expansion.includes(titleInfo.expansion)) {
+                    score -= 10;
+                    matchReason += 'Espansione diversa ';
+                }
+                
+                // Penalità per numeri collezionista non corrispondenti
+                if (titleInfo.collectorNumber && collectorNumber && !collectorNumber.includes(titleInfo.collectorNumber)) {
+                    score -= 10;
+                    matchReason += 'Numero diverso ';
+                }
+                
+                if (score > 0) {
+                    scoredResults.push({
+                        result: result,
+                        score: score,
+                        reason: matchReason.trim()
+                    });
                 }
             }
+        }
+        
+        // Ordina per punteggio decrescente
+        scoredResults.sort((a, b) => b.score - a.score);
+        
+        console.log('📊 Risultati con punteggi:');
+        scoredResults.slice(0, 5).forEach((item, index) => {
+            console.log(`${index + 1}. ${item.result.name_en || item.result.pokemon_name} (${item.result.expansion_name_en || item.result.expansion_name}) - Punteggio: ${item.score} - Motivo: ${item.reason}`);
+        });
+        
+        // Restituisci il risultato con punteggio più alto
+        if (scoredResults.length > 0) {
+            const bestMatch = scoredResults[0];
+            console.log(`✅ Miglior match: ${bestMatch.result.name_en || bestMatch.result.pokemon_name} - Punteggio: ${bestMatch.score} - Motivo: ${bestMatch.reason}`);
+            return bestMatch.result;
         }
         
         // Fallback al primo risultato disponibile
         if (supabaseResults.length > 0 && supabaseResults[0].results.length > 0) {
-            console.log('✅ Primo risultato disponibile:', supabaseResults[0].results[0]);
+            console.log('✅ Fallback al primo risultato disponibile:', supabaseResults[0].results[0]);
             return supabaseResults[0].results[0];
         }
         
@@ -335,82 +356,41 @@
         
         // Estrai l'espansione (cerca pattern comuni)
         const expansionPatterns = [
+            // Scarlet & Violet - priorità alta per Terastal Festival ex
             /terastal festival ex/i,
-            /scarlet & violet/i,
             /sv\d+/i,
+            /scarlet & violet/i,
+            /sv base set/i,
+            /sv paldea evolved/i,
+            /sv obsidian flames/i,
+            /sv 151/i,
+            /sv paradox rift/i,
+            /sv temporal forces/i,
+            /sv paldean fates/i,
+            /sv terastal festival ex/i,
+            
+            // Sword & Shield
             /sword & shield/i,
             /swsh/i,
+            /swsh sword & shield/i,
+            /swsh rebel clash/i,
+            /swsh darkness ablaze/i,
+            /swsh champions path/i,
+            /swsh vivid voltage/i,
+            /swsh shining fates/i,
+            /swsh battle styles/i,
+            /swsh chilling reign/i,
+            /swsh evolving skies/i,
+            /swsh fusion strike/i,
+            /swsh brilliant stars/i,
+            /swsh astral radiance/i,
+            /swsh lost origin/i,
+            /swsh silver tempest/i,
+            /swsh crown zenith/i,
+            
+            // Sun & Moon
             /sun & moon/i,
             /sm/i,
-            /xy/i,
-            /black & white/i,
-            /bw/i,
-            /heartgold & soulsilver/i,
-            /hgss/i,
-            /platinum/i,
-            /diamond & pearl/i,
-            /dp/i,
-            /ex delta species/i,
-            /ex unseen forces/i,
-            /ex sandstorm/i,
-            /ex power keepers/i,
-            /ex ruby & sapphire/i,
-            /ex fire red & leaf green/i,
-            /ex team rocket returns/i,
-            /ex deoxys/i,
-            /ex emerald/i,
-            /ex holon phantoms/i,
-            /ex crystal guardians/i,
-            /ex dragon frontiers/i,
-            /ex power keepers/i,
-            /ex diamond & pearl/i,
-            /ex mysterious treasures/i,
-            /ex secret wonders/i,
-            /ex great encounters/i,
-            /ex majestic dawn/i,
-            /ex legends awakened/i,
-            /ex stormfront/i,
-            /ex platinum/i,
-            /ex rising rivals/i,
-            /ex supreme victors/i,
-            /ex arceus/i,
-            /ex heartgold & soulsilver/i,
-            /ex unleashed/i,
-            /ex undaunted/i,
-            /ex triumphant/i,
-            /ex call of legends/i,
-            /bw black star promos/i,
-            /bw next destinies/i,
-            /bw noble victories/i,
-            /bw emerging powers/i,
-            /bw black & white/i,
-            /bw emerging powers/i,
-            /bw noble victories/i,
-            /bw next destinies/i,
-            /bw dark explorers/i,
-            /bw dragons exalted/i,
-            /bw boundaries crossed/i,
-            /bw plasma storm/i,
-            /bw plasma freeze/i,
-            /bw plasma blast/i,
-            /bw legendary treasures/i,
-            /bw xy/i,
-            /xy kalos starter set/i,
-            /xy xy/i,
-            /xy flashfire/i,
-            /xy furious fists/i,
-            /xy phantom forces/i,
-            /xy primal clash/i,
-            /xy double crisis/i,
-            /xy roaring skies/i,
-            /xy ancient origins/i,
-            /xy breakthrough/i,
-            /xy breakthrough/i,
-            /xy breakpoint/i,
-            /xy generations/i,
-            /xy fates collide/i,
-            /xy steam siege/i,
-            /xy evolutions/i,
             /sm sun & moon/i,
             /sm guardians rising/i,
             /sm burning shadows/i,
@@ -427,30 +407,82 @@
             /sm unified minds/i,
             /sm hidden fates/i,
             /sm cosmic eclipse/i,
-            /swsh sword & shield/i,
-            /swsh rebel clash/i,
-            /swsh darkness ablaze/i,
-            /swsh champions path/i,
-            /swsh vivid voltage/i,
-            /swsh shining fates/i,
-            /swsh battle styles/i,
-            /swsh chilling reign/i,
-            /swsh evolving skies/i,
-            /swsh fusion strike/i,
-            /swsh brilliant stars/i,
-            /swsh astral radiance/i,
-            /swsh lost origin/i,
-            /swsh silver tempest/i,
-            /swsh crown zenith/i,
-            /sv scarlet & violet/i,
-            /sv base set/i,
-            /sv paldea evolved/i,
-            /sv obsidian flames/i,
-            /sv 151/i,
-            /sv paradox rift/i,
-            /sv temporal forces/i,
-            /sv paldean fates/i,
-            /sv terastal festival ex/i
+            
+            // XY
+            /xy/i,
+            /xy kalos starter set/i,
+            /xy xy/i,
+            /xy flashfire/i,
+            /xy furious fists/i,
+            /xy phantom forces/i,
+            /xy primal clash/i,
+            /xy double crisis/i,
+            /xy roaring skies/i,
+            /xy ancient origins/i,
+            /xy breakthrough/i,
+            /xy breakpoint/i,
+            /xy generations/i,
+            /xy fates collide/i,
+            /xy steam siege/i,
+            /xy evolutions/i,
+            
+            // Black & White
+            /black & white/i,
+            /bw/i,
+            /bw black star promos/i,
+            /bw next destinies/i,
+            /bw noble victories/i,
+            /bw emerging powers/i,
+            /bw black & white/i,
+            /bw dark explorers/i,
+            /bw dragons exalted/i,
+            /bw boundaries crossed/i,
+            /bw plasma storm/i,
+            /bw plasma freeze/i,
+            /bw plasma blast/i,
+            /bw legendary treasures/i,
+            /bw xy/i,
+            
+            // HeartGold & SoulSilver
+            /heartgold & soulsilver/i,
+            /hgss/i,
+            
+            // Platinum
+            /platinum/i,
+            
+            // Diamond & Pearl
+            /diamond & pearl/i,
+            /dp/i,
+            
+            // EX Series
+            /ex delta species/i,
+            /ex unseen forces/i,
+            /ex sandstorm/i,
+            /ex power keepers/i,
+            /ex ruby & sapphire/i,
+            /ex fire red & leaf green/i,
+            /ex team rocket returns/i,
+            /ex deoxys/i,
+            /ex emerald/i,
+            /ex holon phantoms/i,
+            /ex crystal guardians/i,
+            /ex dragon frontiers/i,
+            /ex diamond & pearl/i,
+            /ex mysterious treasures/i,
+            /ex secret wonders/i,
+            /ex great encounters/i,
+            /ex majestic dawn/i,
+            /ex legends awakened/i,
+            /ex stormfront/i,
+            /ex platinum/i,
+            /ex rising rivals/i,
+            /ex supreme victors/i,
+            /ex arceus/i,
+            /ex heartgold & soulsilver/i,
+            /ex unleashed/i,
+            /ex undaunted/i,
+            /ex triumphant/i,
+            /ex call of legends/i
         ];
         
         for (const pattern of expansionPatterns) {
