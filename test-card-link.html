@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Link Carta - Cool Porygon</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-section h3 {
+            margin-top: 0;
+            color: #667eea;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        .test-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 5px;
+            transition: all 0.2s;
+        }
+
+        .test-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .result.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .result.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .result.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .expected-link {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+
+        .link-comparison {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+
+        .link-box {
+            flex: 1;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+
+        .link-box h4 {
+            margin-top: 0;
+            color: #667eea;
+        }
+
+        .link-box a {
+            word-break: break-all;
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        .link-box a:hover {
+            text-decoration: underline;
+        }
+
+        .match {
+            background: #d4edda;
+            border-color: #c3e6cb;
+        }
+
+        .no-match {
+            background: #f8d7da;
+            border-color: #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧪 Test Link Carta - Universale</h1>
+        <p>Test della generazione del link per qualsiasi carta Pokemon</p>
+    </div>
+
+    <div class="test-section">
+        <h3>📋 Informazioni Carta</h3>
+        <div class="input-group">
+            <label for="cardTitle">Titolo eBay/Vinted:</label>
+            <input type="text" id="cardTitle" placeholder="Inserisci il titolo della carta..." value="Ho-Oh di Armonio ex(Full-Art">
+        </div>
+        <div class="input-group">
+            <label for="expectedLink">Link Atteso:</label>
+            <input type="text" id="expectedLink" placeholder="Link CardTrader atteso..." value="https://www.cardtrader.com/cards/ho-oh-ex-pokemon-card-game-classic-charizard-ho-oh-ex-deck">
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔍 Test Estrazione Informazioni</h3>
+        <button class="test-btn" id="testExtraction">Test Estrazione</button>
+        <div id="extractionResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔗 Test Generazione Link</h3>
+        <button class="test-btn" id="testLinkGeneration">Genera Link</button>
+        <div id="linkResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>📊 Confronto Link</h3>
+        <div id="linkComparison" style="display: none;">
+            <div class="link-comparison">
+                <div class="link-box" id="expectedBox">
+                    <h4>Link Atteso</h4>
+                    <a href="https://www.cardtrader.com/cards/ho-oh-ex-pokemon-card-game-classic-charizard-ho-oh-ex-deck" target="_blank">
+                        https://www.cardtrader.com/cards/ho-oh-ex-pokemon-card-game-classic-charizard-ho-oh-ex-deck
+                    </a>
+                </div>
+                <div class="link-box" id="generatedBox">
+                    <h4>Link Generato</h4>
+                    <a id="generatedLink" href="#" target="_blank">Caricamento...</a>
+                </div>
+            </div>
+            <div id="matchResult" style="margin-top: 10px; padding: 10px; border-radius: 6px;"></div>
+        </div>
+    </div>
+
+    <script src="api-config.js"></script>
+    <script src="cardtrader-api.js"></script>
+    <script>
+        let cardTraderAPI = null;
+        const testTitle = "Pokemon Cool Porygon 15 Black Star Promo Sealed";
+        const expectedLink = "https://www.cardtrader.com/cards/cool-porygon-15-wizards-black-star-promos";
+
+        // Funzione per mostrare risultati
+        function showResult(elementId, content, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = typeof content === 'object' ? JSON.stringify(content, null, 2) : content;
+            element.className = `result ${type}`;
+            element.style.display = 'block';
+        }
+
+        // Test estrazione informazioni
+        document.getElementById('testExtraction').addEventListener('click', async function() {
+            this.disabled = true;
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                const title = document.getElementById('cardTitle').value || testTitle;
+                const cardInfo = cardTraderAPI.extractCardInfo(title);
+                
+                const result = {
+                    title: title,
+                    cleanedTitle: title.toLowerCase().trim(),
+                    extractedInfo: cardInfo,
+                    analysis: {
+                        pokemonName: cardInfo ? cardInfo.pokemonName : 'Non trovato',
+                        cardType: cardInfo ? cardInfo.cardType : 'Non trovato',
+                        set: cardInfo ? cardInfo.set : 'Non trovato',
+                        hasInfo: !!cardInfo,
+                        hasValidName: cardInfo && cardInfo.pokemonName && cardInfo.pokemonName.length >= 2
+                    }
+                };
+                
+                showResult('extractionResult', result, 'info');
+            } catch (error) {
+                showResult('extractionResult', `Errore: ${error.message}`, 'error');
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Test generazione link
+        document.getElementById('testLinkGeneration').addEventListener('click', async function() {
+            this.disabled = true;
+            showResult('linkResult', 'Generazione link in corso...', 'info');
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                const title = document.getElementById('cardTitle').value || testTitle;
+                const expectedLink = document.getElementById('expectedLink').value || "https://www.cardtrader.com/cards/cool-porygon-15-wizards-black-star-promos";
+                
+                const startTime = Date.now();
+                const generatedLink = await cardTraderAPI.createCardTraderLink(title);
+                const endTime = Date.now();
+                
+                const result = {
+                    title: title,
+                    generatedLink: generatedLink,
+                    generationTime: `${endTime - startTime}ms`,
+                    isGenericLink: generatedLink === API_CONFIG.fallback.genericLink,
+                    expectedLink: expectedLink
+                };
+                
+                showResult('linkResult', result, 'info');
+                
+                // Mostra confronto
+                showLinkComparison(generatedLink, expectedLink);
+                
+            } catch (error) {
+                showResult('linkResult', `Errore: ${error.message}`, 'error');
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Mostra confronto link
+        function showLinkComparison(generatedLink, expectedLink) {
+            const comparison = document.getElementById('linkComparison');
+            const generatedLinkElement = document.getElementById('generatedLink');
+            const expectedBox = document.getElementById('expectedBox');
+            const generatedBox = document.getElementById('generatedBox');
+            const matchResult = document.getElementById('matchResult');
+            
+            // Aggiorna il link atteso
+            const expectedLinkElement = expectedBox.querySelector('a');
+            expectedLinkElement.href = expectedLink;
+            expectedLinkElement.textContent = expectedLink;
+            
+            generatedLinkElement.href = generatedLink;
+            generatedLinkElement.textContent = generatedLink;
+            
+            // Controlla se i link corrispondono
+            const isExactMatch = generatedLink === expectedLink;
+            const isSimilar = generatedLink.includes('cardtrader.com') && expectedLink.includes('cardtrader.com');
+            
+            if (isExactMatch) {
+                expectedBox.className = 'link-box match';
+                generatedBox.className = 'link-box match';
+                matchResult.innerHTML = '<strong>✅ Perfetto!</strong> I link corrispondono esattamente.';
+                matchResult.className = 'result success';
+            } else if (isSimilar) {
+                expectedBox.className = 'link-box';
+                generatedBox.className = 'link-box';
+                matchResult.innerHTML = '<strong>⚠️ Parziale</strong> I link sono simili ma non identici.';
+                matchResult.className = 'result info';
+            } else {
+                expectedBox.className = 'link-box no-match';
+                generatedBox.className = 'link-box no-match';
+                matchResult.innerHTML = '<strong>❌ Non corrisponde</strong> I link sono diversi.';
+                matchResult.className = 'result error';
+            }
+            
+            comparison.style.display = 'block';
+        }
+
+        // Inizializzazione
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Pagina di test caricata per Cool Porygon');
+        });
+    </script>
+</body>
+</html> 

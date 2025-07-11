@@ -3,8 +3,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const autoActivateToggle = document.getElementById('autoActivate');
     const notificationsToggle = document.getElementById('notifications');
     const newTabToggle = document.getElementById('newTab');
+    const useAdvancedAPIToggle = document.getElementById('useAdvancedAPI');
 
     const pokemonKeywords = document.getElementById('pokemonKeywords');
+    const apiToken = document.getElementById('apiToken');
     const saveBtn = document.getElementById('saveBtn');
     const status = document.getElementById('status');
 
@@ -13,6 +15,8 @@ document.addEventListener('DOMContentLoaded', function() {
         autoActivate: true,
         notifications: true,
         newTab: true,
+        useAdvancedAPI: false,
+        apiToken: '',
 
         pokemonKeywords: [
             'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
@@ -27,10 +31,13 @@ document.addEventListener('DOMContentLoaded', function() {
             autoActivateToggle.classList.toggle('active', items.autoActivate);
             notificationsToggle.classList.toggle('active', items.notifications);
             newTabToggle.classList.toggle('active', items.newTab);
+            useAdvancedAPIToggle.classList.toggle('active', items.useAdvancedAPI);
 
             pokemonKeywords.value = Array.isArray(items.pokemonKeywords) 
                 ? items.pokemonKeywords.join('\n') 
                 : items.pokemonKeywords;
+            
+            apiToken.value = items.apiToken || '';
         });
     }
 
@@ -40,6 +47,8 @@ document.addEventListener('DOMContentLoaded', function() {
             autoActivate: autoActivateToggle.classList.contains('active'),
             notifications: notificationsToggle.classList.contains('active'),
             newTab: newTabToggle.classList.contains('active'),
+            useAdvancedAPI: useAdvancedAPIToggle.classList.contains('active'),
+            apiToken: apiToken.value.trim(),
 
             pokemonKeywords: pokemonKeywords.value.split('\n').filter(keyword => keyword.trim() !== '')
         };
@@ -82,6 +91,10 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     newTabToggle.addEventListener('click', function() {
+        this.classList.toggle('active');
+    });
+
+    useAdvancedAPIToggle.addEventListener('click', function() {
         this.classList.toggle('active');
     });
 

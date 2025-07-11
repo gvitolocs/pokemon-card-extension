@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Debug API CardTrader</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-section h3 {
+            margin-top: 0;
+            color: #667eea;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        .test-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 5px;
+            transition: all 0.2s;
+        }
+
+        .test-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .result.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .result.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .result.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔧 Debug API CardTrader</h1>
+        <p>Test step-by-step delle API per identificare il problema</p>
+    </div>
+
+    <div class="test-section">
+        <h3>🔑 Test Autenticazione</h3>
+        <button class="test-btn" id="testAuth">Test Token API</button>
+        <div id="authResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🎮 Test Giochi</h3>
+        <button class="test-btn" id="testGames">Ottieni Lista Giochi</button>
+        <div id="gamesResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>📦 Test Espansioni Pokemon</h3>
+        <button class="test-btn" id="testExpansions">Ottieni Espansioni Pokemon</button>
+        <div id="expansionsResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔍 Test Ricerca Ho-Oh</h3>
+        <button class="test-btn" id="testSearch">Cerca Ho-Oh nelle API</button>
+        <div id="searchResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔍 Test Ricerca Blueprint Dettagliata</h3>
+        <button class="test-btn" id="testBlueprintSearch">Cerca Blueprint Ho-Oh</button>
+        <div id="blueprintSearchResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🛒 Test Marketplace Products</h3>
+        <button class="test-btn" id="testMarketplace">Test Marketplace</button>
+        <div id="marketplaceResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>📊 Status Completo</h3>
+        <div id="statusResult"></div>
+    </div>
+
+    <script src="api-config.js"></script>
+    <script src="cardtrader-api.js"></script>
+    <script>
+        let cardTraderAPI = null;
+        let testResults = {
+            auth: false,
+            games: false,
+            expansions: false,
+            search: false
+        };
+
+        // Funzione per mostrare risultati
+        function showResult(elementId, content, type = 'info') {
+            const element = document.getElementById(elementId);
+            element.textContent = typeof content === 'object' ? JSON.stringify(content, null, 2) : content;
+            element.className = `result ${type}`;
+            element.style.display = 'block';
+        }
+
+        // Funzione per aggiornare status
+        function updateStatus() {
+            const statusDiv = document.getElementById('statusResult');
+            let html = '<h4>Status Test:</h4>';
+            
+            for (const [test, passed] of Object.entries(testResults)) {
+                const status = passed ? 'success' : 'error';
+                const icon = passed ? '✅' : '❌';
+                html += `<div class="status ${status}">${icon} ${test.toUpperCase()}: ${passed ? 'PASS' : 'FAIL'}</div>`;
+            }
+            
+            statusDiv.innerHTML = html;
+        }
+
+        // Test autenticazione
+        document.getElementById('testAuth').addEventListener('click', async function() {
+            this.disabled = true;
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                // Test semplice chiamata API
+                const response = await cardTraderAPI.makeRequest('/games');
+                
+                if (response && Array.isArray(response) && response.length > 0) {
+                    testResults.auth = true;
+                    showResult('authResult', {
+                        status: 'SUCCESS',
+                        message: 'Token API valido',
+                        gamesFound: response.length,
+                        sampleGame: response[0]
+                    }, 'success');
+                } else {
+                    testResults.auth = false;
+                    showResult('authResult', {
+                        status: 'ERROR',
+                        message: 'Risposta API vuota o non valida',
+                        response: response
+                    }, 'error');
+                }
+            } catch (error) {
+                testResults.auth = false;
+                showResult('authResult', {
+                    status: 'ERROR',
+                    message: 'Errore autenticazione',
+                    error: error.message,
+                    details: error
+                }, 'error');
+            } finally {
+                this.disabled = false;
+                updateStatus();
+            }
+        });
+
+        // Test giochi
+        document.getElementById('testGames').addEventListener('click', async function() {
+            this.disabled = true;
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                const response = await cardTraderAPI.makeRequest('/games');
+                
+                if (!Array.isArray(response)) {
+                    throw new Error('Risposta non è un array: ' + JSON.stringify(response));
+                }
+                
+                const pokemonGame = response.find(game => 
+                    game.name.toLowerCase() === 'pokemon' || 
+                    game.name.toLowerCase() === 'pokémon' ||
+                    game.display_name.toLowerCase().includes('pokemon') ||
+                    game.display_name.toLowerCase().includes('pokémon')
+                );
+                
+                if (pokemonGame) {
+                    testResults.games = true;
+                    showResult('gamesResult', {
+                        status: 'SUCCESS',
+                        pokemonGame: pokemonGame,
+                        totalGames: response.length
+                    }, 'success');
+                } else {
+                    testResults.games = false;
+                    showResult('gamesResult', {
+                        status: 'ERROR',
+                        message: 'Pokemon game non trovato',
+                        availableGames: response.map(g => g.name)
+                    }, 'error');
+                }
+            } catch (error) {
+                testResults.games = false;
+                showResult('gamesResult', {
+                    status: 'ERROR',
+                    message: 'Errore nel recupero giochi',
+                    error: error.message
+                }, 'error');
+            } finally {
+                this.disabled = false;
+                updateStatus();
+            }
+        });
+
+        // Test espansioni
+        document.getElementById('testExpansions').addEventListener('click', async function() {
+            this.disabled = true;
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                await cardTraderAPI.initialize();
+                
+                if (cardTraderAPI.expansions.size > 0) {
+                    testResults.expansions = true;
+                    const expansions = Array.from(cardTraderAPI.expansions.values()).slice(0, 10);
+                    showResult('expansionsResult', {
+                        status: 'SUCCESS',
+                        totalExpansions: cardTraderAPI.expansions.size,
+                        pokemonGameId: cardTraderAPI.pokemonGameId,
+                        sampleExpansions: expansions
+                    }, 'success');
+                } else {
+                    testResults.expansions = false;
+                    showResult('expansionsResult', {
+                        status: 'ERROR',
+                        message: 'Nessuna espansione Pokemon trovata'
+                    }, 'error');
+                }
+            } catch (error) {
+                testResults.expansions = false;
+                showResult('expansionsResult', {
+                    status: 'ERROR',
+                    message: 'Errore nel recupero espansioni',
+                    error: error.message
+                }, 'error');
+            } finally {
+                this.disabled = false;
+                updateStatus();
+            }
+        });
+
+        // Test ricerca
+        document.getElementById('testSearch').addEventListener('click', async function() {
+            this.disabled = true;
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                // Test con il titolo originale
+                const originalTitle = "Ho-Oh di Armonio ex(Full-Art";
+                console.log('Testando con titolo originale:', originalTitle);
+                
+                // Estrai informazioni dalla carta
+                const cardInfo = cardTraderAPI.extractCardInfo(originalTitle);
+                console.log('Informazioni estratte:', cardInfo);
+                
+                // Test ricerca diretta
+                console.log('Iniziando ricerca per:', cardInfo);
+                const searchResults = await cardTraderAPI.searchCard(cardInfo);
+                
+                if (searchResults && searchResults.data && searchResults.data.length > 0) {
+                    testResults.search = true;
+                    showResult('searchResult', {
+                        status: 'SUCCESS',
+                        originalTitle: originalTitle,
+                        extractedInfo: cardInfo,
+                        resultsFound: searchResults.data.length,
+                        sampleResults: searchResults.data.slice(0, 3),
+                        allResults: searchResults.data.map(r => ({
+                            name: r.name,
+                            blueprint_id: r.blueprint_id,
+                            expansion: r.expansion?.name_en || r.expansion?.name || 'Unknown'
+                        }))
+                    }, 'success');
+                } else {
+                    testResults.search = false;
+                    showResult('searchResult', {
+                        status: 'ERROR',
+                        originalTitle: originalTitle,
+                        extractedInfo: cardInfo,
+                        message: 'Nessun risultato trovato per Ho-Oh',
+                        searchResults: searchResults
+                    }, 'error');
+                }
+            } catch (error) {
+                testResults.search = false;
+                showResult('searchResult', {
+                    status: 'ERROR',
+                    message: 'Errore nella ricerca',
+                    error: error.message,
+                    stack: error.stack
+                }, 'error');
+            } finally {
+                this.disabled = false;
+                updateStatus();
+            }
+        });
+
+        // Test ricerca dettagliata per blueprint
+        document.getElementById('testBlueprintSearch').addEventListener('click', async function() {
+            this.disabled = true;
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                await cardTraderAPI.initialize();
+                
+                // Test ricerca blueprint per "ho-oh"
+                const searchName = 'ho-oh';
+                console.log('Cercando blueprint per:', searchName);
+                
+                // Ottieni alcune espansioni per testare
+                const allExpansions = Array.from(cardTraderAPI.expansions.values())
+                    .filter(exp => typeof exp.id === 'number')
+                    .slice(0, 5); // Test con prime 5 espansioni
+                
+                const results = [];
+                
+                for (const expansion of allExpansions) {
+                    console.log(`Testando espansione: ${expansion.name} (ID: ${expansion.id})`);
+                    
+                    try {
+                        const blueprints = await cardTraderAPI.getBlueprintsForExpansion(expansion.id);
+                        console.log(`Blueprint in ${expansion.name}:`, blueprints.length);
+                        
+                        // Cerca blueprint che contengono "ho-oh"
+                        const hoohBlueprints = blueprints.filter(bp => 
+                            bp.name.toLowerCase().includes('ho-oh') || 
+                            bp.name.toLowerCase().includes('hooh') ||
+                            bp.name.toLowerCase().includes('ho oh')
+                        );
+                        
+                        if (hoohBlueprints.length > 0) {
+                            results.push({
+                                expansion: expansion.name,
+                                expansionId: expansion.id,
+                                hoohBlueprints: hoohBlueprints.map(bp => ({
+                                    id: bp.id,
+                                    name: bp.name
+                                }))
+                            });
+                        }
+                        
+                        // Mostra anche alcuni blueprint per debug
+                        const sampleBlueprints = blueprints.slice(0, 10).map(bp => bp.name);
+                        console.log(`Esempi blueprint in ${expansion.name}:`, sampleBlueprints);
+                        
+                    } catch (error) {
+                        console.warn(`Errore per espansione ${expansion.name}:`, error);
+                    }
+                }
+                
+                showResult('blueprintSearchResult', {
+                    status: 'SUCCESS',
+                    searchName: searchName,
+                    expansionsTested: allExpansions.length,
+                    results: results,
+                    message: results.length > 0 ? 'Ho-Oh blueprint trovati!' : 'Nessun Ho-Oh blueprint trovato'
+                }, results.length > 0 ? 'success' : 'warning');
+                
+            } catch (error) {
+                showResult('blueprintSearchResult', {
+                    status: 'ERROR',
+                    message: 'Errore nella ricerca blueprint',
+                    error: error.message
+                }, 'error');
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Test marketplace products per blueprint specifico
+        document.getElementById('testMarketplace').addEventListener('click', async function() {
+            this.disabled = true;
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                await cardTraderAPI.initialize();
+                
+                // Test con un blueprint ID specifico (Pikachu ex dal risultato precedente)
+                const testBlueprintId = 265114; // Pikachu ex blueprint ID dal test precedente
+                console.log('Testando marketplace per blueprint ID:', testBlueprintId);
+                
+                try {
+                    const products = await cardTraderAPI.getMarketplaceProducts(testBlueprintId);
+                    console.log('Prodotti marketplace trovati:', products);
+                    
+                    showResult('marketplaceResult', {
+                        status: 'SUCCESS',
+                        blueprintId: testBlueprintId,
+                        productsFound: products.length,
+                        sampleProducts: products.slice(0, 3).map(p => ({
+                            id: p.id,
+                            name: p.name_en || p.name,
+                            price: p.price,
+                            expansion: p.expansion?.name_en || p.expansion?.name
+                        }))
+                    }, 'success');
+                    
+                } catch (error) {
+                    showResult('marketplaceResult', {
+                        status: 'ERROR',
+                        blueprintId: testBlueprintId,
+                        message: 'Errore nel recupero prodotti marketplace',
+                        error: error.message
+                    }, 'error');
+                }
+                
+            } catch (error) {
+                showResult('marketplaceResult', {
+                    status: 'ERROR',
+                    message: 'Errore nell\'inizializzazione',
+                    error: error.message
+                }, 'error');
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Inizializzazione
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Pagina di debug API caricata');
+            updateStatus();
+        });
+    </script>
+</body>
+</html> 

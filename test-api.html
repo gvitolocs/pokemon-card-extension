@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test API CardTrader v2</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }
+
+        .test-section {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .test-section h3 {
+            margin-top: 0;
+            color: #667eea;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 10px;
+        }
+
+        .test-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            margin: 5px;
+            transition: all 0.2s;
+        }
+
+        .test-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .test-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .result.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .result.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .result.loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .status {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🧪 Test API CardTrader v2</h1>
+        <p>Verifica il funzionamento delle API CardTrader</p>
+    </div>
+
+    <div class="test-section">
+        <h3>🔑 Test Autenticazione</h3>
+        <p>Verifica che il token di autenticazione sia valido</p>
+        <button class="test-btn" id="testAuth">Test Autenticazione</button>
+        <div id="authResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🎮 Test Giochi</h3>
+        <p>Ottieni la lista dei giochi disponibili</p>
+        <button class="test-btn" id="testGames">Ottieni Giochi</button>
+        <div id="gamesResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>📦 Test Espansioni Pokemon</h3>
+        <p>Ottieni le espansioni Pokemon disponibili</p>
+        <button class="test-btn" id="testExpansions">Ottieni Espansioni Pokemon</button>
+        <div id="expansionsResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔍 Test Ricerca Carta</h3>
+        <p>Testa la ricerca di una carta specifica</p>
+        <input type="text" class="search-input" id="cardSearch" placeholder="Es: Charizard VMAX, Pikachu Holo, Mewtwo GX" value="Charizard">
+        <button class="test-btn" id="testSearch">Cerca Carta</button>
+        <div id="searchResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div class="test-section">
+        <h3>🔄 Test Completo</h3>
+        <p>Esegui tutti i test in sequenza</p>
+        <button class="test-btn" id="testAll">Esegui Tutti i Test</button>
+        <div id="allResult" class="result" style="display: none;"></div>
+    </div>
+
+    <div id="status" class="status" style="display: none;"></div>
+
+    <script src="api-config.js"></script>
+    <script src="cardtrader-api.js"></script>
+    <script>
+        let cardTraderAPI = null;
+
+        // Funzione per mostrare risultati
+        function showResult(elementId, content, isError = false) {
+            const element = document.getElementById(elementId);
+            element.textContent = typeof content === 'object' ? JSON.stringify(content, null, 2) : content;
+            element.className = `result ${isError ? 'error' : 'success'}`;
+            element.style.display = 'block';
+        }
+
+        // Funzione per mostrare loading
+        function showLoading(elementId) {
+            const element = document.getElementById(elementId);
+            element.textContent = 'Caricamento...';
+            element.className = 'result loading';
+            element.style.display = 'block';
+        }
+
+        // Funzione per mostrare status
+        function showStatus(message, isError = false) {
+            const status = document.getElementById('status');
+            status.textContent = message;
+            status.className = `status ${isError ? 'error' : 'success'}`;
+            status.style.display = 'block';
+            
+            setTimeout(() => {
+                status.style.display = 'none';
+            }, 5000);
+        }
+
+        // Test autenticazione
+        document.getElementById('testAuth').addEventListener('click', async function() {
+            this.disabled = true;
+            showLoading('authResult');
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                const response = await cardTraderAPI.makeRequest('/info');
+                showResult('authResult', response);
+                showStatus('Autenticazione riuscita!');
+            } catch (error) {
+                showResult('authResult', `Errore: ${error.message}`, true);
+                showStatus('Errore di autenticazione', true);
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Test giochi
+        document.getElementById('testGames').addEventListener('click', async function() {
+            this.disabled = true;
+            showLoading('gamesResult');
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                const response = await cardTraderAPI.makeRequest('/games');
+                showResult('gamesResult', response);
+                showStatus('Giochi ottenuti con successo!');
+            } catch (error) {
+                showResult('gamesResult', `Errore: ${error.message}`, true);
+                showStatus('Errore nel recupero giochi', true);
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Test espansioni Pokemon
+        document.getElementById('testExpansions').addEventListener('click', async function() {
+            this.disabled = true;
+            showLoading('expansionsResult');
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                await cardTraderAPI.initialize();
+                const pokemonExpansions = Array.from(cardTraderAPI.expansions.values())
+                    .filter(exp => typeof exp.id === 'number')
+                    .slice(0, 20); // Mostra solo le prime 20
+                
+                showResult('expansionsResult', {
+                    total: cardTraderAPI.expansions.size,
+                    pokemonGameId: cardTraderAPI.pokemonGameId,
+                    expansions: pokemonExpansions
+                });
+                showStatus('Espansioni Pokemon ottenute con successo!');
+            } catch (error) {
+                showResult('expansionsResult', `Errore: ${error.message}`, true);
+                showStatus('Errore nel recupero espansioni', true);
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Test ricerca carta
+        document.getElementById('testSearch').addEventListener('click', async function() {
+            this.disabled = true;
+            showLoading('searchResult');
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                const searchTerm = document.getElementById('cardSearch').value;
+                if (!searchTerm.trim()) {
+                    throw new Error('Inserisci un termine di ricerca');
+                }
+                
+                const link = await cardTraderAPI.createCardTraderLink(searchTerm);
+                showResult('searchResult', {
+                    searchTerm: searchTerm,
+                    generatedLink: link,
+                    isGenericLink: link === API_CONFIG.fallback.genericLink
+                });
+                showStatus('Ricerca completata!');
+            } catch (error) {
+                showResult('searchResult', `Errore: ${error.message}`, true);
+                showStatus('Errore nella ricerca', true);
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Test completo
+        document.getElementById('testAll').addEventListener('click', async function() {
+            this.disabled = true;
+            showLoading('allResult');
+            
+            const results = {
+                auth: null,
+                games: null,
+                expansions: null,
+                search: null
+            };
+            
+            try {
+                if (!cardTraderAPI) {
+                    cardTraderAPI = new CardTraderAPI();
+                }
+                
+                // Test 1: Autenticazione
+                try {
+                    results.auth = await cardTraderAPI.makeRequest('/info');
+                } catch (error) {
+                    results.auth = { error: error.message };
+                }
+                
+                // Test 2: Giochi
+                try {
+                    results.games = await cardTraderAPI.makeRequest('/games');
+                } catch (error) {
+                    results.games = { error: error.message };
+                }
+                
+                // Test 3: Espansioni Pokemon
+                try {
+                    await cardTraderAPI.initialize();
+                    results.expansions = {
+                        pokemonGameId: cardTraderAPI.pokemonGameId,
+                        totalExpansions: cardTraderAPI.expansions.size
+                    };
+                } catch (error) {
+                    results.expansions = { error: error.message };
+                }
+                
+                // Test 4: Ricerca
+                try {
+                    const link = await cardTraderAPI.createCardTraderLink('Charizard');
+                    results.search = {
+                        generatedLink: link,
+                        isGenericLink: link === API_CONFIG.fallback.genericLink
+                    };
+                } catch (error) {
+                    results.search = { error: error.message };
+                }
+                
+                showResult('allResult', results);
+                
+                const successCount = Object.values(results).filter(r => !r.error).length;
+                const totalCount = Object.keys(results).length;
+                
+                showStatus(`Test completati: ${successCount}/${totalCount} riusciti`);
+            } catch (error) {
+                showResult('allResult', `Errore generale: ${error.message}`, true);
+                showStatus('Errore nei test', true);
+            } finally {
+                this.disabled = false;
+            }
+        });
+
+        // Inizializzazione
+        document.addEventListener('DOMContentLoaded', function() {
+            showStatus('Pagina di test caricata. Clicca su un test per iniziare.');
+        });
+    </script>
+</body>
+</html> 

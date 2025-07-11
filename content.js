@@ -8,6 +8,8 @@
         autoActivate: true,
         notifications: true,
         newTab: true,
+        useAdvancedAPI: false,
+        apiToken: '',
 
         pokemonKeywords: [
             'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
@@ -129,11 +131,35 @@
             .toLowerCase();
     }
 
+    // Istanza globale dell'API CardTrader
+    let cardTraderAPI = null;
+
     // Funzione per creare il link CardTrader
-    function createCardTraderLink(title) {
-        // Link diretto alla sezione Pokemon di CardTrader
-        // L'utente può usare i filtri e le categorie del sito per trovare la carta specifica
-        return `https://www.cardtrader.com/pokemon`;
+    async function createCardTraderLink(title) {
+        // Se le API avanzate non sono abilitate ma abbiamo un token configurato, usalo
+        const shouldUseAPI = settings.useAdvancedAPI || (API_CONFIG.authToken && !settings.apiToken);
+        
+        if (!shouldUseAPI) {
+            return API_CONFIG.fallback.genericLink;
+        }
+
+        // Inizializza l'API se non è già stata inizializzata
+        if (!cardTraderAPI) {
+            cardTraderAPI = new CardTraderAPI();
+            // Configura il token (usa quello delle impostazioni o quello predefinito)
+            API_CONFIG.authToken = settings.apiToken || API_CONFIG.authToken;
+        }
+
+        try {
+            // Usa l'API per generare un link specifico
+            const link = await cardTraderAPI.createCardTraderLink(title);
+            console.log('Pokemon Card Trader: Link generato con API:', link);
+            return link;
+        } catch (error) {
+            console.error('Pokemon Card Trader: Errore nella generazione del link:', error);
+            // Fallback al link generico
+            return API_CONFIG.fallback.genericLink;
+        }
     }
 
     // Funzione per caricare le impostazioni
@@ -210,8 +236,8 @@
 
 
     // Funzione per creare il pulsante CT
-    function createCTButton(title) {
-        const link = createCardTraderLink(title);
+    async function createCTButton(title) {
+        const link = await createCardTraderLink(title);
         console.log('Pokemon Card Trader: Link CardTrader generato:', link);
         const button = document.createElement('a');
         button.className = 'ct-button';
@@ -249,7 +275,7 @@
     }
 
     // Funzione per processare un elemento titolo
-    function processTitleElement(titleElement, container) {
+    async function processTitleElement(titleElement, container) {
         // Controlla se è già stato processato
         if (titleElement.dataset.cardtraderProcessed) {
             return;
@@ -277,7 +303,7 @@
         if (hasPokemonKeywords && !isPaused) {
             console.log('Pokemon Card Trader: Creando pulsante CT per:', title);
             // Crea e aggiungi il pulsante CT
-            const ctButton = createCTButton(title);
+            const ctButton = await createCTButton(title);
             
             // Trova la posizione migliore per inserire il pulsante
             let insertPosition = null;
@@ -327,7 +353,7 @@
     }
 
     // Funzione principale per processare la pagina
-    function processPage() {
+    async function processPage() {
         console.log('Pokemon Card Trader: processPage chiamata');
         
         if (isPaused || !settings.autoActivate) {
@@ -352,7 +378,8 @@
         const containers = document.querySelectorAll(config.containerSelector);
         console.log('Pokemon Card Trader: Trovati', containers.length, 'container');
         
-        containers.forEach(container => {
+        // Processa i container in parallelo per migliorare le performance
+        const promises = containers.map(async container => {
             // Trova il titolo usando i selettori configurati
             let titleElement = null;
             for (const selector of config.titleSelectors) {
@@ -364,11 +391,14 @@
             }
 
             if (titleElement) {
-                processTitleElement(titleElement, container);
+                await processTitleElement(titleElement, container);
             } else {
                 console.log('Pokemon Card Trader: Nessun titolo trovato nel container:', container);
             }
         });
+
+        // Aspetta che tutti i container siano processati
+        await Promise.all(promises);
     }
 
     // Osserva i cambiamenti nella pagina (per pagine dinamiche)
@@ -404,7 +434,7 @@
 
             if (shouldProcess) {
                 // Aspetta un po' per permettere al DOM di stabilizzarsi
-                setTimeout(processPage, 100);
+                setTimeout(() => processPage().catch(console.error), 100);
             }
 
             // Controlla anche se sono stati aggiunti elementi pubblicitari
@@ -441,13 +471,13 @@
         console.log('Pokemon Card Trader: Parole chiave Pokemon:', settings.pokemonKeywords);
         
         // Processa la pagina corrente
-        processPage();
+        processPage().catch(console.error);
         
         // Osserva i cambiamenti per pagine dinamiche
         observePageChanges();
         
         // Processa di nuovo dopo un breve delay per assicurarsi che tutto sia caricato
-        setTimeout(processPage, 1000);
+        setTimeout(() => processPage().catch(console.error), 1000);
     }
 
     // Avvia quando il DOM è pronto
@@ -458,10 +488,10 @@
     }
 
     // Processa anche quando la pagina cambia (per SPA)
-    window.addEventListener('load', processPage);
+    window.addEventListener('load', () => processPage().catch(console.error));
     
     // Processa periodicamente per assicurarsi che tutto sia processato
-    setInterval(processPage, 3000);
+    setInterval(() => processPage().catch(console.error), 3000);
 
     // Gestione dei messaggi dal popup e dalle impostazioni
     chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
@@ -474,7 +504,7 @@
             case 'updateSettings':
                 settings = { ...settings, ...request.settings };
                 // Ricarica la pagina per applicare le nuove impostazioni
-                setTimeout(processPage, 100);
+                setTimeout(() => processPage().catch(console.error), 100);
                 sendResponse({success: true});
                 break;
             

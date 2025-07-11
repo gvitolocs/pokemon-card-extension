@@ -5,11 +5,13 @@ Un'estensione Chrome che converte automaticamente i titoli delle inserzioni di c
 ## ✨ Caratteristiche
 
 - **Rilevamento automatico**: Identifica automaticamente le inserzioni di carte Pokemon
-- **Link diretti**: Crea link cliccabili che portano direttamente alla ricerca su CardTrader
+- **Link intelligenti**: Utilizza le API di CardTrader per generare link specifici e diretti alle carte
+- **Estrazione informazioni**: Analizza i titoli per identificare Pokemon, set e tipi di carta
 - **Siti supportati**: Funziona su eBay (Italia e Internazionale) e Vinted (Italia e Internazionale)
 - **Personalizzabile**: Puoi modificare le parole chiave per identificare le carte Pokemon
 - **Interfaccia moderna**: Design pulito e intuitivo
 - **Impostazioni avanzate**: Controllo completo sulle funzionalità
+- **Performance ottimizzate**: Cache intelligente e rate limiting per le API
 
 ## 🚀 Installazione
 
@@ -77,6 +79,22 @@ L'estensione riconosce automaticamente le carte Pokemon cercando queste parole c
 - **Apertura in nuova tab**: Apri i link CardTrader in una nuova tab
 - **Parole chiave personalizzate**: Aggiungi o rimuovi parole chiave
 
+## 🧪 Test delle API
+
+### Test Locale
+Per testare le API CardTrader v2:
+
+1. **Apri il file `test-api.html`** nel browser
+2. **Clicca su "Test Autenticazione"** per verificare il token
+3. **Esegui i test individuali** o usa "Esegui Tutti i Test"
+4. **Controlla i risultati** per verificare il funzionamento
+
+### Test nell'Estensione
+1. **Carica l'estensione** in Chrome
+2. **Configura il token** nelle impostazioni
+3. **Vai su eBay o Vinted** e cerca carte Pokemon
+4. **Verifica che i link generati** siano specifici e funzionanti
+
 ## 🛠️ Sviluppo
 
 ### Struttura del progetto
@@ -84,12 +102,16 @@ L'estensione riconosce automaticamente le carte Pokemon cercando queste parole c
 ```
 pokemon-card-extension/
 ├── manifest.json          # Configurazione dell'estensione
+├── api-config.js          # Configurazione API CardTrader
+├── cardtrader-api.js      # Integrazione API CardTrader
 ├── content.js             # Script principale che funziona nelle pagine
 ├── popup.html             # Interfaccia del popup
 ├── popup.js               # Logica del popup
 ├── settings.html          # Pagina delle impostazioni
 ├── settings.js            # Logica delle impostazioni
 ├── styles.css             # Stili per i badge
+├── test-api.html          # Pagina di test per le API
+├── API_INTEGRATION.md     # Documentazione API
 └── README.md              # Questo file
 ```
 
@@ -99,6 +121,9 @@ pokemon-card-extension/
 - **Content Scripts**: Per modificare le pagine web
 - **Chrome Storage API**: Per salvare le impostazioni
 - **MutationObserver**: Per rilevare cambiamenti dinamici nelle pagine
+- **CardTrader API**: Per la ricerca intelligente delle carte
+- **Async/Await**: Per gestire le chiamate API in modo efficiente
+- **Cache System**: Per ottimizzare le performance delle API
 
 ### Come contribuire
 
@@ -130,6 +155,20 @@ pokemon-card-extension/
 3. **Problemi del sito**: CardTrader potrebbe essere temporaneamente non disponibile
 
 ## 📝 Changelog
+
+### v1.2.0
+- ✅ Integrazione API CardTrader v2 con autenticazione
+- ✅ Configurazione token tramite interfaccia utente
+- ✅ Ricerca avanzata tramite espansioni e blueprint
+- ✅ Rate limiting ottimizzato per marketplace (1 chiamata/secondo)
+- ✅ Gestione errori migliorata con fallback intelligente
+
+### v1.1.0
+- ✅ Integrazione API CardTrader per link intelligenti
+- ✅ Estrazione automatica di Pokemon, set e tipi di carta
+- ✅ Cache intelligente per ottimizzare le performance
+- ✅ Rate limiting per rispettare i limiti dell'API
+- ✅ Gestione errori avanzata con fallback
 
 ### v1.0.0
 - ✅ Rilevamento automatico delle carte Pokemon
