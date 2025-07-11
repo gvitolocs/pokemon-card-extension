@@ -337,18 +337,122 @@
             
             info.pokemonName = extractPokemonName(title);
             
-            const expansionPatterns = [
-                /terastal festival ex/i,
-                /sv\d+/i,
-                /scarlet & violet/i,
-                /sword & shield/i,
-                /swsh/i,
-                /sun & moon/i,
-                /sm/i,
-                /xy/i,
-                /black & white/i,
-                /bw/i
-            ];
+                    const expansionPatterns = [
+            // Scarlet & Violet - priorità alta per Terastal Festival ex
+            /terastal festival ex/i,
+            /sv\d+/i,
+            /scarlet & violet/i,
+            /sv base set/i,
+            /sv paldea evolved/i,
+            /sv obsidian flames/i,
+            /sv 151/i,
+            /sv paradox rift/i,
+            /sv temporal forces/i,
+            /sv paldean fates/i,
+            
+            // Sword & Shield
+            /sword & shield/i,
+            /swsh/i,
+            /swsh sword & shield/i,
+            /swsh rebel clash/i,
+            /swsh darkness ablaze/i,
+            /swsh champions path/i,
+            /swsh vivid voltage/i,
+            /swsh shining fates/i,
+            /swsh battle styles/i,
+            /swsh chilling reign/i,
+            /swsh evolving skies/i,
+            /swsh fusion strike/i,
+            /swsh brilliant stars/i,
+            /swsh astral radiance/i,
+            /swsh lost origin/i,
+            /swsh silver tempest/i,
+            /swsh crown zenith/i,
+            
+            // Sun & Moon
+            /sun & moon/i,
+            /sm/i,
+            /sm sun & moon/i,
+            /sm guardians rising/i,
+            /sm burning shadows/i,
+            /sm shining legends/i,
+            /sm crimson invasion/i,
+            /sm ultra prism/i,
+            /sm forbidden light/i,
+            /sm celestial storm/i,
+            /sm dragon majesty/i,
+            /sm lost thunder/i,
+            /sm team up/i,
+            /sm detective pikachu/i,
+            /sm unbroken bonds/i,
+            /sm unified minds/i,
+            /sm hidden fates/i,
+            /sm cosmic eclipse/i,
+            
+            // XY
+            /xy/i,
+            /xy kalos starter set/i,
+            /xy xy/i,
+            /xy flashfire/i,
+            /xy furious fists/i,
+            /xy phantom forces/i,
+            /xy primal clash/i,
+            /xy double crisis/i,
+            /xy roaring skies/i,
+            /xy ancient origins/i,
+            /xy breakthrough/i,
+            /xy breakpoint/i,
+            /xy generations/i,
+            /xy fates collide/i,
+            /xy steam siege/i,
+            /xy evolutions/i,
+            
+            // Black & White
+            /black & white/i,
+            /bw/i,
+            /bw black star promos/i,
+            /bw next destinies/i,
+            /bw noble victories/i,
+            /bw emerging powers/i,
+            /bw dark explorers/i,
+            /bw dragons exalted/i,
+            /bw boundaries crossed/i,
+            /bw plasma storm/i,
+            /bw plasma freeze/i,
+            /bw plasma blast/i,
+            /bw legendary treasures/i,
+            /bw xy/i,
+            
+            // EX Series
+            /ex delta species/i,
+            /ex unseen forces/i,
+            /ex sandstorm/i,
+            /ex power keepers/i,
+            /ex ruby & sapphire/i,
+            /ex fire red & leaf green/i,
+            /ex team rocket returns/i,
+            /ex deoxys/i,
+            /ex emerald/i,
+            /ex holon phantoms/i,
+            /ex crystal guardians/i,
+            /ex dragon frontiers/i,
+            /ex diamond & pearl/i,
+            /ex mysterious treasures/i,
+            /ex secret wonders/i,
+            /ex great encounters/i,
+            /ex majestic dawn/i,
+            /ex legends awakened/i,
+            /ex stormfront/i,
+            /ex platinum/i,
+            /ex rising rivals/i,
+            /ex supreme victors/i,
+            /ex arceus/i,
+            /ex heartgold & soulsilver/i,
+            /ex unleashed/i,
+            /ex undaunted/i,
+            /ex triumphant/i,
+            /ex call of legends/i
+        ];
             
             for (const pattern of expansionPatterns) {
                 const match = titleLower.match(pattern);
@@ -486,17 +590,35 @@
                     }
                     
                     if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
-                        score += 25;
+                        score += 50; // Aumentato significativamente il peso dell'espansione
                         reason += 'Espansione ';
+                        
+                        // Bonus extra per match esatto dell'espansione
+                        if (expansion === titleInfo.expansion) {
+                            score += 25;
+                            reason += 'Espansione esatta ';
+                        }
                     }
                     
                     if (titleInfo.collectorNumber && collectorNumber.includes(titleInfo.collectorNumber)) {
                         score += 30;
                         reason += 'Numero collezionista ';
+                        
+                        // Bonus extra se abbiamo anche l'espansione corretta
+                        if (titleInfo.expansion && expansion.includes(titleInfo.expansion)) {
+                            score += 20;
+                            reason += 'Numero+Espansione ';
+                        }
                     }
                     
                     if (result.image_url) score += 5;
                     if (result.blueprint_id || result.id) score += 5;
+                    
+                    // Penalità per espansioni che non corrispondono
+                    if (titleInfo.expansion && expansion && !expansion.includes(titleInfo.expansion)) {
+                        score -= 30;
+                        reason += 'Espansione diversa ';
+                    }
                     
                     return { result, score, reason: reason.trim() };
                 });
