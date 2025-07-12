@@ -3,9 +3,12 @@
 
 console.log('🃏 Pokemon Card Trader Linker - Estensione attivata');
 
-// Stato dell'estensione
+// Stato dell'estensione con cache ottimizzata
 let isEnabled = true;
 let isProcessing = false;
+let cardCache = new Map(); // Cache per i risultati delle ricerche
+let observerCache = new WeakSet(); // Cache per elementi già processati
+let debounceTimer = null; // Debounce per evitare troppe ricerche
 
 // Inizializza le variabili globali se non esistono
 if (typeof window.supabaseClient === 'undefined') {
@@ -96,22 +99,51 @@ function cleanupProcessedAttributes() {
 // Avvia l'osservatore per rilevare nuove inserzioni
 function startObserver() {
     try {
-        console.log('🔍 [CardTrader] Avvio osservatore...');
+        console.log('🔍 [CardTrader] Avvio osservatore ottimizzato...');
         
         cleanupProcessedAttributes();
         
         const observer = new MutationObserver((mutations) => {
-            if (!isEnabled || isProcessing) return;
+            if (!isEnabled) return;
+            
+            let hasNewListings = false;
+            let pendingListings = [];
             
             mutations.forEach((mutation) => {
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
                         if (node.nodeType === Node.ELEMENT_NODE) {
-                            processNewListings(node);
+                            const listings = findListingsInContainer(node);
+                            if (listings.length > 0) {
+                                hasNewListings = true;
+                                pendingListings.push(...listings);
+                            }
                         }
                     });
                 }
             });
+            
+            if (hasNewListings) {
+                // Debounce per evitare troppe elaborazioni
+                if (debounceTimer) {
+                    clearTimeout(debounceTimer);
+                }
+                
+                debounceTimer = setTimeout(() => {
+                    console.log(`🔄 [CardTrader] Processando ${pendingListings.length} nuove inserzioni`);
+                    
+                    // Processa in batch per migliorare le performance
+                    const batchSize = 5;
+                    for (let i = 0; i < pendingListings.length; i += batchSize) {
+                        const batch = pendingListings.slice(i, i + batchSize);
+                        setTimeout(() => {
+                            batch.forEach(listing => {
+                                processListing(listing);
+                            });
+                        }, i * 50); // Spazia le elaborazioni
+                    }
+                }, 100); // Debounce di 100ms
+            }
         });
         
         if (document.body) {
@@ -124,7 +156,7 @@ function startObserver() {
                 processExistingListings();
             }, 2000);
             
-            console.log('✅ [CardTrader] Osservatore avviato correttamente');
+            console.log('✅ [CardTrader] Osservatore ottimizzato avviato');
         } else {
             console.warn('⚠️ [CardTrader] Document.body non disponibile, riprovo tra 1 secondo');
             setTimeout(startObserver, 1000);
@@ -284,15 +316,13 @@ function getListingSelectors() {
     return [];
 }
 
-// Processa una singola inserzione
+// Processa una singola inserzione con cache e ottimizzazioni
 async function processListing(listingElement) {
     if (!isEnabled || isProcessing) return;
     
     try {
-        isProcessing = true;
-        
-        // Evita di processare elementi già processati
-        if (listingElement.hasAttribute('data-pokemon-linker-processed')) {
+        // Evita di processare elementi già processati (cache ottimizzata)
+        if (observerCache.has(listingElement) || listingElement.hasAttribute('data-pokemon-linker-processed')) {
             return;
         }
         
@@ -300,6 +330,19 @@ async function processListing(listingElement) {
         const title = extractTitleFromListing(listingElement);
         if (!title) {
             console.log('🚫 [CardTrader] Nessun titolo trovato, saltando');
+            return;
+        }
+        
+        // Genera una chiave cache per questa ricerca
+        const cacheKey = generateCacheKey(title);
+        
+        // Controlla se abbiamo già i risultati in cache
+        if (cardCache.has(cacheKey)) {
+            console.log(`⚡ [CardTrader] Risultati trovati in cache per: "${title}"`);
+            const cachedResults = cardCache.get(cacheKey);
+            addCardTraderLinks(listingElement, cachedResults.results, cachedResults.titleInfo);
+            observerCache.add(listingElement);
+            listingElement.setAttribute('data-pokemon-linker-processed', 'true');
             return;
         }
         
@@ -323,16 +366,24 @@ async function processListing(listingElement) {
         
         console.log(`✅ [CardTrader] Trovati ${results.length} risultati`);
         
+        // Salva in cache per future ricerche
+        cardCache.set(cacheKey, { results, titleInfo });
+        
+        // Limita la dimensione della cache (max 100 elementi)
+        if (cardCache.size > 100) {
+            const firstKey = cardCache.keys().next().value;
+            cardCache.delete(firstKey);
+        }
+        
         // Aggiungi i link CardTrader
         addCardTraderLinks(listingElement, results, titleInfo);
         
         // Marca come processato
+        observerCache.add(listingElement);
         listingElement.setAttribute('data-pokemon-linker-processed', 'true');
         
     } catch (error) {
         console.error('❌ [CardTrader] Errore nel processamento inserzione:', error);
-    } finally {
-        isProcessing = false;
     }
 }
 
@@ -1300,6 +1351,25 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             console.error('❌ [CardTrader] Supabase client non disponibile');
             return [];
         }
+        
+        // Ottimizzazione: usa requestIdleCallback se disponibile per non bloccare l'UI
+        if (window.requestIdleCallback) {
+            return new Promise((resolve) => {
+                requestIdleCallback(() => {
+                    performSearch(supabaseClient, titleInfo, originalTitle).then(resolve);
+                });
+            });
+        } else {
+            return performSearch(supabaseClient, titleInfo, originalTitle);
+        }
+    } catch (error) {
+        console.error('❌ [CardTrader] Errore nella ricerca:', error);
+        return [];
+    }
+}
+
+async function performSearch(supabaseClient, titleInfo, originalTitle) {
+    try {
         
         console.log('🔍 [CardTrader] Cercando con criteri:', JSON.stringify(titleInfo, null, 2));
         
@@ -2352,6 +2422,11 @@ function calculateImageUrlWordMatch(imageUrl, titleWords) {
     }
     
     return totalScore;
+}
+
+// Funzione per generare chiave cache
+function generateCacheKey(title) {
+    return title.toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
 // Funzione per generare link CardTrader
