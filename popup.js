@@ -122,8 +122,31 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // Cerca nel database
-            const results = await searchCardInDatabase(titleInfo);
+            // Cerca nel database tramite content script
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            let results = [];
+            
+            if (tab && (tab.url.includes('ebay') || tab.url.includes('vinted'))) {
+                // Usa il content script se siamo su eBay/Vinted
+                results = await new Promise((resolve, reject) => {
+                    chrome.tabs.sendMessage(tab.id, { 
+                        action: 'searchCard', 
+                        titleInfo: titleInfo 
+                    }, function(response) {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error('Errore di comunicazione con la pagina'));
+                        } else if (response && response.success) {
+                            resolve(response.results || []);
+                        } else {
+                            reject(new Error(response?.error || 'Errore sconosciuto'));
+                        }
+                    });
+                });
+            } else {
+                // Fallback: cerca direttamente (senza Supabase)
+                showResult('⚠️ Funzionalità limitata fuori da eBay/Vinted', 'warning');
+                return;
+            }
             
             if (results.length === 0) {
                 showResult('❌ Nessuna carta trovata nel database', 'error');
@@ -336,109 +359,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
     
-    // Funzione per cercare nel database
-    async function searchCardInDatabase(titleInfo) {
-        try {
-            // Usa l'API di Supabase direttamente
-            const supabaseUrl = 'https://msngrrrihwudtnyjatlo.supabase.co';
-            const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo';
-            
-            const supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
-            
-            let allResults = [];
-            
-            // Cerca nelle carte
-            const { data: cards, error: cardsError } = await supabase
-                .from('cards')
-                .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .limit(10);
-            
-            if (!cardsError && cards && cards.length > 0) {
-                allResults.push(...cards.map(card => ({ ...card, source: 'cards' })));
-            }
-            
-            // Se abbiamo un numero collezionista, cerca anche nelle varianti
-            if (titleInfo.collectorNumber) {
-                const { data: pokemonCards, error: pokemonError } = await supabase
-                    .from('cards')
-                    .select('blueprint_id, name_en, expansion_name_en, expansion_code')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`);
-                
-                if (!pokemonError && pokemonCards && pokemonCards.length > 0) {
-                    const blueprintIds = pokemonCards.map(card => card.blueprint_id).filter(id => id);
-                    
-                    const { data: variants, error: variantsError } = await supabase
-                        .from('card_variants')
-                        .select('*')
-                        .in('blueprint_id', blueprintIds)
-                        .eq('collector_number', titleInfo.collectorNumber);
-                    
-                    if (!variantsError && variants && variants.length > 0) {
-                        variants.forEach(variant => {
-                            const card = pokemonCards.find(c => c.blueprint_id === variant.blueprint_id);
-                            if (card) {
-                                const combinedVariant = {
-                                    ...variant,
-                                    name_en: card.name_en,
-                                    pokemon_name: card.name_en,
-                                    expansion_name_en: card.expansion_name_en,
-                                    expansion_name: card.expansion_name_en,
-                                    expansion_code: card.expansion_code,
-                                    source: 'card_variants'
-                                };
-                                allResults.push(combinedVariant);
-                            }
-                        });
-                    }
-                }
-            }
-            
-            // Sistema di punteggi
-            const scoredResults = allResults.map(result => {
-                let score = 0;
-                
-                // Punteggio per nome Pokemon
-                const name = (result.name_en || result.pokemon_name || '').toLowerCase();
-                if (name.includes(titleInfo.pokemonName)) {
-                    score += 1000;
-                }
-                
-                // Punteggio per numero collezionista
-                if (titleInfo.collectorNumber && result.collector_number === titleInfo.collectorNumber) {
-                    score += 500;
-                }
-                
-                // Punteggio per espansione
-                if (titleInfo.expansion) {
-                    const expansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
-                    if (expansion.includes(titleInfo.expansion.toLowerCase())) {
-                        score += 200;
-                    }
-                }
-                
-                // Bonus per image_url
-                if (result.image_url) {
-                    score += 100;
-                }
-                
-                return { result, score };
-            });
-            
-            // Ordina per punteggio
-            scoredResults.sort((a, b) => b.score - a.score);
-            
-            // Ritorna solo i risultati con punteggio > 0
-            return scoredResults
-                .filter(item => item.score > 0)
-                .map(item => item.result)
-                .slice(0, 5);
-                
-        } catch (error) {
-            console.error('Errore nella ricerca database:', error);
-            throw error;
-        }
-    }
+    // Funzione rimossa - ora usa il content script per la ricerca
     
     // Funzione per calcolare il punteggio di una carta
     function calculateScore(result, titleInfo) {

@@ -369,10 +369,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             connected: window.supabaseClient !== null,
             enabled: isEnabled 
         });
+    } else if (request.action === 'searchCard') {
+        // Gestisce la ricerca manuale dal popup
+        handlePopupSearch(request.titleInfo, sendResponse);
+        return true; // Mantieni il canale aperto per risposta asincrona
     }
     
     return true;
 });
+
+// Gestisce la ricerca dal popup
+async function handlePopupSearch(titleInfo, sendResponse) {
+    try {
+        console.log('🔍 [Popup] Ricerca richiesta per:', titleInfo);
+        
+        const results = await searchCardInDatabase(titleInfo);
+        
+        console.log('✅ [Popup] Risultati trovati:', results.length);
+        
+        sendResponse({
+            success: true,
+            results: results
+        });
+    } catch (error) {
+        console.error('❌ [Popup] Errore nella ricerca:', error);
+        sendResponse({
+            success: false,
+            error: error.message
+        });
+    }
+}
 
 // Inizializza l'estensione quando il DOM è pronto
 if (document.readyState === 'loading') {
