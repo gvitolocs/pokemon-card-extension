@@ -2432,8 +2432,15 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         const specificKeywords = ['holo', 'rare', 'ex', 'gx', 'v', 'vmax'];
                         for (const keyword of specificKeywords) {
                             if (titleLower.includes(keyword) && imageUrl.includes(keyword)) {
-                                nameScore += 15000; // Bonus ridotto per parole specifiche
-                                console.log(`🎯 [CardTrader] PAROLA SPECIFICA IMAGE_URL TROVATA: "${keyword}" -> +15000 punti`);
+                                // CONTROLLO AGGIUNTIVO: Verifica che la parola sia effettivamente rilevante per questa carta
+                                const isRelevantKeyword = true; // Per ora sempre true, ma potrebbe essere migliorato
+                                
+                                if (isRelevantKeyword) {
+                                    nameScore += 8000; // Bonus ridotto per parole specifiche
+                                    console.log(`🎯 [CardTrader] PAROLA SPECIFICA IMAGE_URL TROVATA: "${keyword}" -> +8000 punti`);
+                                } else {
+                                    console.log(`🚫 [CardTrader] Parola "${keyword}" trovata ma non rilevante per questa carta`);
+                                }
                                 break; // Solo il primo match
                             }
                         }
@@ -2469,6 +2476,18 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +8000 punti (solo se nel titolo)`);
             }
             
+            // BONUS per carte V (SOLO se il titolo contiene "v" e non "vmax" o "vstar")
+            if (titleLower.includes('v') && !titleLower.includes('vmax') && !titleLower.includes('vstar') && cardName.includes('v') && !cardName.includes('vmax') && !cardName.includes('vstar')) {
+                nameScore += 6000; // Bonus per match "v" (solo se nel titolo)
+                console.log(`🎯 [CardTrader] MATCH V TROVATO in "${cardName}" -> +6000 punti (solo se nel titolo)`);
+            }
+            
+            // BONUS per carte VSTAR (SOLO se il titolo contiene "vstar")
+            if (titleLower.includes('vstar') && cardName.includes('vstar')) {
+                nameScore += 7000; // Bonus per match "vstar" (solo se nel titolo)
+                console.log(`🎯 [CardTrader] MATCH VSTAR TROVATO in "${cardName}" -> +7000 punti (solo se nel titolo)`);
+            }
+            
             // BONUS MASSIMO per espansioni specifiche trovate nel titolo
             if (titleInfo.expansion && result.expansion_name_en) {
                 const titleExpansion = titleInfo.expansion.toLowerCase();
@@ -2478,8 +2497,17 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 const isExactExpansionMatch = cardExpansion === titleExpansion;
                 const isContainedExpansionMatch = cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion);
                 
-                // Per espansioni specifiche, richiedi un match più preciso
-                if (isExactExpansionMatch) {
+                // CONTROLLO SPECIALE per "V Star Universe" - deve matchare esattamente
+                if (titleExpansion.includes('v star universe') || titleExpansion.includes('vstar universe')) {
+                    if (cardExpansion.includes('v star universe') || cardExpansion.includes('vstar universe')) {
+                        nameScore += 50000; // Bonus MASSIMO per V Star Universe
+                        console.log(`🎯 [CardTrader] V STAR UNIVERSE TROVATO: "${titleExpansion}" = "${cardExpansion}" -> +50000 punti (PRIORITÀ ASSOLUTA)`);
+                    } else {
+                        console.log(`🚫 [CardTrader] V Star Universe richiesto ma non trovato: "${titleExpansion}" vs "${cardExpansion}"`);
+                    }
+                }
+                // Per altre espansioni specifiche, richiedi un match più preciso
+                else if (isExactExpansionMatch) {
                     nameScore += 40000; // Bonus MASSIMO per espansione esatta
                     console.log(`🎯 [CardTrader] ESPANSIONE ESATTA TROVATA: "${titleExpansion}" = "${cardExpansion}" -> +40000 punti (PRIORITÀ ASSOLUTA)`);
                 } else if (isContainedExpansionMatch) {
@@ -2653,6 +2681,25 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                             bonus = 6000; // Bonus MEDIO per parole medie
                         } else if (['star', 'universe', 'frontier', 'dragon', 'delta', 'species'].includes(word)) {
                             bonus = 5000; // Bonus MEDIO per parole di espansione
+                        } else if (['holo', 'rare'].includes(word)) {
+                            // CONTROLLO RIGOROSO: Parole generiche come "holo" e "rare" hanno bonus molto bassi
+                            // e solo se sono effettivamente rilevanti per l'espansione
+                            if (titleInfo.expansion && result.expansion_name_en) {
+                                const titleExpansion = titleInfo.expansion.toLowerCase();
+                                const cardExpansion = result.expansion_name_en.toLowerCase();
+                                
+                                // Se l'espansione matcha, allora "holo" e "rare" sono rilevanti
+                                if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
+                                    bonus = 2000; // Bonus MOLTO BASSO per parole generiche
+                                    console.log(`🎯 [CardTrader] PAROLA GENERICA "${word}" TROVATA ma espansione matcha -> +${bonus} punti`);
+                                } else {
+                                    console.log(`🚫 [CardTrader] Parola generica "${word}" trovata ma espansione non matcha, saltando`);
+                                    return; // Salta questa parola
+                                }
+                            } else {
+                                bonus = 1000; // Bonus MINIMO per parole generiche senza espansione
+                                console.log(`🎯 [CardTrader] PAROLA GENERICA "${word}" TROVATA senza espansione -> +${bonus} punti`);
+                            }
                         } else {
                             bonus = 3000; // Bonus BASE per altre parole
                         }
@@ -2667,6 +2714,21 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         }
                     }
                 });
+            }
+            
+            // PENALIZZAZIONE FINALE: Se il titolo specifica un'espansione ma la carta non la ha, penalizza
+            if (titleInfo.expansion && result.expansion_name_en) {
+                const titleExpansion = titleInfo.expansion.toLowerCase();
+                const cardExpansion = result.expansion_name_en.toLowerCase();
+                
+                // Se l'espansione del titolo non matcha con quella della carta, penalizza
+                const hasExpansionMatch = cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion);
+                
+                if (!hasExpansionMatch) {
+                    // Penalizza significativamente le carte con espansione sbagliata
+                    nameScore -= 30000; // Penalizzazione MASSIMA
+                    console.log(`🚫 [CardTrader] PENALIZZAZIONE: Espansione "${titleExpansion}" non trovata in "${cardExpansion}" -> -30000 punti`);
+                }
             }
             
             return { result, imageUrlScore, nameScore };

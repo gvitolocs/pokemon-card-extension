@@ -35,7 +35,7 @@
         "https://www.vinted.com/*",
         "https://vinted.com/*"
       ],
-      "js": ["supabase.js", "api-config.js", "supabase-config.js", "supabase-integration.js", "content.js"],
+      "js": ["standalone-config.js", "supabase.js", "api-config.js", "supabase-config.js", "supabase-integration.js", "content.js"],
       "css": ["styles.css"]
     }
   ],
