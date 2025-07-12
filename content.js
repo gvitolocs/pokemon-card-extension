@@ -2678,10 +2678,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] MATCH VSTAR TROVATO in "${cardName}" -> +7000 punti (solo se nel titolo)`);
             }
             
-            // BONUS per carte EX (SOLO se il titolo contiene "ex")
-            if (titleLower.includes('ex') && cardName.includes('ex')) {
-                nameScore += 5000; // Bonus per match "ex" (solo se nel titolo)
-                console.log(`🎯 [CardTrader] MATCH EX TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo)`);
+            // BONUS per carte EX (SOLO se il titolo contiene "ex" come parola separata)
+            if (titleLower.includes(' ex ') || titleLower.startsWith('ex ') || titleLower.endsWith(' ex') || titleLower === 'ex') {
+                if (cardName.includes('ex')) {
+                    nameScore += 5000; // Bonus per match "ex" (solo se nel titolo come parola separata)
+                    console.log(`🎯 [CardTrader] MATCH EX TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo come parola separata)`);
+                }
             }
             
             // BONUS per carte GX (SOLO se il titolo contiene "gx")
@@ -2739,29 +2741,14 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         // Bonus basato sull'importanza della parola - SOLO se presente nel titolo
                         if (['vmax', 'vstar', 'sl', 'tg'].includes(word)) {
                             bonus = 8000; // Bonus ALTO per parole importanti
-                        } else if (['ex', 'gx', 'v', 'shiny', 'promo'].includes(word)) {
+                        } else if (['gx', 'v', 'shiny', 'promo'].includes(word)) {
                             bonus = 6000; // Bonus MEDIO per parole medie
                         } else if (['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'].includes(word)) {
                             bonus = 5000; // Bonus MEDIO per parole di espansione
-                        } else if (['holo', 'rare'].includes(word)) {
-                            // CONTROLLO RIGOROSO: Parole generiche come "holo" e "rare" hanno bonus molto bassi
-                            // e solo se sono effettivamente rilevanti per l'espansione
-                            if (titleInfo.expansion && result.expansion_name_en) {
-                                const titleExpansion = titleInfo.expansion.toLowerCase();
-                                const cardExpansion = result.expansion_name_en.toLowerCase();
-                                
-                                // Se l'espansione matcha, allora "holo" e "rare" sono rilevanti
-                                if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
-                                    bonus = 2000; // Bonus MOLTO BASSO per parole generiche
-                                    console.log(`🎯 [CardTrader] PAROLA GENERICA "${word}" TROVATA ma espansione matcha -> +${bonus} punti`);
-                                } else {
-                                    console.log(`🚫 [CardTrader] Parola generica "${word}" trovata ma espansione non matcha, saltando`);
-                                    return; // Salta questa parola
-                                }
-                            } else {
-                                bonus = 1000; // Bonus MINIMO per parole generiche senza espansione
-                                console.log(`🎯 [CardTrader] PAROLA GENERICA "${word}" TROVATA senza espansione -> +${bonus} punti`);
-                            }
+                        } else if (word === 'ex') {
+                            // CONTROLLO RIGOROSO: "ex" deve essere una parola esatta, non parte di altre parole
+                            bonus = 6000; // Bonus MEDIO per "ex" esatto
+                            console.log(`🎯 [CardTrader] PAROLA "ex" ESATTA TROVATA -> +${bonus} punti`);
                         } else {
                             bonus = 3000; // Bonus BASE per altre parole
                         }
