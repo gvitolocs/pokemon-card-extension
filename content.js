@@ -1316,6 +1316,19 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
+            // PRIORITÀ 1.5: Se il titolo contiene '&' o ' and ', il nome della carta deve contenerlo
+            const titleHasAnd = originalTitle.includes('&') || originalTitle.toLowerCase().includes(' and ');
+            if (titleHasAnd) {
+                const cardNameHasAnd = cardName.includes('&') || cardName.toLowerCase().includes(' and ');
+                if (!cardNameHasAnd) {
+                    score -= 50000;
+                    console.log(`❌ [CardTrader] Il titolo contiene '&' o 'and' ma la carta no: penalità -50000 punti`);
+                } else {
+                    score += 1000;
+                    console.log(`🎯 [CardTrader] Match '&' o 'and' sia nel titolo che nel nome carta: +1000 punti`);
+                }
+            }
+            
             return { result, score };
         });
         
