@@ -2735,6 +2735,20 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 let matchedWords = [];
                 
                 titleWords.forEach(word => {
+                    // CONTROLLO RIGOROSO: Verifica che la parola sia effettivamente presente nel titolo originale
+                    const wordInTitle = titleLower.includes(word) || 
+                                       titleLower.includes(word + ' ') || 
+                                       titleLower.includes(' ' + word) || 
+                                       titleLower.includes(' ' + word + ' ') ||
+                                       titleLower.startsWith(word + ' ') ||
+                                       titleLower.endsWith(' ' + word) ||
+                                       titleLower === word;
+                    
+                    if (!wordInTitle) {
+                        console.log(`🚫 [CardTrader] Parola "${word}" NON presente nel titolo originale, saltando`);
+                        return; // Salta questa parola
+                    }
+                    
                     if (imageUrlFinal.includes(word) && !matchedWords.includes(word)) {
                         let bonus = 0;
                         
