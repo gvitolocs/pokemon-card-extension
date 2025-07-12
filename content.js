@@ -881,16 +881,19 @@ function extractTitleInfo(title) {
     const numberMatch = titleLower.match(/(\d+)\/(\d+)/);
     if (numberMatch) {
         collectorNumber = numberMatch[1];
+        console.log(`🎯 [CardTrader] Numero collezionista estratto (X/Y): ${collectorNumber} da ${numberMatch[0]}`);
     } else {
         // Cerca un numero singolo dopo "n." o "numero" o "XY" o simili
         const singleNumberMatch = titleLower.match(/(?:n\.|numero|#|xy|swsh|sv|sm)\s*(\d+)/i);
         if (singleNumberMatch) {
             collectorNumber = singleNumberMatch[1];
+            console.log(`🎯 [CardTrader] Numero collezionista estratto (singolo): ${collectorNumber} da ${singleNumberMatch[0]}`);
         } else {
             // Cerca un numero singolo isolato (per casi come "148")
             const isolatedNumberMatch = titleLower.match(/\b(\d{1,3})\b/);
             if (isolatedNumberMatch) {
                 collectorNumber = isolatedNumberMatch[1];
+                console.log(`🎯 [CardTrader] Numero collezionista estratto (isolato): ${collectorNumber} da ${isolatedNumberMatch[0]}`);
             }
         }
     }
@@ -1177,6 +1180,7 @@ function extractTitleInfo(title) {
         const match = titleLower.match(pattern);
         if (match) {
             expansion = match[0];
+            console.log(`🎯 [CardTrader] Espansione estratta: ${expansion} con pattern: ${pattern}`);
             break;
         }
     }
@@ -1198,13 +1202,17 @@ function extractTitleInfo(title) {
         }
     }
     
-    return {
+    const result = {
         pokemonName,
         expansion,
         expansionCode,
         collectorNumber,
         rarity
     };
+    
+    console.log(`📊 [CardTrader] Info estratte complete:`, result);
+    
+    return result;
 }
 
 // Funzione per cercare nel database
