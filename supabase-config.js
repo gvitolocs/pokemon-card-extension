@@ -13,6 +13,9 @@ async function initializeSupabase() {
         // Crea il client Supabase
         supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
         
+        // Rendi il client disponibile globalmente
+        window.supabaseClient = supabaseClient;
+        
         // Testa la connessione
         const { data, error } = await supabaseClient
             .from('cards')
@@ -25,6 +28,7 @@ async function initializeSupabase() {
         }
         
         console.log('✅ Supabase inizializzato correttamente');
+        console.log('✅ Client Supabase reso disponibile globalmente');
         return true;
         
     } catch (error) {

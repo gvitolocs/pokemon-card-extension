@@ -20,6 +20,9 @@
     "https://www.cardtrader.com/*",
     "https://*.supabase.co/*"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "content_scripts": [
     {
       "matches": [
@@ -32,7 +35,7 @@
         "https://www.vinted.com/*",
         "https://vinted.com/*"
       ],
-      "js": ["api-config.js", "supabase-config.js", "supabase-integration.js", "content.js"],
+      "js": ["supabase.js", "api-config.js", "supabase-config.js", "supabase-integration.js", "content.js"],
       "css": ["styles.css"]
     }
   ],
