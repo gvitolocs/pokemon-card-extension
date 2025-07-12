@@ -48,6 +48,11 @@ async function initializeExtension() {
             console.warn('⚠️ Funzione initializeSupabase non disponibile');
         }
         
+        // Pulisci attributi processati esistenti
+        if (typeof cleanupProcessedAttributes === 'function') {
+            cleanupProcessedAttributes();
+        }
+        
         // Avvia l'osservatore per le nuove inserzioni
         startObserver();
         
@@ -60,10 +65,47 @@ async function initializeExtension() {
     }
 }
 
+// Funzione per pulire gli attributi processati dagli elementi che non dovrebbero essere processati
+function cleanupProcessedAttributes() {
+    const hostname = window.location.hostname;
+    
+    if (hostname.includes('vinted')) {
+        // Rimuovi attributi da elementi che non dovrebbero essere processati
+        const cleanupSelectors = [
+            '[data-testid="item-attributes-upload_date"]',
+            '[data-testid="item-attributes-status"]',
+            '[data-testid="item-attributes-brand-menu-button"]',
+            '.details-list__item-value',
+            '.web_ui__Text__subtitle',
+            '.web_ui__Text__body',
+            '.web_ui__Spacer__',
+            '.web_ui__Divider__',
+            '.overflow-menu',
+            '.u-cursor-pointer',
+            'button',
+            'a'
+        ];
+        
+        cleanupSelectors.forEach(selector => {
+            const elements = document.querySelectorAll(selector);
+            elements.forEach(element => {
+                if (element.hasAttribute('data-pokemon-linker-processed')) {
+                    element.removeAttribute('data-pokemon-linker-processed');
+                }
+            });
+        });
+        
+        console.log('🧹 [CardTrader] Puliti attributi processati da elementi non rilevanti');
+    }
+}
+
 // Avvia l'osservatore per rilevare nuove inserzioni
 function startObserver() {
     try {
         console.log('🔍 [CardTrader] Avvio osservatore...');
+        
+        // Pulisci attributi processati esistenti
+        cleanupProcessedAttributes();
         
         const observer = new MutationObserver((mutations) => {
             if (!isEnabled || isProcessing) return;
@@ -138,11 +180,56 @@ function processNewListings(container) {
 function findListings() {
     const selectors = getListingSelectors();
     const listings = [];
+    const hostname = window.location.hostname;
     
     selectors.forEach(selector => {
         const elements = document.querySelectorAll(selector);
         elements.forEach(element => {
             if (!element.hasAttribute('data-pokemon-linker-processed')) {
+                // Per Vinted, filtra ulteriormente gli elementi
+                if (hostname.includes('vinted')) {
+                    // Salta elementi che potrebbero nascondere informazioni importanti
+                    const skipSelectors = [
+                        '[data-testid="item-attributes-upload_date"]',
+                        '[data-testid="item-attributes-status"]',
+                        '[data-testid="item-attributes-brand-menu-button"]',
+                        '.details-list__item-value',
+                        '.web_ui__Text__subtitle',
+                        '.web_ui__Text__body',
+                        '.web_ui__Spacer__',
+                        '.web_ui__Divider__',
+                        '.overflow-menu',
+                        '.u-cursor-pointer',
+                        'button',
+                        'a'
+                    ];
+                    
+                    let shouldSkip = false;
+                    for (const skipSelector of skipSelectors) {
+                        if (element.matches(skipSelector) || element.closest(skipSelector)) {
+                            shouldSkip = true;
+                            break;
+                        }
+                    }
+                    
+                    if (shouldSkip) {
+                        return; // Salta questo elemento
+                    }
+                    
+                    // Processa solo elementi principali
+                    const isMainContainer = element.classList.contains('summary-max-lines-4') ||
+                                          element.classList.contains('details-list--main-info') ||
+                                          element.classList.contains('feed-grid__item') ||
+                                          element.classList.contains('item-card') ||
+                                          element.tagName === 'H1' ||
+                                          element.tagName === 'H2' ||
+                                          element.tagName === 'H3';
+                    
+                    if (!isMainContainer) {
+                        return; // Salta questo elemento
+                    }
+                }
+                
                 listings.push(element);
             }
         });
@@ -156,10 +243,56 @@ function findListingsInContainer(container) {
     const selectors = getListingSelectors();
     const listings = [];
     
+    const hostname = window.location.hostname;
+    
     selectors.forEach(selector => {
         const elements = container.querySelectorAll ? container.querySelectorAll(selector) : [];
         elements.forEach(element => {
             if (!element.hasAttribute('data-pokemon-linker-processed')) {
+                // Per Vinted, filtra ulteriormente gli elementi
+                if (hostname.includes('vinted')) {
+                    // Salta elementi che potrebbero nascondere informazioni importanti
+                    const skipSelectors = [
+                        '[data-testid="item-attributes-upload_date"]',
+                        '[data-testid="item-attributes-status"]',
+                        '[data-testid="item-attributes-brand-menu-button"]',
+                        '.details-list__item-value',
+                        '.web_ui__Text__subtitle',
+                        '.web_ui__Text__body',
+                        '.web_ui__Spacer__',
+                        '.web_ui__Divider__',
+                        '.overflow-menu',
+                        '.u-cursor-pointer',
+                        'button',
+                        'a'
+                    ];
+                    
+                    let shouldSkip = false;
+                    for (const skipSelector of skipSelectors) {
+                        if (element.matches(skipSelector) || element.closest(skipSelector)) {
+                            shouldSkip = true;
+                            break;
+                        }
+                    }
+                    
+                    if (shouldSkip) {
+                        return; // Salta questo elemento
+                    }
+                    
+                    // Processa solo elementi principali
+                    const isMainContainer = element.classList.contains('summary-max-lines-4') ||
+                                          element.classList.contains('details-list--main-info') ||
+                                          element.classList.contains('feed-grid__item') ||
+                                          element.classList.contains('item-card') ||
+                                          element.tagName === 'H1' ||
+                                          element.tagName === 'H2' ||
+                                          element.tagName === 'H3';
+                    
+                    if (!isMainContainer) {
+                        return; // Salta questo elemento
+                    }
+                }
+                
                 listings.push(element);
             }
         });
@@ -181,10 +314,22 @@ function getListingSelectors() {
         ];
     } else if (hostname.includes('vinted')) {
         return [
+            // Nuovi selettori per Vinted aggiornati
             '[data-testid="item-card"]',
             '.feed-grid__item',
             '.web_ui__Text__text',
-            '[data-testid="item"]'
+            '[data-testid="item"]',
+            // Selettori aggiuntivi per la nuova struttura Vinted
+            '.details-list',
+            '.details-list__item',
+            '[data-testid="item-details-divider"]',
+            // Selettori per le card nella griglia
+            '.feed-grid__item',
+            '.item-card',
+            '.item-card__link',
+            // Selettori per le pagine di prodotto
+            '.item-details',
+            '.item-details__content'
         ];
     }
     
@@ -194,8 +339,49 @@ function getListingSelectors() {
 // Processa una singola inserzione
 async function processListing(listingElement) {
     try {
+        // Verifica se l'elemento è già stato processato
         if (listingElement.hasAttribute('data-pokemon-linker-processed')) {
             return;
+        }
+        
+        // Per Vinted, processa solo elementi principali per evitare duplicati
+        const hostname = window.location.hostname;
+        if (hostname.includes('vinted')) {
+            // NON processare elementi che potrebbero nascondere informazioni importanti
+            const skipSelectors = [
+                '[data-testid="item-attributes-upload_date"]',  // Box "Caricato"
+                '[data-testid="item-attributes-status"]',        // Box "Condizioni"
+                '[data-testid="item-attributes-brand-menu-button"]', // Menu brand
+                '.details-list__item-value',                     // Valori dei dettagli
+                '.web_ui__Text__subtitle',                       // Sottotitoli
+                '.web_ui__Text__body',                           // Testo del corpo
+                '.web_ui__Spacer__',                             // Spaziatori
+                '.web_ui__Divider__',                            // Divisori
+                '.overflow-menu',                                // Menu overflow
+                '.u-cursor-pointer',                             // Elementi cliccabili
+                'button',                                        // Pulsanti
+                'a'                                              // Link
+            ];
+            
+            // Verifica se l'elemento dovrebbe essere saltato
+            for (const selector of skipSelectors) {
+                if (listingElement.matches(selector) || listingElement.closest(selector)) {
+                    return; // Salta questo elemento
+                }
+            }
+            
+            // Processa solo elementi principali che potrebbero contenere titoli
+            const isMainContainer = listingElement.classList.contains('summary-max-lines-4') ||
+                                  listingElement.classList.contains('details-list--main-info') ||
+                                  listingElement.classList.contains('feed-grid__item') ||
+                                  listingElement.classList.contains('item-card') ||
+                                  listingElement.tagName === 'H1' ||
+                                  listingElement.tagName === 'H2' ||
+                                  listingElement.tagName === 'H3';
+            
+            if (!isMainContainer) {
+                return;
+            }
         }
         
         // Marca come processata per evitare duplicati
@@ -218,6 +404,8 @@ async function processListing(listingElement) {
             return;
         }
         
+        console.log('🔍 [CardTrader] Titolo estratto:', title);
+        
         // Estrai informazioni dal titolo
         if (typeof extractTitleInfo !== 'function') {
             console.warn('⚠️ [CardTrader] Funzione extractTitleInfo non disponibile');
@@ -227,10 +415,11 @@ async function processListing(listingElement) {
         const titleInfo = extractTitleInfo(title);
         
         if (!titleInfo.pokemonName) {
+            console.log('❌ [CardTrader] Nessun Pokemon trovato nel titolo:', title);
             return;
         }
         
-        console.log('🔍 Processando inserzione:', titleInfo);
+        console.log('🔍 [CardTrader] Processando inserzione:', titleInfo);
         
         // Cerca nel database
         if (typeof searchCardInDatabase !== 'function') {
@@ -250,6 +439,8 @@ async function processListing(listingElement) {
             if (typeof updateStats === 'function') {
                 updateStats('linksGenerated', results.length);
             }
+        } else {
+            console.log('❌ [CardTrader] Nessun risultato trovato per:', titleInfo.pokemonName);
         }
         
     } catch (error) {
@@ -278,18 +469,45 @@ function extractTitleFromListing(listingElement) {
         }
         
     } else if (hostname.includes('vinted')) {
-        // Vinted
+        // Vinted - Aggiornato per la nuova struttura
         const titleSelectors = [
+            // Titolo principale nella pagina di prodotto
+            'h1.web_ui__Text__text.web_ui__Text__title.web_ui__Text__left',
+            '.summary-max-lines-4 h1.web_ui__Text__text',
             '[data-testid="item-title"]',
-            '.web_ui__Text__text',
-            'h3',
+            // Titoli nelle card della griglia
+            '.item-card__title',
+            '.feed-grid__item h3',
+            '.web_ui__Text__text.web_ui__Text__title',
+            // Fallback generici
+            'h1',
             '.item-title'
         ];
         
         for (const selector of titleSelectors) {
             const element = listingElement.querySelector(selector);
             if (element) {
-                return element.textContent.trim();
+                const title = element.textContent.trim();
+                // Verifica che il titolo non sia troppo corto o generico
+                if (title && title.length > 3 && !title.includes('€') && !title.includes('Condizioni')) {
+                    console.log('🔍 [CardTrader] Titolo Vinted trovato:', title);
+                    return title;
+                }
+            }
+        }
+        
+        // Se non troviamo un titolo specifico, cerca nel contenuto dell'elemento
+        const allTextElements = listingElement.querySelectorAll('.web_ui__Text__text');
+        for (const textElement of allTextElements) {
+            const text = textElement.textContent.trim();
+            // Cerca testo che sembra un titolo di carta Pokemon
+            if (text && text.length > 5 && text.length < 100 && 
+                (text.toLowerCase().includes('pokemon') || 
+                 text.toLowerCase().includes('pokémon') ||
+                 text.toLowerCase().includes('carta') ||
+                 text.toLowerCase().includes('card'))) {
+                console.log('🔍 [CardTrader] Titolo Vinted trovato nel testo:', text);
+                return text;
             }
         }
     }
@@ -338,7 +556,15 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
     
     const linkText = document.createElement('span');
     linkText.className = 'pokemon-card-linker-link-text';
-    linkText.textContent = `Vedi ${bestMatch.name_en || bestMatch.pokemon_name} su CardTrader`;
+    
+    // Per Vinted, usa il nome del Pokemon se disponibile
+    const hostname = window.location.hostname;
+    if (hostname.includes('vinted') && titleInfo && titleInfo.pokemonName) {
+        const pokemonName = titleInfo.pokemonName.charAt(0).toUpperCase() + titleInfo.pokemonName.slice(1);
+        linkText.textContent = `Vedi ${pokemonName} su CardTrader`;
+    } else {
+        linkText.textContent = `Vedi ${bestMatch.name_en || bestMatch.pokemon_name} su CardTrader`;
+    }
     
     const badge = document.createElement('span');
     badge.className = 'pokemon-card-linker-badge pokemon-card-linker-badge-perfect';
@@ -367,7 +593,14 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             
             const additionalText = document.createElement('span');
             additionalText.className = 'pokemon-card-linker-link-text';
-            additionalText.textContent = `Variante ${index + 2}: ${result.name_en || result.pokemon_name}`;
+            
+            // Per Vinted, usa il nome del Pokemon se disponibile
+            if (hostname.includes('vinted') && titleInfo && titleInfo.pokemonName) {
+                const pokemonName = titleInfo.pokemonName.charAt(0).toUpperCase() + titleInfo.pokemonName.slice(1);
+                additionalText.textContent = `Variante ${index + 2}: ${pokemonName}`;
+            } else {
+                additionalText.textContent = `Variante ${index + 2}: ${result.name_en || result.pokemon_name}`;
+            }
             
             const additionalBadge = document.createElement('span');
             additionalBadge.className = 'pokemon-card-linker-badge pokemon-card-linker-badge-good';
@@ -389,7 +622,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
     insertLinkContainer(listingElement, linkContainer);
 }
 
-// Inserisce il container dei link nell'inserzione
+// Inserisce il container dei link nell'elemento inserzione
 function insertLinkContainer(listingElement, linkContainer) {
     const hostname = window.location.hostname;
     
@@ -401,16 +634,81 @@ function insertLinkContainer(listingElement, linkContainer) {
         } else {
             listingElement.appendChild(linkContainer);
         }
-        
     } else if (hostname.includes('vinted')) {
-        // Vinted: inserisci dopo il titolo
-        const titleElement = listingElement.querySelector('[data-testid="item-title"], .web_ui__Text__text, h3');
+        // Vinted: sistema semplificato con link diretti
+        const titleElement = listingElement.querySelector('h1.web_ui__Text__text.web_ui__Text__title, [data-testid="item-title"]');
+        
         if (titleElement && titleElement.parentNode) {
-            titleElement.parentNode.insertBefore(linkContainer, titleElement.nextSibling);
+            // Crea un container per i link
+            const linksContainer = document.createElement('div');
+            linksContainer.style.cssText = `
+                display: inline-block;
+                margin-left: 10px;
+                vertical-align: middle;
+            `;
+            
+            // Estrai i link dal popup originale
+            const links = linkContainer.querySelectorAll('.pokemon-card-linker-link');
+            
+            // Crea link diretti per ogni risultato
+            links.forEach((link, index) => {
+                const directLink = document.createElement('a');
+                directLink.href = link.href;
+                directLink.target = '_blank';
+                directLink.style.cssText = `
+                    display: inline-block;
+                    background: #28a745;
+                    color: white;
+                    border: 1px solid #1e7e34;
+                    border-radius: 4px;
+                    padding: 6px 12px;
+                    font-size: 12px;
+                    font-weight: bold;
+                    text-decoration: none;
+                    margin-right: 5px;
+                    margin-bottom: 5px;
+                    transition: background 0.3s;
+                `;
+                
+                // Testo del link
+                const linkText = link.querySelector('.pokemon-card-linker-link-text');
+                const badge = link.querySelector('.pokemon-card-linker-badge');
+                
+                if (index === 0) {
+                    directLink.textContent = '🃏 CARDTRADER';
+                    directLink.title = linkText ? linkText.textContent : 'Vedi su CardTrader';
+                } else {
+                    directLink.textContent = `Alt ${index}`;
+                    directLink.title = linkText ? linkText.textContent : `Variante ${index + 1}`;
+                }
+                
+                // Hover effects
+                directLink.addEventListener('mouseenter', () => {
+                    directLink.style.background = '#218838';
+                });
+                
+                directLink.addEventListener('mouseleave', () => {
+                    directLink.style.background = '#28a745';
+                });
+                
+                linksContainer.appendChild(directLink);
+            });
+            
+            // Inserisci il container dopo il titolo
+            titleElement.parentNode.insertBefore(linksContainer, titleElement.nextSibling);
+            
+            console.log('✅ [CardTrader] Link diretti creati per Vinted');
+            
         } else {
+            // Fallback: aggiungi direttamente all'elemento
             listingElement.appendChild(linkContainer);
         }
+    } else {
+        // Altri siti: inserisci alla fine
+        listingElement.appendChild(linkContainer);
     }
+    
+    console.log('✅ [CardTrader] Container link inserito con successo');
 }
 
 // Gestisce i messaggi dal popup
@@ -668,7 +966,7 @@ function patchVintedProductPage() {
     console.log('🔍 [CardTrader] Cercando box del titolo Vinted...');
     
     // Cerca il box del titolo con più selettori per Vinted
-    const titleBox = document.querySelector('.summary-max-lines-4, [data-testid="item-title"], .item-title-container, .title-section');
+    const titleBox = document.querySelector('.summary-max-lines-4, [data-testid="item-title"], .item-title-container, .title-section, .details-list--main-info');
     console.log('🔍 [CardTrader] Box del titolo Vinted trovato:', !!titleBox);
     
     if (titleBox && !document.querySelector('.pokemon-card-linker-product')) {
@@ -677,6 +975,7 @@ function patchVintedProductPage() {
         // Trova il titolo con più selettori per Vinted
         const titleSelectors = [
             'h1.web_ui__Text__text.web_ui__Text__title.web_ui__Text__left',
+            '.summary-max-lines-4 h1.web_ui__Text__text',
             '.web_ui__Text__text.web_ui__Text__title',
             '[data-testid="item-title"]',
             '.item-title',
@@ -712,7 +1011,7 @@ function patchVintedProductPage() {
             return;
         }
         
-        // Cerca nel database e inserisci il bottone
+        // Cerca nel database e inserisci il popup
         console.log('🔍 [CardTrader] Cercando nel database Vinted...');
         console.log('🔍 [CardTrader] Client Supabase disponibile:', !!window.supabaseClient);
         searchCardInDatabase(titleInfo, title).then(results => {
@@ -723,35 +1022,18 @@ function patchVintedProductPage() {
                 return;
             }
             
-            const bestMatch = results[0];
-            const cardTraderLink = generateCardTraderLink(bestMatch.blueprint_id);
-            console.log('🔗 [CardTrader] Link generato Vinted:', cardTraderLink);
+            // Crea un elemento temporaneo per utilizzare il sistema di popup
+            const tempElement = document.createElement('div');
+            tempElement.style.display = 'none';
+            document.body.appendChild(tempElement);
             
-            // Crea il bottone CardTrader
-            const ctBtn = document.createElement('a');
-            ctBtn.href = cardTraderLink;
-            ctBtn.target = '_blank';
-            ctBtn.className = 'pokemon-card-linker-product';
-            ctBtn.style.cssText = 'display:inline-block;margin-left:10px;padding:6px 12px;background:#28a745;color:white;border:1px solid #1e7e34;border-radius:4px;text-decoration:none;font-size:12px;font-weight:bold;transition:background 0.3s;';
-            ctBtn.textContent = 'CARDTRADER';
-            ctBtn.title = 'Vedi su CardTrader';
+            // Utilizza il sistema di popup esistente
+            addCardTraderLinks(tempElement, results, titleInfo);
             
-            // Aggiungi hover effect
-            ctBtn.addEventListener('mouseenter', () => {
-                ctBtn.style.background = '#218838';
-            });
-            ctBtn.addEventListener('mouseleave', () => {
-                ctBtn.style.background = '#28a745';
-            });
+            // Rimuovi l'elemento temporaneo
+            document.body.removeChild(tempElement);
             
-            // Inserisci nel box del titolo, dopo il titolo principale
-            const titleElement = titleBox.querySelector('h1, .web_ui__Text__text.web_ui__Text__title, [data-testid="item-title"]');
-            if (titleElement && titleElement.parentNode) {
-                titleElement.parentNode.insertBefore(ctBtn, titleElement.nextSibling);
-            } else {
-                titleBox.appendChild(ctBtn);
-            }
-            console.log('✅ [CardTrader] Pulsante CARDTRADER aggiunto a Vinted!');
+            console.log('✅ [CardTrader] Popup CARDTRADER aggiunto a Vinted!');
         }).catch(error => {
             console.error('❌ [CardTrader] Errore nella ricerca database Vinted:', error);
         });
@@ -1282,6 +1564,7 @@ function extractTitleInfo(title) {
         /holon phantoms/i,
         /crystal guardians/i,
         /dragon frontiers/i,
+        /dragon frontier/i,  // Aggiunto pattern singolare
         /power keepers/i,
         /ex dragon/i,
         /ex ruby & sapphire/i,
@@ -1290,6 +1573,7 @@ function extractTitleInfo(title) {
         /ex unseen forces/i,
         /ex dragon/i,
         /ex dragon frontiers/i,
+        /ex dragon frontier/i,  // Aggiunto pattern singolare
         /ex power keepers/i,
         /ex holon phantoms/i,
         /ex crystal guardians/i,
@@ -1891,6 +2175,90 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             let imageUrlMatches = [];
             let nameScore = 0;
             
+            // PRIORITÀ 1: MATCH NOME POKEMON (BASE)
+            const titleLower = originalTitle.toLowerCase();
+            const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
+            
+            // Match base del Pokemon
+            if (cardName.includes(titleInfo.pokemonName.toLowerCase())) {
+                nameScore += 10000; // Base score per match Pokemon
+                console.log(`🎯 [CardTrader] MATCH POKEMON BASE: "${titleInfo.pokemonName}" in "${cardName}" -> +10000 punti`);
+            }
+            
+            // PRIORITÀ 2: MATCH NUMERO COLLEZIONE (ALTA PRIORITÀ)
+            if (titleInfo.collectorNumber && result.collector_number) {
+                const titleNumber = titleInfo.collectorNumber.toString();
+                const cardNumber = result.collector_number.toString();
+                
+                if (titleNumber === cardNumber) {
+                    nameScore += 50000; // PRIORITÀ MASSIMA per numero esatto
+                    console.log(`🎯 [CardTrader] NUMERO COLLEZIONE ESATTO: ${titleNumber} = ${cardNumber} -> +50000 punti (PRIORITÀ MASSIMA)`);
+                } else if (cardNumber.includes(titleNumber) || titleNumber.includes(cardNumber)) {
+                    nameScore += 30000; // PRIORITÀ ALTA per numero parziale
+                    console.log(`🎯 [CardTrader] NUMERO COLLEZIONE PARZIALE: ${titleNumber} ~ ${cardNumber} -> +30000 punti (PRIORITÀ ALTA)`);
+                }
+            }
+            
+            // PRIORITÀ 3: ESPANSIONE (solo se abbiamo già un buon match Pokemon + Numero)
+            if (nameScore >= 15000) { // Solo se abbiamo almeno un match Pokemon + numero
+                // BONUS per espansioni specifiche trovate nel titolo
+                if (titleInfo.expansion && result.expansion_name_en) {
+                    const titleExpansion = titleInfo.expansion.toLowerCase();
+                    const cardExpansion = result.expansion_name_en.toLowerCase();
+                    
+                    if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
+                        nameScore += 20000; // Bonus per espansione specifica
+                        console.log(`🎯 [CardTrader] ESPANSIONE SPECIFICA TROVATA: "${titleExpansion}" in "${cardExpansion}" -> +20000 punti`);
+                    }
+                }
+                
+                // BONUS per codici espansione specifici
+                if (titleInfo.expansionCode && result.expansion_code) {
+                    const titleCode = titleInfo.expansionCode.toLowerCase();
+                    const cardCode = result.expansion_code.toLowerCase();
+                    
+                    if (cardCode.includes(titleCode) || titleCode.includes(cardCode)) {
+                        nameScore += 15000; // Bonus per codice espansione
+                        console.log(`🎯 [CardTrader] CODICE ESPANSIONE TROVATO: "${titleCode}" in "${cardCode}" -> +15000 punti`);
+                    }
+                }
+                
+                // BONUS per espansioni nell'image_url (solo se abbiamo già un buon match)
+                if (result.image_url && originalTitle) {
+                    const imageUrl = result.image_url.toLowerCase();
+                    const titleLower = originalTitle.toLowerCase();
+                    
+                    // BONUS SPECIFICO per espansioni nell'image_url
+                    const expansionKeywords = [
+                        'vstar-universe', 'vstar universe', 'v star universe',
+                        'dragon-frontier', 'dragon frontier', 'ex dragon frontiers',
+                        'delta-species', 'delta species',
+                        'holo', 'rare', 'ex', 'gx', 'v', 'vmax'
+                    ];
+                    
+                    for (const keyword of expansionKeywords) {
+                        if (titleLower.includes(keyword.replace('-', ' ')) && imageUrl.includes(keyword)) {
+                            nameScore += 25000; // Bonus per espansione nell'image_url
+                            console.log(`🎯 [CardTrader] ESPANSIONE IMAGE_URL TROVATA: "${keyword}" -> +25000 punti`);
+                            break; // Solo il primo match
+                        }
+                    }
+                }
+                
+                // BONUS per espansioni generiche trovate nel titolo
+                const expansionKeywords = ['dragon frontier', 'ex dragon frontiers', 'delta species', 'holo', 'rare', 'ex', 'v star universe', 'vstar universe'];
+                for (const keyword of expansionKeywords) {
+                    if (originalTitle.toLowerCase().includes(keyword) && result.expansion_name_en) {
+                        const cardExpansion = result.expansion_name_en.toLowerCase();
+                        if (cardExpansion.includes(keyword) || keyword.includes(cardExpansion)) {
+                            nameScore += 10000; // Bonus per keyword espansione
+                            console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +10000 punti`);
+                            break; // Solo il primo match
+                        }
+                    }
+                }
+            }
+            
             // PRIORITÀ ASSOLUTA: Se abbiamo un allenatore, cerca nel nome della carta
             if (titleInfo.trainerName) {
                 const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
@@ -1902,22 +2270,28 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
-            // PRIORITÀ MASSIMA: Se il titolo contiene un allenatore, cerca nel nome della carta anche senza trainerName
-            if (!titleInfo.trainerName && originalTitle.toLowerCase().includes("erika's")) {
-                const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
-                if (cardName.includes('erika')) {
-                    nameScore += 100000; // PRIORITÀ MASSIMA per carte con nome allenatore
-                    console.log(`🎯 [CardTrader] NOME ALLENATORE TROVATO NEL TITOLO: erika in "${cardName}" -> +100000 punti (PRIORITÀ MASSIMA)`);
-                }
-            }
-            
             // PRIORITÀ ALTA: Se il titolo contiene "ex" o "shiny", cerca nel nome della carta
-            const titleLower = originalTitle.toLowerCase();
-            const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
-            
             if (titleLower.includes('ex') && cardName.includes('ex')) {
                 nameScore += 5000; // Bonus per match "ex"
                 console.log(`🎯 [CardTrader] MATCH EX TROVATO in "${cardName}" -> +5000 punti`);
+            }
+            
+            // BONUS MASSIMO per carte VMAX (priorità assoluta)
+            if (titleLower.includes('vmax') && cardName.includes('vmax')) {
+                nameScore += 15000; // Bonus MASSIMO per match "vmax" (priorità assoluta)
+                console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +15000 punti (PRIORITÀ ASSOLUTA)`);
+            }
+            
+            // BONUS MASSIMO per image_url che contiene SL (priorità assoluta per carte SL)
+            if (result.image_url && result.image_url.toLowerCase().includes('sl')) {
+                nameScore += 10000; // Bonus MASSIMO per image_url con SL
+                console.log(`🎯 [CardTrader] IMAGE_URL CON SL TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
+            }
+            
+            // BONUS MASSIMO per image_url che contiene VMAX (priorità assoluta per carte VMAX)
+            if (result.image_url && result.image_url.toLowerCase().includes('vmax')) {
+                nameScore += 12000; // Bonus MASSIMO per image_url con VMAX
+                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +12000 punti (PRIORITÀ ASSOLUTA)`);
             }
             
             if (titleLower.includes('shiny') && cardName.includes('shiny')) {
@@ -1946,6 +2320,95 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             if (result.image_url && result.image_url.toLowerCase().includes('sl')) {
                 nameScore += 10000; // Bonus MASSIMO per image_url con SL
                 console.log(`🎯 [CardTrader] IMAGE_URL CON SL TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
+            }
+            
+            // BONUS MASSIMO per image_url che contiene VMAX (priorità assoluta per carte VMAX)
+            if (result.image_url && result.image_url.toLowerCase().includes('vmax')) {
+                nameScore += 12000; // Bonus MASSIMO per image_url con VMAX
+                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +12000 punti (PRIORITÀ ASSOLUTA)`);
+            }
+            
+            // BONUS MASSIMO per espansioni specifiche trovate nel titolo
+            if (titleInfo.expansion && result.expansion_name_en) {
+                const titleExpansion = titleInfo.expansion.toLowerCase();
+                const cardExpansion = result.expansion_name_en.toLowerCase();
+                
+                if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
+                    nameScore += 25000; // Bonus MASSIMO per espansione specifica
+                    console.log(`🎯 [CardTrader] ESPANSIONE SPECIFICA TROVATA: "${titleExpansion}" in "${cardExpansion}" -> +25000 punti (PRIORITÀ ASSOLUTA)`);
+                }
+            }
+            
+            // BONUS ALTO per codici espansione specifici
+            if (titleInfo.expansionCode && result.expansion_code) {
+                const titleCode = titleInfo.expansionCode.toLowerCase();
+                const cardCode = result.expansion_code.toLowerCase();
+                
+                if (cardCode.includes(titleCode) || titleCode.includes(cardCode)) {
+                    nameScore += 20000; // Bonus ALTO per codice espansione
+                    console.log(`🎯 [CardTrader] CODICE ESPANSIONE TROVATO: "${titleCode}" in "${cardCode}" -> +20000 punti (PRIORITÀ ALTA)`);
+                }
+            }
+            
+            // BONUS MASSIMO per match diretto tra titolo e image_url (PRIORITÀ ASSOLUTA)
+            if (result.image_url && originalTitle) {
+                const imageUrl = result.image_url.toLowerCase();
+                const titleLower = originalTitle.toLowerCase();
+                
+                // Estrai parole chiave dal titolo che potrebbero essere nell'image_url
+                const titleKeywords = titleLower.split(/\s+/).filter(word => 
+                    word.length > 2 && 
+                    !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon'].includes(word)
+                );
+                
+                // Cerca match diretti tra parole del titolo e image_url
+                let directMatches = 0;
+                let totalKeywords = titleKeywords.length;
+                
+                titleKeywords.forEach(keyword => {
+                    if (imageUrl.includes(keyword)) {
+                        directMatches++;
+                        console.log(`🎯 [CardTrader] MATCH DIRETTO TROVATO: "${keyword}" in image_url -> +1 match`);
+                    }
+                });
+                
+                // Se abbiamo almeno 2 match diretti, bonus MASSIMO
+                if (directMatches >= 2) {
+                    nameScore += 50000; // Bonus MASSIMO per match multipli
+                    console.log(`🎯 [CardTrader] ${directMatches}/${totalKeywords} MATCH DIRETTI TROVATI -> +50000 punti (PRIORITÀ ASSOLUTA)`);
+                } else if (directMatches >= 1) {
+                    nameScore += 30000; // Bonus ALTO per match singolo
+                    console.log(`🎯 [CardTrader] ${directMatches}/${totalKeywords} MATCH DIRETTO TROVATO -> +30000 punti (PRIORITÀ ALTA)`);
+                }
+                
+                // BONUS SPECIFICO per espansioni nell'image_url
+                const expansionKeywords = [
+                    'vstar-universe', 'vstar universe', 'v star universe',
+                    'dragon-frontier', 'dragon frontier', 'ex dragon frontiers',
+                    'delta-species', 'delta species',
+                    'holo', 'rare', 'ex', 'gx', 'v', 'vmax'
+                ];
+                
+                for (const keyword of expansionKeywords) {
+                    if (titleLower.includes(keyword.replace('-', ' ')) && imageUrl.includes(keyword)) {
+                        nameScore += 40000; // Bonus MASSIMO per espansione nell'image_url
+                        console.log(`🎯 [CardTrader] ESPANSIONE IMAGE_URL TROVATA: "${keyword}" -> +40000 punti (PRIORITÀ ASSOLUTA)`);
+                        break; // Solo il primo match
+                    }
+                }
+            }
+            
+            // BONUS per espansioni generiche trovate nel titolo
+            const expansionKeywords = ['dragon frontier', 'ex dragon frontiers', 'delta species', 'holo', 'rare', 'ex', 'v star universe', 'vstar universe'];
+            for (const keyword of expansionKeywords) {
+                if (originalTitle.toLowerCase().includes(keyword) && result.expansion_name_en) {
+                    const cardExpansion = result.expansion_name_en.toLowerCase();
+                    if (cardExpansion.includes(keyword) || keyword.includes(cardExpansion)) {
+                        nameScore += 15000; // Bonus per keyword espansione
+                        console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +15000 punti`);
+                        break; // Solo il primo match
+                    }
+                }
             }
             
             if (result.image_url) {
@@ -2004,6 +2467,41 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         if (trainerNameMatches.length > 0) {
             console.log(`✅ [CardTrader] Trovati ${trainerNameMatches.length} match con nome allenatore - priorità assoluta`);
             return trainerNameMatches.map(item => item.result).slice(0, 5);
+        }
+        
+        // PRIORITÀ MASSIMA: Match Pokemon + Numero Collezione (60,000+ punti)
+        const perfectMatches = finalResults.filter(item => item.nameScore >= 60000);
+        
+        if (perfectMatches.length > 0) {
+            console.log(`✅ [CardTrader] Trovati ${perfectMatches.length} match perfetti (Pokemon + Numero) - priorità massima`);
+            return perfectMatches.map(item => item.result).slice(0, 5);
+        }
+        
+        // PRIORITÀ ALTA: Match Pokemon + Numero Parziale (40,000+ punti)
+        const goodMatches = finalResults.filter(item => item.nameScore >= 40000);
+        
+        if (goodMatches.length > 0) {
+            console.log(`✅ [CardTrader] Trovati ${goodMatches.length} match buoni (Pokemon + Numero parziale) - priorità alta`);
+            return goodMatches.map(item => item.result).slice(0, 5);
+        }
+        
+        // PRIORITÀ MEDIA: Match Pokemon + Espansione (30,000+ punti)
+        const expansionMatches = finalResults.filter(item => item.nameScore >= 30000);
+        
+        if (expansionMatches.length > 0) {
+            console.log(`✅ [CardTrader] Trovati ${expansionMatches.length} match con espansione - priorità media`);
+            return expansionMatches.map(item => item.result).slice(0, 5);
+        }
+        
+        // PRIORITÀ ASSOLUTA: Se abbiamo carte VMAX, mostrale per prime
+        const vmaxMatches = finalResults.filter(item => {
+            const cardName = (item.result.name_en || item.result.pokemon_name || '').toLowerCase();
+            return cardName.includes('vmax');
+        });
+        
+        if (vmaxMatches.length > 0) {
+            console.log(`✅ [CardTrader] Trovate ${vmaxMatches.length} carte VMAX - priorità assoluta`);
+            return vmaxMatches.map(item => item.result).slice(0, 5);
         }
         
         // Se abbiamo match perfetti nell'image_url, priorità alta
