@@ -916,8 +916,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     .from('card_variants')
                     .select('*')
                     .in('blueprint_id', blueprintIds)
-                    .not('image_url', 'is', null)
-                    .limit(50); // Limita per performance
+                    .not('image_url', 'is', null);
                 
                 if (!variantsError && variants && variants.length > 0) {
                     console.log(`✅ [CardTrader] Trovate ${variants.length} varianti con image_url`);
