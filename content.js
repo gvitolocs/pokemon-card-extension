@@ -2396,10 +2396,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] MATCH EX TROVATO in "${cardName}" -> +5000 punti`);
             }
             
-            // BONUS per carte VMAX (priorità alta ma non assoluta)
+            // BONUS per carte VMAX (SOLO se il titolo contiene "vmax")
             if (titleLower.includes('vmax') && cardName.includes('vmax')) {
-                nameScore += 8000; // Bonus per match "vmax" (priorità alta ma non assoluta)
-                console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +8000 punti (PRIORITÀ ALTA)`);
+                nameScore += 8000; // Bonus per match "vmax" (solo se nel titolo)
+                console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +8000 punti (solo se nel titolo)`);
             }
             
             // BONUS MASSIMO per image_url che contiene SL (priorità assoluta per carte SL)
@@ -2408,10 +2408,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] IMAGE_URL CON SL TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
             }
             
-            // BONUS per image_url che contiene VMAX (priorità alta per carte VMAX)
-            if (result.image_url && result.image_url.toLowerCase().includes('vmax')) {
-                nameScore += 6000; // Bonus per image_url con VMAX
-                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +6000 punti (PRIORITÀ ALTA)`);
+            // BONUS per image_url che contiene VMAX (SOLO se il titolo contiene "vmax")
+            if (titleLower.includes('vmax') && result.image_url && result.image_url.toLowerCase().includes('vmax')) {
+                nameScore += 6000; // Bonus per image_url con VMAX (solo se nel titolo)
+                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +6000 punti (solo se nel titolo)`);
             }
             
             if (titleLower.includes('shiny') && cardName.includes('shiny')) {
@@ -2442,10 +2442,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] IMAGE_URL CON SL TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
             }
             
-            // BONUS per image_url che contiene VMAX (priorità alta per carte VMAX)
-            if (result.image_url && result.image_url.toLowerCase().includes('vmax')) {
-                nameScore += 6000; // Bonus per image_url con VMAX
-                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +6000 punti (PRIORITÀ ALTA)`);
+            // BONUS per image_url che contiene VMAX (SOLO se il titolo contiene "vmax")
+            if (titleLower.includes('vmax') && result.image_url && result.image_url.toLowerCase().includes('vmax')) {
+                nameScore += 6000; // Bonus per image_url con VMAX (solo se nel titolo)
+                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +6000 punti (solo se nel titolo)`);
             }
             
             // BONUS MASSIMO per espansioni specifiche trovate nel titolo
@@ -2611,17 +2611,6 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         if (expansionMatches.length > 0) {
             console.log(`✅ [CardTrader] Trovati ${expansionMatches.length} match con espansione - priorità media`);
             return expansionMatches.map(item => item.result).slice(0, 5);
-        }
-        
-        // PRIORITÀ ASSOLUTA: Se abbiamo carte VMAX, mostrale per prime
-        const vmaxMatches = finalResults.filter(item => {
-            const cardName = (item.result.name_en || item.result.pokemon_name || '').toLowerCase();
-            return cardName.includes('vmax');
-        });
-        
-        if (vmaxMatches.length > 0) {
-            console.log(`✅ [CardTrader] Trovate ${vmaxMatches.length} carte VMAX - priorità assoluta`);
-            return vmaxMatches.map(item => item.result).slice(0, 5);
         }
         
         // Se abbiamo match perfetti nell'image_url, priorità alta
