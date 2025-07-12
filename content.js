@@ -1059,6 +1059,21 @@ function extractTitleInfo(title) {
         }
     }
     
+    // Cerca tipi di carta specifici (GX, V, VMAX, VSTAR, EX, ecc.)
+    const cardTypes = [
+        'gx', 'v', 'vmax', 'vstar', 'ex', 'break', 'prime', 'legend', 'star', 'shining',
+        'gold star', 'crystal', 'delta', 'shining', 'secret rare', 'ultra rare', 'rare holo',
+        'rare', 'uncommon', 'common', 'promo', 'black star', 'prerelease', 'staff'
+    ];
+    
+    let cardType = null;
+    for (const type of cardTypes) {
+        if (titleLower.includes(type.toLowerCase())) {
+            cardType = type;
+            break;
+        }
+    }
+    
     // Cerca espansioni specifiche
     const expansions = [
         'v star universe', 'vstar universe', 'dragon frontier', 'dragon frontiers',
@@ -1089,6 +1104,7 @@ function extractTitleInfo(title) {
         pokemonName: pokemonName,
         collectorNumber: collectorNumber,
         trainerName: trainerName,
+        cardType: cardType,
         expansion: expansion,
         originalTitle: title
     };
@@ -1290,7 +1306,35 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] MATCH POKEMON: "${pokemonNameLower}" in "${cardName}" -> +10000 punti`);
             }
             
-            // PRIORITÀ 2: Match Numero Collezione (ALTA PRIORITÀ)
+            // PRIORITÀ 2: Match Tipo Carta (ALTA PRIORITÀ - FILTRO CRITICO)
+            if (titleInfo.cardType && cardName) {
+                const titleCardType = titleInfo.cardType.toLowerCase();
+                const cardNameLower = cardName.toLowerCase();
+                
+                // Controlla se il tipo di carta nel titolo corrisponde al nome della carta
+                if (titleCardType === 'gx' && cardNameLower.includes('gx')) {
+                    score += 30000; // Bonus alto per match tipo esatto
+                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: GX -> +30000 punti`);
+                } else if (titleCardType === 'v' && cardNameLower.includes('v') && !cardNameLower.includes('vmax') && !cardNameLower.includes('vstar')) {
+                    score += 30000;
+                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: V -> +30000 punti`);
+                } else if (titleCardType === 'vmax' && cardNameLower.includes('vmax')) {
+                    score += 30000;
+                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: VMAX -> +30000 punti`);
+                } else if (titleCardType === 'vstar' && cardNameLower.includes('vstar')) {
+                    score += 30000;
+                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: VSTAR -> +30000 punti`);
+                } else if (titleCardType === 'ex' && cardNameLower.includes('ex')) {
+                    score += 30000;
+                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: EX -> +30000 punti`);
+                } else if (titleCardType && !cardNameLower.includes(titleCardType)) {
+                    // PENALIZZA SE IL TIPO NON CORRISPONDE
+                    score -= 50000; // Penalità massima per tipo sbagliato
+                    console.log(`❌ [CardTrader] TIPO CARTA SBAGLIATO: "${titleCardType}" non in "${cardName}" -> -50000 punti`);
+                }
+            }
+            
+            // PRIORITÀ 3: Match Numero Collezione (ALTA PRIORITÀ)
             if (titleInfo.collectorNumber && result.collector_number) {
                 const titleNumber = titleInfo.collectorNumber.toString();
                 const cardNumber = result.collector_number.toString();
@@ -1301,7 +1345,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
-            // PRIORITÀ 3: Match Espansione (solo se abbiamo già un match Pokemon)
+            // PRIORITÀ 4: Match Espansione (solo se abbiamo già un match Pokemon)
             if (score >= 10000 && titleInfo.expansion && result.expansion_name_en) {
                 const titleExpansion = titleInfo.expansion.toLowerCase();
                 const cardExpansion = result.expansion_name_en.toLowerCase();
@@ -1312,7 +1356,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
-            // PRIORITÀ 4: MATCHING PAROLA PER PAROLA CON IMAGE_URL
+            // PRIORITÀ 5: MATCHING PAROLA PER PAROLA CON IMAGE_URL
             if (result.image_url && titleWords.length > 0) {
                 const imageUrlScore = calculateImageUrlWordMatch(result.image_url, titleWords);
                 score += imageUrlScore;
