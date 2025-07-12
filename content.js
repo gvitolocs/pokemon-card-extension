@@ -1446,6 +1446,13 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] Match titolo nell'URL -> +75 punti`);
             }
             
+            // Bonus per carte "ex" (300 punti)
+            const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
+            if (cardName.includes(' ex') || cardName.endsWith('ex')) {
+                score += 300;
+                console.log(`🎯 [CardTrader] Carta EX rilevata: ${cardName} -> +300 punti`);
+            }
+            
             console.log(`📊 [CardTrader] ${result.name_en || result.pokemon_name} - Punteggio totale: ${score}`);
             
             return { result, score };
