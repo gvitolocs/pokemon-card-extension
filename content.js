@@ -797,6 +797,14 @@ function extractTitleInfo(title) {
         }
     }
     
+    // Estrai codice di espansione (es: SL7, XY123, etc.)
+    let expansionCode = null;
+    const expansionCodeMatch = titleLower.match(/\b([a-z]{1,3}\d+)\b/i);
+    if (expansionCodeMatch) {
+        expansionCode = expansionCodeMatch[1].toUpperCase();
+        console.log(`🎯 [CardTrader] Codice espansione trovato: ${expansionCode}`);
+    }
+    
     // Estrai espansione
     let expansion = null;
     const expansionPatterns = [
@@ -928,6 +936,9 @@ function extractTitleInfo(title) {
         /emerging powers/i,
         /black & white base/i,
         /call of legends/i,
+        /fuori serie/i,
+        /out of series/i,
+        /special series/i,
         /triumphant/i,
         /undauted/i,
         /unleashed/i,
@@ -1092,6 +1103,7 @@ function extractTitleInfo(title) {
     return {
         pokemonName,
         expansion,
+        expansionCode,
         collectorNumber,
         rarity
     };
@@ -1234,17 +1246,18 @@ async function searchCardInDatabase(titleInfo) {
         }
         
         // 3. Ricerca avanzata nelle carte con ilike su image_url e espansione
-        if (titleInfo.expansion) {
-            console.log(`🔍 [CardTrader] Cercando carte per espansione: ${titleInfo.expansion}`);
+        if (titleInfo.expansion || titleInfo.expansionCode) {
+            console.log(`🔍 [CardTrader] Cercando carte per espansione: ${titleInfo.expansion || titleInfo.expansionCode}`);
             
-            const expansionLower = titleInfo.expansion.toLowerCase();
+            const expansionLower = titleInfo.expansion ? titleInfo.expansion.toLowerCase() : '';
+            const expansionCode = titleInfo.expansionCode || '';
             
             // Cerca carte che hanno l'espansione nell'image_url
             const { data: expansionCards, error: expansionError } = await supabaseClient
                 .from('cards')
                 .select('*')
                 .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .or(`image_url.ilike.%${expansionLower}%`)
+                .or(`image_url.ilike.%${expansionLower}%,image_url.ilike.%${expansionCode}%`)
                 .limit(20);
             
             if (!expansionError && expansionCards && expansionCards.length > 0) {
@@ -1270,12 +1283,12 @@ async function searchCardInDatabase(titleInfo) {
                 });
             }
             
-            // Cerca anche nel nome dell'espansione
+            // Cerca anche nel nome dell'espansione e codice
             const { data: expansionNameCards, error: expansionNameError } = await supabaseClient
                 .from('cards')
                 .select('*')
                 .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .or(`expansion_name_en.ilike.%${expansionLower}%`)
+                .or(`expansion_name_en.ilike.%${expansionLower}%,expansion_code.ilike.%${expansionCode}%`)
                 .limit(20);
             
             if (!expansionNameError && expansionNameCards && expansionNameCards.length > 0) {
@@ -1348,11 +1361,17 @@ async function searchCardInDatabase(titleInfo) {
             }
             
             // Punteggio per espansione (200 punti per match esatto, 150 per match URL, 100 per match parziale)
-            if (titleInfo.expansion) {
+            if (titleInfo.expansion || titleInfo.expansionCode) {
                 const expansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
-                const searchExpansion = titleInfo.expansion.toLowerCase();
+                const expansionCode = (result.expansion_code || '').toUpperCase();
+                const searchExpansion = titleInfo.expansion ? titleInfo.expansion.toLowerCase() : '';
+                const searchExpansionCode = titleInfo.expansionCode || '';
                 
-                if (expansion.includes(searchExpansion) || searchExpansion.includes(expansion)) {
+                // Match per codice di espansione (priorità alta)
+                if (searchExpansionCode && expansionCode === searchExpansionCode) {
+                    score += 300;
+                    console.log(`🎯 [CardTrader] Match codice espansione: ${expansionCode} -> +300 punti`);
+                } else if (expansion.includes(searchExpansion) || searchExpansion.includes(expansion)) {
                     score += 200;
                     console.log(`🎯 [CardTrader] Match espansione: ${expansion} -> +200 punti`);
                 } else if (result.expansion_url_match) {
