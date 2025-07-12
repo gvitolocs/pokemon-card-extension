@@ -17,7 +17,7 @@ async function updateIcon(status) {
                 iconPath = 'icon-red.png';
                 break;
             default:
-                iconPath = 'icon.png';
+                iconPath = 'icon-default.png';
                 break;
         }
         
