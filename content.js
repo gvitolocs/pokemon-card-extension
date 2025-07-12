@@ -1123,30 +1123,85 @@ async function searchCardInDatabase(titleInfo) {
             allResults.push(...cards.map(card => ({ ...card, source: 'cards' })));
         }
         
-        // 2. Se abbiamo un numero collezionista, cerca nelle varianti con priorità alta
-        if (titleInfo.collectorNumber) {
-            console.log(`🔍 [CardTrader] Cercando varianti con numero ${titleInfo.collectorNumber}`);
+        // 2. Ricerca avanzata con ilike su image_url e confronto espansione
+        console.log(`🔍 [CardTrader] Ricerca avanzata per: ${titleInfo.pokemonName}`);
+        
+        // Prima trova le carte Pokemon
+        const { data: pokemonCards, error: pokemonError } = await supabaseClient
+            .from('cards')
+            .select('blueprint_id, name_en, expansion_name_en, expansion_code')
+            .ilike('name_en', `%${titleInfo.pokemonName}%`);
+        
+        if (!pokemonError && pokemonCards && pokemonCards.length > 0) {
+            const blueprintIds = pokemonCards.map(card => card.blueprint_id).filter(id => id);
+            console.log(`🔍 [CardTrader] Cercando varianti per ${blueprintIds.length} blueprint IDs`);
             
-            // Prima trova le carte Pokemon
-            const { data: pokemonCards, error: pokemonError } = await supabaseClient
-                .from('cards')
-                .select('blueprint_id, name_en, expansion_name_en, expansion_code')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`);
+            // Cerca nelle varianti con criteri multipli
+            let variantsQuery = supabaseClient
+                .from('card_variants')
+                .select('*')
+                .in('blueprint_id', blueprintIds);
             
-            if (!pokemonError && pokemonCards && pokemonCards.length > 0) {
-                const blueprintIds = pokemonCards.map(card => card.blueprint_id).filter(id => id);
-                console.log(`🔍 [CardTrader] Cercando varianti per ${blueprintIds.length} blueprint IDs`);
-                
-                // Poi cerca le varianti con il numero collezionista esatto
-                const { data: variants, error: variantsError } = await supabaseClient
+            // Se abbiamo un numero collezionista, aggiungi il filtro
+            if (titleInfo.collectorNumber) {
+                variantsQuery = variantsQuery.eq('collector_number', titleInfo.collectorNumber);
+            }
+            
+            // Se abbiamo un'espansione, cerca nell'image_url
+            if (titleInfo.expansion) {
+                const expansionLower = titleInfo.expansion.toLowerCase();
+                variantsQuery = variantsQuery.or(`image_url.ilike.%${expansionLower}%`);
+            }
+            
+            const { data: variants, error: variantsError } = await variantsQuery.limit(100);
+            
+            if (!variantsError && variants && variants.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${variants.length} varianti con criteri avanzati`);
+                variants.forEach(variant => {
+                    const card = pokemonCards.find(c => c.blueprint_id === variant.blueprint_id);
+                    if (card) {
+                        // Controlla se l'image_url contiene informazioni sull'espansione
+                        let expansionMatch = false;
+                        let numberMatch = false;
+                        
+                        if (titleInfo.expansion && variant.image_url) {
+                            const imageUrlLower = variant.image_url.toLowerCase();
+                            const expansionLower = titleInfo.expansion.toLowerCase();
+                            expansionMatch = imageUrlLower.includes(expansionLower);
+                        }
+                        
+                        if (titleInfo.collectorNumber && variant.collector_number) {
+                            numberMatch = variant.collector_number === titleInfo.collectorNumber;
+                        }
+                        
+                        const combinedVariant = {
+                            ...variant,
+                            name_en: card.name_en,
+                            pokemon_name: card.name_en,
+                            expansion_name_en: card.expansion_name_en,
+                            expansion_name: card.expansion_name_en,
+                            expansion_code: card.expansion_code,
+                            source: 'card_variants',
+                            exact_number_match: numberMatch,
+                            expansion_url_match: expansionMatch
+                        };
+                        allResults.push(combinedVariant);
+                    }
+                });
+            }
+            
+            // Se non abbiamo trovato risultati con criteri specifici, cerca tutte le varianti
+            if (variants.length === 0) {
+                console.log(`🔍 [CardTrader] Nessun risultato specifico, cercando tutte le varianti`);
+                const { data: allVariants, error: allVariantsError } = await supabaseClient
                     .from('card_variants')
                     .select('*')
                     .in('blueprint_id', blueprintIds)
-                    .eq('collector_number', titleInfo.collectorNumber);
+                    .limit(50);
                 
-                if (!variantsError && variants && variants.length > 0) {
-                    console.log(`✅ [CardTrader] Trovate ${variants.length} varianti con numero collezionista esatto`);
-                    variants.forEach(variant => {
+                if (!allVariantsError && allVariants && allVariants.length > 0) {
+                    console.log(`✅ [CardTrader] Trovate ${allVariants.length} varianti totali`);
+                    allVariants.forEach(variant => {
                         const card = pokemonCards.find(c => c.blueprint_id === variant.blueprint_id);
                         if (card) {
                             const combinedVariant = {
@@ -1157,69 +1212,82 @@ async function searchCardInDatabase(titleInfo) {
                                 expansion_name: card.expansion_name_en,
                                 expansion_code: card.expansion_code,
                                 source: 'card_variants',
-                                exact_number_match: true
+                                exact_number_match: false,
+                                expansion_url_match: false
                             };
                             allResults.push(combinedVariant);
                         }
                     });
                 }
-                
-                // Se non abbiamo trovato match esatti, cerca anche varianti con numeri simili
-                if (variants.length === 0) {
-                    console.log(`🔍 [CardTrader] Nessun match esatto, cercando varianti con numeri simili`);
-                    const { data: similarVariants, error: similarError } = await supabaseClient
-                        .from('card_variants')
-                        .select('*')
-                        .in('blueprint_id', blueprintIds)
-                        .limit(50);
-                    
-                    if (!similarError && similarVariants && similarVariants.length > 0) {
-                        console.log(`✅ [CardTrader] Trovate ${similarVariants.length} varianti totali per confronto`);
-                        similarVariants.forEach(variant => {
-                            const card = pokemonCards.find(c => c.blueprint_id === variant.blueprint_id);
-                            if (card) {
-                                const combinedVariant = {
-                                    ...variant,
-                                    name_en: card.name_en,
-                                    pokemon_name: card.name_en,
-                                    expansion_name_en: card.expansion_name_en,
-                                    expansion_name: card.expansion_name_en,
-                                    expansion_code: card.expansion_code,
-                                    source: 'card_variants',
-                                    exact_number_match: false
-                                };
-                                allResults.push(combinedVariant);
-                            }
-                        });
-                    }
-                }
             }
         }
         
-        // 3. Se abbiamo un'espansione, cerca anche carte specifiche per quell'espansione
+        // 3. Ricerca avanzata nelle carte con ilike su image_url e espansione
         if (titleInfo.expansion) {
             console.log(`🔍 [CardTrader] Cercando carte per espansione: ${titleInfo.expansion}`);
             
-            const { data: expansionCards, error: expansionError } = await supabaseClient
+            let expansionQuery = supabaseClient
                 .from('cards')
                 .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .or(`expansion_name_en.ilike.%${titleInfo.expansion}%,expansion_code.ilike.%${titleInfo.expansion}%`)
-                .limit(10);
+                .ilike('name_en', `%${titleInfo.pokemonName}%`);
+            
+            // Cerca nell'image_url per l'espansione
+            const expansionLower = titleInfo.expansion.toLowerCase();
+            expansionQuery = expansionQuery.or(`image_url.ilike.%${expansionLower}%,expansion_name_en.ilike.%${expansionLower}%,expansion_code.ilike.%${expansionLower}%`);
+            
+            const { data: expansionCards, error: expansionError } = await expansionQuery.limit(20);
             
             if (!expansionError && expansionCards && expansionCards.length > 0) {
                 console.log(`✅ [CardTrader] Trovate ${expansionCards.length} carte per espansione specifica`);
                 expansionCards.forEach(card => {
+                    // Controlla se l'image_url contiene l'espansione
+                    let expansionUrlMatch = false;
+                    if (card.image_url) {
+                        const imageUrlLower = card.image_url.toLowerCase();
+                        expansionUrlMatch = imageUrlLower.includes(expansionLower);
+                    }
+                    
                     // Evita duplicati
                     const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
                     if (!existing) {
-                        allResults.push({ ...card, source: 'cards', expansion_match: true });
+                        allResults.push({ 
+                            ...card, 
+                            source: 'cards', 
+                            expansion_match: true,
+                            expansion_url_match: expansionUrlMatch
+                        });
                     }
                 });
             }
         }
         
-        // 4. Sistema di punteggi migliorato
+        // 4. Ricerca nel titolo completo nell'image_url
+        console.log(`🔍 [CardTrader] Ricerca nel titolo completo: ${title}`);
+        
+        // Cerca carte che hanno informazioni del titolo nell'image_url
+        const { data: titleCards, error: titleError } = await supabaseClient
+            .from('cards')
+            .select('*')
+            .ilike('name_en', `%${titleInfo.pokemonName}%`)
+            .ilike('image_url', `%${titleInfo.pokemonName}%`)
+            .limit(10);
+        
+        if (!titleError && titleCards && titleCards.length > 0) {
+            console.log(`✅ [CardTrader] Trovate ${titleCards.length} carte con match nel titolo URL`);
+            titleCards.forEach(card => {
+                // Evita duplicati
+                const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
+                if (!existing) {
+                    allResults.push({ 
+                        ...card, 
+                        source: 'cards', 
+                        title_url_match: true
+                    });
+                }
+            });
+        }
+        
+        // 5. Sistema di punteggi migliorato
         const scoredResults = allResults.map(result => {
             let score = 0;
             
@@ -1245,7 +1313,7 @@ async function searchCardInDatabase(titleInfo) {
                 }
             }
             
-            // Punteggio per espansione (200 punti per match esatto, 100 per match parziale)
+            // Punteggio per espansione (200 punti per match esatto, 150 per match URL, 100 per match parziale)
             if (titleInfo.expansion) {
                 const expansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
                 const searchExpansion = titleInfo.expansion.toLowerCase();
@@ -1253,6 +1321,9 @@ async function searchCardInDatabase(titleInfo) {
                 if (expansion.includes(searchExpansion) || searchExpansion.includes(expansion)) {
                     score += 200;
                     console.log(`🎯 [CardTrader] Match espansione: ${expansion} -> +200 punti`);
+                } else if (result.expansion_url_match) {
+                    score += 150;
+                    console.log(`🎯 [CardTrader] Match espansione nell'URL: ${expansion} -> +150 punti`);
                 } else if (result.expansion_match) {
                     score += 100;
                     console.log(`🎯 [CardTrader] Match espansione parziale: ${expansion} -> +100 punti`);
@@ -1269,6 +1340,12 @@ async function searchCardInDatabase(titleInfo) {
             if (result.source === 'card_variants') {
                 score += 50;
                 console.log(`🎯 [CardTrader] Variante -> +50 punti`);
+            }
+            
+            // Bonus per match del titolo nell'URL (75 punti)
+            if (result.title_url_match) {
+                score += 75;
+                console.log(`🎯 [CardTrader] Match titolo nell'URL -> +75 punti`);
             }
             
             console.log(`📊 [CardTrader] ${result.name_en || result.pokemon_name} - Punteggio totale: ${score}`);
