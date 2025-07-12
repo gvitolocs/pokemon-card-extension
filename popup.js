@@ -122,9 +122,22 @@ document.addEventListener('DOMContentLoaded', function() {
     function displayResults(results, titleInfo) {
         let html = '';
         
-        // Mostra le prime 10 carte con punteggio
-        const maxResults = Math.min(results.length, 10);
-        results.slice(0, maxResults).forEach((result, index) => {
+        // Filtra i duplicati basandosi su blueprint_id
+        const uniqueResults = [];
+        const seenBlueprintIds = new Set();
+        
+        results.forEach(result => {
+            if (result.blueprint_id && !seenBlueprintIds.has(result.blueprint_id)) {
+                seenBlueprintIds.add(result.blueprint_id);
+                uniqueResults.push(result);
+            }
+        });
+        
+        console.log(`🔍 [Popup] Risultati originali: ${results.length}, unici: ${uniqueResults.length}`);
+        
+        // Mostra le prime 10 carte uniche con punteggio
+        const maxResults = Math.min(uniqueResults.length, 10);
+        uniqueResults.slice(0, maxResults).forEach((result, index) => {
             const score = calculateScore(result, titleInfo);
             const scoreClass = score >= 1500 ? 'score-perfect' : score >= 1000 ? 'score-good' : 'score-low';
             const scoreText = score >= 1500 ? 'Perfetto' : score >= 1000 ? 'Buono' : 'Basso';
