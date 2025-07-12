@@ -1385,67 +1385,65 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             }
         }
         
-        // 2.5. Ricerca DEDICATA per numero collezionista esatto (PRIORITÀ MASSIMA)
-        if (titleInfo.collectorNumber) {
-            console.log(`🔍 [CardTrader] Ricerca DEDICATA per numero esatto: ${titleInfo.collectorNumber}`);
+        // 2.5. Ricerca SEMPLIFICATA per Pokemon + numero collezionista
+        if (titleInfo.pokemonName && titleInfo.collectorNumber) {
+            console.log(`🔍 [CardTrader] Ricerca SEMPLIFICATA: ${titleInfo.pokemonName} ${titleInfo.collectorNumber}`);
             
-            // Cerca TUTTE le varianti con quel numero specifico
-            const { data: allVariantsWithNumber, error: allVariantsError } = await supabaseClient
-                .from('card_variants')
-                .select('*')
-                .eq('collector_number', titleInfo.collectorNumber);
+            // Cerca direttamente le carte che contengono Pokemon + numero
+            let simpleQuery = supabaseClient
+                .from('cards')
+                .select('blueprint_id, name_en, expansion_name_en, expansion_code');
             
-            if (!allVariantsError && allVariantsWithNumber && allVariantsWithNumber.length > 0) {
-                console.log(`✅ [CardTrader] Trovate ${allVariantsWithNumber.length} varianti TOTALI con numero ${titleInfo.collectorNumber}`);
+            // Filtro per Pokemon principale
+            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+            simpleQuery = simpleQuery.ilike('name_en', `%${pokemonNameLower}%`);
+            
+            // Se c'è un secondo Pokemon, aggiungi il filtro
+            if (titleInfo.secondPokemonName) {
+                const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
+                simpleQuery = simpleQuery.ilike('name_en', `%${secondPokemonLower}%`);
+            }
+            
+            // Se è una carta GX, aggiungi il filtro
+            if (titleInfo.isGXCard) {
+                simpleQuery = simpleQuery.ilike('name_en', '%gx%');
+            }
+            
+            const { data: matchingCards, error: matchingCardsError } = await simpleQuery;
+            
+            if (!matchingCardsError && matchingCards && matchingCards.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${matchingCards.length} carte che corrispondono ai criteri`);
                 
-                // Per ogni variante, cerca la carta corrispondente
-                for (const variant of allVariantsWithNumber) {
-                    const { data: cardData, error: cardError } = await supabaseClient
-                        .from('cards')
+                // Cerca le varianti con il numero specifico
+                const blueprintIds = matchingCards.map(card => card.blueprint_id).filter(id => id);
+                
+                if (blueprintIds.length > 0) {
+                    const { data: variantsWithNumber, error: variantsError } = await supabaseClient
+                        .from('card_variants')
                         .select('*')
-                        .eq('blueprint_id', variant.blueprint_id);
+                        .in('blueprint_id', blueprintIds)
+                        .eq('collector_number', titleInfo.collectorNumber);
                     
-                    if (!cardError && cardData && cardData.length > 0) {
-                        const card = cardData[0];
+                    if (!variantsError && variantsWithNumber && variantsWithNumber.length > 0) {
+                        console.log(`🎯 [CardTrader] Trovate ${variantsWithNumber.length} varianti con numero ${titleInfo.collectorNumber}`);
                         
-                        // Verifica se la carta contiene il Pokemon richiesto
-                        const cardNameLower = card.name_en.toLowerCase();
-                        let pokemonMatch = false;
-                        
-                        if (titleInfo.pokemonName) {
-                            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
-                            if (cardNameLower.includes(pokemonNameLower)) {
-                                pokemonMatch = true;
+                        variantsWithNumber.forEach(variant => {
+                            const card = matchingCards.find(c => c.blueprint_id === variant.blueprint_id);
+                            if (card) {
+                                const combinedResult = {
+                                    ...variant,
+                                    name_en: card.name_en,
+                                    pokemon_name: card.name_en,
+                                    expansion_name_en: card.expansion_name_en,
+                                    expansion_code: card.expansion_code,
+                                    source: 'simple_pokemon_number_search',
+                                    exact_number_match: true,
+                                    priority: 'high'
+                                };
+                                allResults.push(combinedResult);
+                                console.log(`🎯 [CardTrader] Match SEMPLIFICATO: ${card.name_en} con numero ${titleInfo.collectorNumber}`);
                             }
-                        }
-                        
-                        // Se è una carta GX, verifica che contenga GX
-                        let gxMatch = true;
-                        if (titleInfo.isGXCard) {
-                            gxMatch = cardNameLower.includes('gx');
-                        }
-                        
-                        // Se c'è un secondo Pokemon, verifica che lo contenga
-                        let secondPokemonMatch = true;
-                        if (titleInfo.secondPokemonName) {
-                            const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
-                            secondPokemonMatch = cardNameLower.includes(secondPokemonLower);
-                        }
-                        
-                        if (pokemonMatch && gxMatch && secondPokemonMatch) {
-                            const combinedResult = {
-                                ...variant,
-                                name_en: card.name_en,
-                                pokemon_name: card.name_en,
-                                expansion_name_en: card.expansion_name_en,
-                                expansion_code: card.expansion_code,
-                                source: 'exact_number_search',
-                                exact_number_match: true,
-                                priority: 'high'
-                            };
-                            allResults.push(combinedResult);
-                            console.log(`🎯 [CardTrader] Match PERFETTO trovato: ${card.name_en} con numero ${titleInfo.collectorNumber}`);
-                        }
+                        });
                     }
                 }
             }
@@ -1666,10 +1664,68 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     score += 1000; // Bonus MASSIMO per match numero esatto
                     reason += `Numero ${collectorNumberStr} nell\'URL CORRETTO `;
                     console.log(`🎯 [CardTrader] MATCH NUMERO ${collectorNumberStr}: "${result.image_url}" -> +1000 punti`);
+                    
+                    // Bonus extra se il numero è isolato (non parte di altri numeri)
+                    const numberPattern = new RegExp(`\\b${collectorNumberStr}\\b`);
+                    if (numberPattern.test(imageUrlLower)) {
+                        score += 200; // Bonus per numero isolato
+                        reason += `Numero ${collectorNumberStr} isolato nell\'URL `;
+                        console.log(`🎯 [CardTrader] NUMERO ISOLATO: +200 punti`);
+                    }
                 } else {
                     score -= 800; // Penalità MASSIMA se il numero non è nell'URL
                     reason += `Numero ${collectorNumberStr} richiesto ma non nell\'URL `;
                     console.log(`❌ [CardTrader] Numero ${collectorNumberStr} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
+                }
+            }
+            
+            // PRIORITÀ 4.9: Validazione completa per risolvere ambiguità
+            if (result.image_url) {
+                const imageUrlLower = result.image_url.toLowerCase();
+                let validationScore = 0;
+                let validationReason = '';
+                
+                // Verifica che tutti i Pokemon richiesti siano nell'URL
+                if (titleInfo.pokemonName) {
+                    const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                    if (imageUrlLower.includes(pokemonNameLower)) {
+                        validationScore += 100;
+                        validationReason += `Pokemon ${titleInfo.pokemonName} nell\'URL `;
+                    } else {
+                        validationScore -= 200;
+                        validationReason += `Pokemon ${titleInfo.pokemonName} mancante nell\'URL `;
+                    }
+                }
+                
+                if (titleInfo.secondPokemonName) {
+                    const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
+                    if (imageUrlLower.includes(secondPokemonLower)) {
+                        validationScore += 100;
+                        validationReason += `Secondo Pokemon ${titleInfo.secondPokemonName} nell\'URL `;
+                    } else {
+                        validationScore -= 200;
+                        validationReason += `Secondo Pokemon ${titleInfo.secondPokemonName} mancante nell\'URL `;
+                    }
+                }
+                
+                // Verifica tipo di carta
+                if (titleInfo.isGXCard && !imageUrlLower.includes('gx')) {
+                    validationScore -= 300;
+                    validationReason += 'GX mancante nell\'URL ';
+                }
+                
+                if (titleInfo.isVCard && !imageUrlLower.includes('v')) {
+                    validationScore -= 300;
+                    validationReason += 'V mancante nell\'URL ';
+                }
+                
+                score += validationScore;
+                reason += validationReason;
+                
+                if (validationScore > 0) {
+                    console.log(`✅ [CardTrader] Validazione URL: +${validationScore} punti - ${validationReason}`);
+                } else if (validationScore < 0) {
+                    console.log(`❌ [CardTrader] Validazione URL: ${validationScore} punti - ${validationReason}`);
                 }
             }
             
