@@ -313,6 +313,8 @@ function getListingSelectors() {
         ];
     } else if (hostname.includes('cardmarket')) {
         return [
+            '.page-title-container', // container principale
+            '.page-title-container .flex-grow-1 h1', // h1 specifico
             'h1', // pagina prodotto
             '.product-title', // listing
             '.col-12 .d-flex .flex-grow-1 h1', // struttura tipica Cardmarket
@@ -359,10 +361,13 @@ async function processListing(listingElement) {
         const titleInfo = extractTitleInfo(title);
         if (!titleInfo.pokemonName) {
             console.log('🚫 [CardTrader] Nessun Pokemon trovato nel titolo, saltando');
+            console.log(`🔍 [CardTrader] Titolo analizzato: "${title}"`);
+            console.log(`🔍 [CardTrader] TitleInfo:`, titleInfo);
             return;
         }
         
         console.log(`🎯 [CardTrader] Pokemon trovato: ${titleInfo.pokemonName}`);
+        console.log(`🔍 [CardTrader] TitleInfo completo:`, titleInfo);
         
         // Cerca nel database
         const results = await searchCardInDatabase(titleInfo, title);
@@ -460,14 +465,17 @@ function extractTitleFromListing(listingElement) {
     } else if (hostname.includes('cardmarket')) {
         // Cardmarket: pagina prodotto e listing
         const titleSelectors = [
-            'h1',
-            '.product-title',
-            '.col-12 .d-flex .flex-grow-1 h1',
+            '.page-title-container', // container principale
+            '.page-title-container .flex-grow-1 h1', // h1 specifico
+            'h1', // pagina prodotto
+            '.product-title', // listing
+            '.col-12 .d-flex .flex-grow-1 h1', // struttura tipica Cardmarket
             '.col-12 .product-title'
         ];
         for (const selector of titleSelectors) {
             const element = listingElement.querySelector(selector) || (listingElement.matches(selector) ? listingElement : null);
             if (element && element.textContent && element.textContent.trim()) {
+                console.log(`🔍 [CardTrader] Cardmarket selettore trovato: "${selector}"`);
                 let title = '';
                 // Se il titolo è in un h1 con uno span, prendi solo il testo principale (prima del primo span)
                 if (element.tagName === 'H1' && element.childNodes.length > 1 && element.childNodes[0].nodeType === Node.TEXT_NODE) {
@@ -483,6 +491,7 @@ function extractTitleFromListing(listingElement) {
                 return title;
             }
         }
+        console.log(`❌ [CardTrader] Cardmarket: nessun selettore ha trovato elementi`);
         // Fallback: usa il testo dell'elemento stesso
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
