@@ -320,47 +320,128 @@
                 
                 console.log('🔍 Test: Cercando con criteri:', titleInfo);
                 
-                // Cerca carte con il nome Pokemon
-                const { data: cards, error: cardsError } = await testSupabaseClient
+                // Cerca carte con il nome Pokemon - query migliorata
+                let query = testSupabaseClient
                     .from('cards')
                     .select('*')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .limit(10);
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`);
+                
+                // Se abbiamo un'espansione specifica, filtra per essa
+                if (titleInfo.expansion) {
+                    query = query.ilike('expansion_name_en', `%${titleInfo.expansion}%`);
+                }
+                
+                const { data: cards, error: cardsError } = await query.limit(20);
                 
                 if (cardsError) {
                     throw cardsError;
                 }
                 
+                // Se non abbiamo risultati diretti, prova a cercare nelle varianti
                 if (!cards || cards.length === 0) {
+                    console.log('🔍 Nessuna carta trovata, cercando nelle varianti...');
+                    
+                    const { data: variants, error: variantsError } = await testSupabaseClient
+                        .from('card_variants')
+                        .select('*, cards(*)')
+                        .ilike('cards.name_en', `%${titleInfo.pokemonName}%`)
+                        .limit(10);
+                    
+                    if (variantsError) {
+                        throw variantsError;
+                    }
+                    
+                    if (variants && variants.length > 0) {
+                        // Converti le varianti in formato compatibile
+                        const variantCards = variants.map(variant => ({
+                            ...variant.cards,
+                            collector_number: variant.collector_number,
+                            image_url: variant.image_url,
+                            source: 'variant'
+                        }));
+                        
+                        return variantCards;
+                    }
+                    
                     return [];
                 }
                 
-                // Simula il sistema di punteggi
+                // Sistema di punteggi migliorato
                 const scoredResults = cards.map(card => {
                     let score = 0;
+                    let scoreDetails = [];
                     
                     // Bonus base per match Pokemon
                     if (card.name_en && card.name_en.toLowerCase().includes(titleInfo.pokemonName)) {
                         score += 10000;
+                        scoreDetails.push('Pokemon match: +10000');
                     }
                     
-                    // Bonus per espansione
+                    // Bonus per espansione specifica
                     if (titleInfo.expansion && card.expansion_name_en) {
                         const titleExpansion = titleInfo.expansion.toLowerCase();
                         const cardExpansion = card.expansion_name_en.toLowerCase();
                         
-                        if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
+                        // Match esatto per V Star Universe
+                        if (titleExpansion.includes('v star universe') && cardExpansion.includes('v star universe')) {
+                            score += 50000;
+                            scoreDetails.push('V Star Universe exact: +50000');
+                        }
+                        // Match esatto per altre espansioni
+                        else if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
                             score += 40000;
+                            scoreDetails.push('Expansion match: +40000');
+                        }
+                        // Penalizzazione per espansione sbagliata
+                        else {
+                            score -= 30000;
+                            scoreDetails.push('Wrong expansion: -30000');
                         }
                     }
                     
-                    return { ...card, score };
+                    // Bonus per forme speciali
+                    if (titleInfo.pokemonName === 'mew' && card.name_en) {
+                        const cardName = card.name_en.toLowerCase();
+                        if (cardName.includes('v') && !cardName.includes('vmax') && !cardName.includes('vstar')) {
+                            score += 6000;
+                            scoreDetails.push('V form: +6000');
+                        } else if (cardName.includes('vstar')) {
+                            score += 7000;
+                            scoreDetails.push('VSTAR form: +7000');
+                        }
+                    }
+                    
+                    return { ...card, score, scoreDetails };
                 });
                 
                 // Ordina per punteggio
                 scoredResults.sort((a, b) => b.score - a.score);
                 
-                return scoredResults.slice(0, 5);
+                // Se non abbiamo risultati con punteggio positivo, prova ricerca più ampia
+                const positiveResults = scoredResults.filter(result => result.score > 0);
+                
+                if (positiveResults.length === 0) {
+                    console.log('🔍 Nessun risultato con punteggio positivo, cercando senza filtri...');
+                    
+                    // Ricerca più ampia senza filtri di espansione
+                    const { data: fallbackCards, error: fallbackError } = await testSupabaseClient
+                        .from('cards')
+                        .select('*')
+                        .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                        .limit(10);
+                    
+                    if (!fallbackError && fallbackCards && fallbackCards.length > 0) {
+                        const fallbackResults = fallbackCards.map(card => ({
+                            ...card,
+                            score: 1000, // Punteggio base per risultati fallback
+                            scoreDetails: ['Fallback search: +1000']
+                        }));
+                        
+                        return fallbackResults.slice(0, 5);
+                    }
+                }
+                
+                return positiveResults.slice(0, 5);
                 
             } catch (error) {
                 console.error('❌ Errore nella ricerca database:', error);
@@ -443,6 +524,7 @@
                             <div class="card-name">${index + 1}. ${result.name_en || result.pokemon_name} (Punteggio: ${result.score || 0})</div>
                             <div class="card-expansion">Espansione: ${result.expansion_name_en || 'N/A'}</div>
                             <div class="card-score">Blueprint ID: ${result.blueprint_id}</div>
+                            ${result.scoreDetails ? `<div class="card-score">Dettagli: ${result.scoreDetails.join(', ')}</div>` : ''}
                         </div>`
                     ).join('');
             } catch (error) {
