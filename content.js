@@ -2287,8 +2287,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     const cardExpansion = result.expansion_name_en.toLowerCase();
                     
                     if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
-                        nameScore += 20000; // Bonus per espansione specifica
-                        console.log(`🎯 [CardTrader] ESPANSIONE SPECIFICA TROVATA: "${titleExpansion}" in "${cardExpansion}" -> +20000 punti`);
+                        nameScore += 30000; // Bonus per espansione specifica
+                        console.log(`🎯 [CardTrader] ESPANSIONE SPECIFICA TROVATA: "${titleExpansion}" in "${cardExpansion}" -> +30000 punti`);
                     }
                 }
                 
@@ -2298,8 +2298,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     const cardCode = result.expansion_code.toLowerCase();
                     
                     if (cardCode.includes(titleCode) || titleCode.includes(cardCode)) {
-                        nameScore += 15000; // Bonus per codice espansione
-                        console.log(`🎯 [CardTrader] CODICE ESPANSIONE TROVATO: "${titleCode}" in "${cardCode}" -> +15000 punti`);
+                        nameScore += 25000; // Bonus per codice espansione
+                        console.log(`🎯 [CardTrader] CODICE ESPANSIONE TROVATO: "${titleCode}" in "${cardCode}" -> +25000 punti`);
                     }
                 }
                 
@@ -2396,10 +2396,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] MATCH EX TROVATO in "${cardName}" -> +5000 punti`);
             }
             
-            // BONUS MASSIMO per carte VMAX (priorità assoluta)
+            // BONUS per carte VMAX (priorità alta ma non assoluta)
             if (titleLower.includes('vmax') && cardName.includes('vmax')) {
-                nameScore += 15000; // Bonus MASSIMO per match "vmax" (priorità assoluta)
-                console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +15000 punti (PRIORITÀ ASSOLUTA)`);
+                nameScore += 8000; // Bonus per match "vmax" (priorità alta ma non assoluta)
+                console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +8000 punti (PRIORITÀ ALTA)`);
             }
             
             // BONUS MASSIMO per image_url che contiene SL (priorità assoluta per carte SL)
@@ -2408,10 +2408,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] IMAGE_URL CON SL TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
             }
             
-            // BONUS MASSIMO per image_url che contiene VMAX (priorità assoluta per carte VMAX)
+            // BONUS per image_url che contiene VMAX (priorità alta per carte VMAX)
             if (result.image_url && result.image_url.toLowerCase().includes('vmax')) {
-                nameScore += 12000; // Bonus MASSIMO per image_url con VMAX
-                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +12000 punti (PRIORITÀ ASSOLUTA)`);
+                nameScore += 6000; // Bonus per image_url con VMAX
+                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +6000 punti (PRIORITÀ ALTA)`);
             }
             
             if (titleLower.includes('shiny') && cardName.includes('shiny')) {
@@ -2442,10 +2442,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] IMAGE_URL CON SL TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
             }
             
-            // BONUS MASSIMO per image_url che contiene VMAX (priorità assoluta per carte VMAX)
+            // BONUS per image_url che contiene VMAX (priorità alta per carte VMAX)
             if (result.image_url && result.image_url.toLowerCase().includes('vmax')) {
-                nameScore += 12000; // Bonus MASSIMO per image_url con VMAX
-                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +12000 punti (PRIORITÀ ASSOLUTA)`);
+                nameScore += 6000; // Bonus per image_url con VMAX
+                console.log(`🎯 [CardTrader] IMAGE_URL CON VMAX TROVATO: ${result.image_url} -> +6000 punti (PRIORITÀ ALTA)`);
             }
             
             // BONUS MASSIMO per espansioni specifiche trovate nel titolo
@@ -2524,8 +2524,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 if (originalTitle.toLowerCase().includes(keyword) && result.expansion_name_en) {
                     const cardExpansion = result.expansion_name_en.toLowerCase();
                     if (cardExpansion.includes(keyword) || keyword.includes(cardExpansion)) {
-                        nameScore += 15000; // Bonus per keyword espansione
-                        console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +15000 punti`);
+                        nameScore += 25000; // Bonus per keyword espansione
+                        console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +25000 punti`);
                         break; // Solo il primo match
                     }
                 }
