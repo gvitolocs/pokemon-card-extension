@@ -746,9 +746,19 @@ function extractTitleInfo(title) {
     for (const pokemon of pokemonList) {
         // Cerca il Pokemon con variazioni di maiuscole/minuscole
         const pokemonLower = pokemon.toLowerCase();
+        
+        // Match diretto
         if (titleLower.includes(pokemonLower)) {
             pokemonName = pokemon.toLowerCase();
             console.log('✅ [CardTrader] Pokemon trovato (match diretto):', pokemonName);
+            break;
+        }
+        
+        // Cerca con possessivi (es: "Erika's Dragonair", "Giovanni's Nidoking")
+        const possessiveMatch = titleLower.match(new RegExp(`\\w+'s\\s+${pokemonLower}\\b`, 'i'));
+        if (possessiveMatch) {
+            pokemonName = pokemon.toLowerCase();
+            console.log('✅ [CardTrader] Pokemon trovato (con possessivo):', pokemonName, 'match:', possessiveMatch[0]);
             break;
         }
         
@@ -774,21 +784,54 @@ function extractTitleInfo(title) {
     if (numberMatch) {
         collectorNumber = numberMatch[1];
     } else {
-        // Cerca un numero singolo dopo "XY" o simili
-        const singleNumberMatch = titleLower.match(/(?:xy|swsh|sv|sm)\s*(\d+)/i);
+        // Cerca un numero singolo dopo "n." o "numero" o "XY" o simili
+        const singleNumberMatch = titleLower.match(/(?:n\.|numero|#|xy|swsh|sv|sm)\s*(\d+)/i);
         if (singleNumberMatch) {
             collectorNumber = singleNumberMatch[1];
+        } else {
+            // Cerca un numero singolo isolato (per casi come "148")
+            const isolatedNumberMatch = titleLower.match(/\b(\d{1,3})\b/);
+            if (isolatedNumberMatch) {
+                collectorNumber = isolatedNumberMatch[1];
+            }
         }
     }
     
     // Estrai espansione
     let expansion = null;
     const expansionPatterns = [
+        /gym heroes/i,
+        /gym challenge/i,
+        /team rocket/i,
+        /neo genesis/i,
+        /neo discovery/i,
+        /neo revelation/i,
+        /neo destiny/i,
         /terastal festival/i,
         /prismatic evolution/i,
         /scarlet & violet/i,
         /sword & shield/i,
-        /sun & moon/i
+        /sun & moon/i,
+        /xy/i,
+        /black & white/i,
+        /heartgold & soulsilver/i,
+        /platinum/i,
+        /diamond & pearl/i,
+        /ex delta species/i,
+        /ex deoxys/i,
+        /ex emerald/i,
+        /ex fire red & leaf green/i,
+        /ex hidden legends/i,
+        /ex ruby & sapphire/i,
+        /ex sandstorm/i,
+        /ex team magma vs team aqua/i,
+        /ex unseen forces/i,
+        /ex dragon/i,
+        /ex dragon frontiers/i,
+        /ex power keepers/i,
+        /ex holon phantoms/i,
+        /ex crystal guardians/i,
+        /ex legend maker/i
     ];
     
     for (const pattern of expansionPatterns) {
@@ -839,11 +882,17 @@ async function searchCardInDatabase(titleInfo) {
         let allResults = [];
         
         // 1. Cerca nelle carte con il nome Pokemon
-        const { data: cards, error: cardsError } = await supabaseClient
+        let cardsQuery = supabaseClient
             .from('cards')
             .select('*')
-            .ilike('name_en', `%${titleInfo.pokemonName}%`)
-            .limit(20);
+            .ilike('name_en', `%${titleInfo.pokemonName}%`);
+        
+        // Se abbiamo un numero collezionista, aggiungi il filtro
+        if (titleInfo.collectorNumber) {
+            cardsQuery = cardsQuery.eq('collector_number', titleInfo.collectorNumber);
+        }
+        
+        const { data: cards, error: cardsError } = await cardsQuery.limit(20);
         
         if (!cardsError && cards && cards.length > 0) {
             console.log(`✅ [CardTrader] Trovate ${cards.length} carte con nome Pokemon`);
