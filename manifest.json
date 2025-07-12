@@ -18,7 +18,9 @@
     "https://www.vinted.com/*",
     "https://vinted.com/*",
     "https://www.cardtrader.com/*",
-    "https://*.supabase.co/*"
+    "https://*.supabase.co/*",
+    "https://www.cardmarket.com/*",
+    "https://cardmarket.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -33,7 +35,9 @@
         "https://www.vinted.it/*",
         "https://vinted.it/*",
         "https://www.vinted.com/*",
-        "https://vinted.com/*"
+        "https://vinted.com/*",
+        "https://www.cardmarket.com/*",
+        "https://cardmarket.com/*"
       ],
       "js": ["standalone-config.js", "supabase.js", "api-config.js", "supabase-config.js", "supabase-integration.js", "content.js"],
       "css": ["styles.css"]

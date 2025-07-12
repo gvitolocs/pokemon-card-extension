@@ -311,6 +311,13 @@ function getListingSelectors() {
             '.srp-results .s-item__info',
             '.srp-results .s-item__title'
         ];
+    } else if (hostname.includes('cardmarket')) {
+        return [
+            'h1', // pagina prodotto
+            '.product-title', // listing
+            '.col-12 .d-flex .flex-grow-1 h1', // struttura tipica Cardmarket
+            '.col-12 .product-title'
+        ];
     }
     
     return [];
@@ -447,6 +454,29 @@ function extractTitleFromListing(listingElement) {
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
             // Rimuovi eventuali pulsanti CT dal titolo
+            title = title.replace(/\bCT\b/g, '').trim();
+            return title;
+        }
+    } else if (hostname.includes('cardmarket')) {
+        // Cardmarket: pagina prodotto e listing
+        const titleSelectors = [
+            'h1',
+            '.product-title',
+            '.col-12 .d-flex .flex-grow-1 h1',
+            '.col-12 .product-title'
+        ];
+        for (const selector of titleSelectors) {
+            const element = listingElement.querySelector(selector) || (listingElement.matches(selector) ? listingElement : null);
+            if (element && element.textContent && element.textContent.trim()) {
+                let title = element.textContent.trim();
+                // Rimuovi eventuali pulsanti CT dal titolo
+                title = title.replace(/\bCT\b/g, '').trim();
+                return title;
+            }
+        }
+        // Fallback: usa il testo dell'elemento stesso
+        if (listingElement.textContent && listingElement.textContent.trim()) {
+            let title = listingElement.textContent.trim();
             title = title.replace(/\bCT\b/g, '').trim();
             return title;
         }
