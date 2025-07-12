@@ -1307,70 +1307,14 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         
 
         
-        // 3. Ricerca avanzata nelle carte con ilike su image_url e espansione
+        // 3. Ricerca avanzata nelle carte per espansione
         if (titleInfo.expansion || titleInfo.expansionCode) {
             console.log(`🔍 [CardTrader] Cercando carte per espansione: ${titleInfo.expansion || titleInfo.expansionCode}`);
             
             const expansionLower = titleInfo.expansion ? titleInfo.expansion.toLowerCase() : '';
             const expansionCode = titleInfo.expansionCode || '';
             
-            // Cerca carte che hanno l'espansione nell'image_url
-            let expansionCards = [];
-            let expansionError = null;
-            
-            // Query separata per evitare errori OR
-            if (expansionLower) {
-                const { data: cards1, error: error1 } = await supabaseClient
-                    .from('cards')
-                    .select('*')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .ilike('image_url', `%${expansionLower}%`)
-                    .limit(10);
-                
-                if (!error1 && cards1) {
-                    expansionCards.push(...cards1);
-                }
-                expansionError = error1;
-            }
-            
-            if (expansionCode) {
-                const { data: cards2, error: error2 } = await supabaseClient
-                    .from('cards')
-                    .select('*')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .ilike('image_url', `%${expansionCode}%`)
-                    .limit(10);
-                
-                if (!error2 && cards2) {
-                    expansionCards.push(...cards2);
-                }
-                if (!expansionError) expansionError = error2;
-            }
-            
-            if (!expansionError && expansionCards && expansionCards.length > 0) {
-                console.log(`✅ [CardTrader] Trovate ${expansionCards.length} carte per espansione specifica`);
-                expansionCards.forEach(card => {
-                    // Controlla se l'image_url contiene l'espansione
-                    let expansionUrlMatch = false;
-                    if (card.image_url) {
-                        const imageUrlLower = card.image_url.toLowerCase();
-                        expansionUrlMatch = imageUrlLower.includes(expansionLower);
-                    }
-                    
-                    // Evita duplicati
-                    const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
-                    if (!existing) {
-                        allResults.push({ 
-                            ...card, 
-                            source: 'cards', 
-                            expansion_match: true,
-                            expansion_url_match: expansionUrlMatch
-                        });
-                    }
-                });
-            }
-            
-            // Cerca anche nel nome dell'espansione e codice
+            // Cerca nel nome dell'espansione e codice
             let expansionNameCards = [];
             let expansionNameError = null;
             
@@ -1420,79 +1364,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             }
         }
         
-        // 4. Ricerca avanzata nell'image_url per match precisi
-        console.log(`🔍 [CardTrader] Ricerca avanzata nell'image_url per: ${titleInfo.pokemonName}`);
-        
-        // Costruisci pattern di ricerca basati sui dati estratti
-        let imageUrlPatterns = [];
-        
-        // Pattern base: nome Pokemon
-        imageUrlPatterns.push(titleInfo.pokemonName);
-        
-        // Pattern con tipo carta (ex, gx, v, etc.)
-        if (titleInfo.pokemonName.includes(' ex')) {
-            imageUrlPatterns.push(titleInfo.pokemonName.replace(' ex', '-ex'));
-        } else if (titleInfo.pokemonName.includes(' gx')) {
-            imageUrlPatterns.push(titleInfo.pokemonName.replace(' gx', '-gx'));
-        } else if (titleInfo.pokemonName.includes(' v')) {
-            imageUrlPatterns.push(titleInfo.pokemonName.replace(' v', '-v'));
-        }
-        
-        // Pattern con numero collezionista
-        if (titleInfo.collectorNumber) {
-            imageUrlPatterns.push(titleInfo.collectorNumber);
-            // Pattern con formato X/Y
-            if (titleInfo.collectorNumber.match(/\d+\/\d+/)) {
-                imageUrlPatterns.push(titleInfo.collectorNumber.replace('/', '-'));
-            }
-        }
-        
-        // Pattern con espansione
-        if (titleInfo.expansion) {
-            const expansionLower = titleInfo.expansion.toLowerCase();
-            imageUrlPatterns.push(expansionLower.replace(/\s+/g, '-'));
-        }
-        
-        if (titleInfo.expansionCode) {
-            imageUrlPatterns.push(titleInfo.expansionCode.toLowerCase());
-        }
-        
-        console.log(`🔍 [CardTrader] Pattern di ricerca image_url:`, imageUrlPatterns);
-        
-        // Cerca carte che hanno pattern nell'image_url
-        let imageUrlResults = [];
-        for (const pattern of imageUrlPatterns) {
-            const { data: patternCards, error: patternError } = await supabaseClient
-                .from('cards')
-                .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .ilike('image_url', `%${pattern}%`)
-                .limit(5);
-            
-            if (!patternError && patternCards) {
-                imageUrlResults.push(...patternCards.map(card => ({ 
-                    ...card, 
-                    source: 'cards_image_url',
-                    matched_pattern: pattern 
-                })));
-            }
-        }
-        
-        if (imageUrlResults && imageUrlResults.length > 0) {
-            console.log(`✅ [CardTrader] Trovate ${imageUrlResults.length} carte con match nell'image_url`);
-            imageUrlResults.forEach(card => {
-                // Evita duplicati
-                const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
-                if (!existing) {
-                    allResults.push({ 
-                        ...card, 
-                        source: 'cards_image_url', 
-                        image_url_match: true,
-                        matched_pattern: card.matched_pattern
-                    });
-                }
-            });
-        }
+        // 4. Ricerca avanzata nell'image_url per match precisi (RIMOSSA - causa errori 400)
+        console.log(`🔍 [CardTrader] Ricerca nell'image_url disabilitata per evitare errori 400`);
         
 
 
@@ -1567,35 +1440,11 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] Variante -> +50 punti`);
             }
             
-            // Bonus per match nell'image_url (PRIORITÀ ALTA - 800 punti)
-            if (result.image_url_match) {
-                score += 800;
-                console.log(`🎯 [CardTrader] Match nell'image_url (pattern: ${result.matched_pattern}) -> +800 punti (PRIORITÀ ALTA)`);
-                
-                // Bonus extra per match multipli nell'image_url
-                if (result.matched_pattern) {
-                    const pattern = result.matched_pattern.toLowerCase();
-                    const imageUrl = (result.image_url || '').toLowerCase();
-                    
-                    // Bonus per match del numero collezionista nell'image_url
-                    if (titleInfo.collectorNumber && imageUrl.includes(titleInfo.collectorNumber)) {
-                        score += 500;
-                        console.log(`🎯 [CardTrader] Numero collezionista ${titleInfo.collectorNumber} nell'image_url -> +500 punti EXTRA`);
-                    }
-                    
-                    // Bonus per match dell'espansione nell'image_url
-                    if (titleInfo.expansion && imageUrl.includes(titleInfo.expansion.toLowerCase().replace(/\s+/g, '-'))) {
-                        score += 400;
-                        console.log(`🎯 [CardTrader] Espansione ${titleInfo.expansion} nell'image_url -> +400 punti EXTRA`);
-                    }
-                    
-                    // Bonus per match del codice espansione nell'image_url
-                    if (titleInfo.expansionCode && imageUrl.includes(titleInfo.expansionCode.toLowerCase())) {
-                        score += 600;
-                        console.log(`🎯 [CardTrader] Codice espansione ${titleInfo.expansionCode} nell'image_url -> +600 punti EXTRA`);
-                    }
-                }
-            }
+            // Bonus per match nell'image_url (RIMOSSO - causa errori 400)
+            // if (result.image_url_match) {
+            //     score += 800;
+            //     console.log(`🎯 [CardTrader] Match nell'image_url (pattern: ${result.matched_pattern}) -> +800 punti (PRIORITÀ ALTA)`);
+            // }
             
             // Bonus per carte "ex" (300 punti)
             const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
@@ -1604,15 +1453,15 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] Carta EX rilevata: ${cardName} -> +300 punti`);
             }
             
-            // Bonus per rarità (200 punti)
-            if (titleInfo.rarity) {
-                const imageUrl = (result.image_url || '').toLowerCase();
-                const rarityLower = titleInfo.rarity.toLowerCase();
-                if (imageUrl.includes(rarityLower) || imageUrl.includes(rarityLower.replace(/\s+/g, '-'))) {
-                    score += 200;
-                    console.log(`🎯 [CardTrader] Rarità ${titleInfo.rarity} nell'image_url -> +200 punti`);
-                }
-            }
+            // Bonus per rarità (200 punti) - RIMOSSO per evitare errori 400
+            // if (titleInfo.rarity) {
+            //     const imageUrl = (result.image_url || '').toLowerCase();
+            //     const rarityLower = titleInfo.rarity.toLowerCase();
+            //     if (imageUrl.includes(rarityLower) || imageUrl.includes(rarityLower.replace(/\s+/g, '-'))) {
+            //         score += 200;
+            //         console.log(`🎯 [CardTrader] Rarità ${titleInfo.rarity} nell'image_url -> +200 punti`);
+            //     }
+            // }
             
             console.log(`📊 [CardTrader] ${result.name_en || result.pokemon_name} - Punteggio totale: ${score}`);
             
@@ -1628,32 +1477,42 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             .map(item => item.result)
             .slice(0, 10);
         
-        // Filtro finale: se abbiamo un'espansione, verifica che sia presente nel titolo originale
+        // Filtro finale: se abbiamo un'espansione, verifica che sia presente nel titolo originale (MIGLIORATO)
         if (originalTitle && (titleInfo.expansion || titleInfo.expansionCode)) {
             const originalTitleLower = originalTitle.toLowerCase();
             const expansionToCheck = titleInfo.expansion ? titleInfo.expansion.toLowerCase() : '';
             const expansionCodeToCheck = titleInfo.expansionCode ? titleInfo.expansionCode.toLowerCase() : '';
             
-            filteredResults = filteredResults.filter(result => {
+            // Filtra solo se abbiamo risultati con espansione specifica
+            const resultsWithExpansion = filteredResults.filter(result => {
                 const resultExpansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
                 const resultExpansionCode = (result.expansion_code || '').toLowerCase();
                 
-                // Verifica se l'espansione o il codice sono presenti nel titolo originale
-                const expansionInTitle = expansionToCheck && originalTitleLower.includes(expansionToCheck);
-                const codeInTitle = expansionCodeToCheck && originalTitleLower.includes(expansionCodeToCheck);
-                
-                // Se l'espansione è nel titolo, deve matchare con il risultato
-                if (expansionInTitle && resultExpansion && !resultExpansion.includes(expansionToCheck) && !expansionToCheck.includes(resultExpansion)) {
-                    return false;
-                }
-                
-                // Se il codice è nel titolo, deve matchare con il risultato
-                if (codeInTitle && resultExpansionCode && resultExpansionCode !== expansionCodeToCheck) {
-                    return false;
-                }
-                
-                return true;
+                return resultExpansion || resultExpansionCode;
             });
+            
+            if (resultsWithExpansion.length > 0) {
+                filteredResults = resultsWithExpansion.filter(result => {
+                    const resultExpansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
+                    const resultExpansionCode = (result.expansion_code || '').toLowerCase();
+                    
+                    // Verifica se l'espansione o il codice sono presenti nel titolo originale
+                    const expansionInTitle = expansionToCheck && originalTitleLower.includes(expansionToCheck);
+                    const codeInTitle = expansionCodeToCheck && originalTitleLower.includes(expansionCodeToCheck);
+                    
+                    // Se l'espansione è nel titolo, deve matchare con il risultato
+                    if (expansionInTitle && resultExpansion && !resultExpansion.includes(expansionToCheck) && !expansionToCheck.includes(resultExpansion)) {
+                        return false;
+                    }
+                    
+                    // Se il codice è nel titolo, deve matchare con il risultato
+                    if (codeInTitle && resultExpansionCode && resultExpansionCode !== expansionCodeToCheck) {
+                        return false;
+                    }
+                    
+                    return true;
+                });
+            }
             
             console.log(`🔍 [CardTrader] Filtro finale espansione: ${filteredResults.length} risultati rimasti`);
         }
