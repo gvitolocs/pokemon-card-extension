@@ -1021,6 +1021,12 @@ function extractTitleInfo(title) {
             if (standardMatch) {
                 collectorNumber = standardMatch[1];
             } else {
+                            // Cerca pattern come "SV67", "sv67", "SV 67"
+            const svMatch = title.match(/(?:sv|sv\s+)(\d+)/i);
+            if (svMatch) {
+                collectorNumber = `sv${svMatch[1]}`;
+                console.log(`🔍 [CardTrader] Trovato pattern SV: ${collectorNumber} da ${svMatch[0]}`);
+            } else {
                 // Cerca pattern come "XY 156", "xy156", "XY156"
                 const xyMatch = title.match(/(?:xy|xy\s+)(\d+)/i);
                 if (xyMatch) {
@@ -1033,6 +1039,7 @@ function extractTitleInfo(title) {
                         console.log(`🔍 [CardTrader] Trovato numero collezionista: ${collectorNumber}`);
                     }
                 }
+            }
             }
         }
     }
@@ -1684,13 +1691,46 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 const imageUrlLower = result.image_url.toLowerCase();
                 const collectorNumberStr = titleInfo.collectorNumber.toString();
                 
-                if (imageUrlLower.includes(collectorNumberStr)) {
+                // Gestisci pattern speciali come SV, XY, TG, SL
+                let numberFound = false;
+                let matchType = '';
+                
+                if (collectorNumberStr.startsWith('sv')) {
+                    // Per pattern SV, cerca sia "sv67" che solo "67"
+                    const svNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(svNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'SV completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('xy')) {
+                    // Per pattern XY, cerca sia "xy156" che solo "156"
+                    const xyNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(xyNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'XY completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('tg') || collectorNumberStr.startsWith('sl')) {
+                    // Per pattern TG/SL, cerca sia "tg16" che solo "16"
+                    const tgSlNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(tgSlNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'TG/SL completo' : 'Solo numero';
+                    }
+                } else {
+                    // Per numeri normali, cerca il numero esatto
+                    if (imageUrlLower.includes(collectorNumberStr)) {
+                        numberFound = true;
+                        matchType = 'Numero esatto';
+                    }
+                }
+                
+                if (numberFound) {
                     score += 1000; // Bonus MASSIMO per match numero esatto
-                    reason += `Numero ${collectorNumberStr} nell\'URL CORRETTO `;
-                    console.log(`🎯 [CardTrader] MATCH NUMERO ${collectorNumberStr}: "${result.image_url}" -> +1000 punti`);
+                    reason += `Numero ${collectorNumberStr} nell\'URL CORRETTO (${matchType}) `;
+                    console.log(`🎯 [CardTrader] MATCH NUMERO ${collectorNumberStr}: "${result.image_url}" -> +1000 punti (${matchType})`);
                     
                     // Bonus extra se il numero è isolato (non parte di altri numeri)
-                    const numberPattern = new RegExp(`\\b${collectorNumberStr}\\b`);
+                    const numberPattern = new RegExp(`\\b${collectorNumberStr.replace(/^(sv|xy|tg|sl)/, '')}\\b`);
                     if (numberPattern.test(imageUrlLower)) {
                         score += 200; // Bonus per numero isolato
                         reason += `Numero ${collectorNumberStr} isolato nell\'URL `;
