@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Database - Pokemon Card Trader Linker</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .test-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .test-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin: 5px;
+        }
+        .test-button:hover {
+            background: #0056b3;
+        }
+        .test-button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            margin-top: 10px;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .result.success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+        .result.error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+        .result.info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .card-result {
+            border: 1px solid #ddd;
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            background: #f9f9f9;
+        }
+        .card-name {
+            font-weight: bold;
+            color: #333;
+        }
+        .card-expansion {
+            color: #666;
+            font-size: 12px;
+        }
+        .card-score {
+            color: #007bff;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Test Database - Pokemon Card Trader Linker</h1>
+    
+    <!-- Test Connessione -->
+    <div class="container">
+        <div class="test-section">
+            <div class="test-title">🔌 Test Connessione Supabase</div>
+            <div id="connection-status" class="status disconnected">Disconnesso</div>
+            <button class="test-button" onclick="testConnection()">Testa Connessione</button>
+            <div id="connection-result" class="result"></div>
+        </div>
+    </div>
+
+    <!-- Test Estrazione Titolo -->
+    <div class="container">
+        <div class="test-section">
+            <div class="test-title">📝 Test Estrazione Informazioni dal Titolo</div>
+            <input type="text" id="title-input" class="test-input" 
+                   placeholder="Inserisci un titolo (es: Pokemon TCG - Mew V Star Universe)" 
+                   value="Pokemon TCG - Mew V Star Universe">
+            <button class="test-button" onclick="testTitleExtraction()">Estrai Informazioni</button>
+            <div id="title-result" class="result"></div>
+        </div>
+    </div>
+
+    <!-- Test Ricerca Database -->
+    <div class="container">
+        <div class="test-section">
+            <div class="test-title">🔍 Test Ricerca Database</div>
+            <input type="text" id="search-input" class="test-input" 
+                   placeholder="Inserisci un Pokemon da cercare (es: mew)" 
+                   value="mew">
+            <button class="test-button" onclick="testDatabaseSearch()">Cerca nel Database</button>
+            <div id="search-result" class="result"></div>
+        </div>
+    </div>
+
+    <!-- Test Matching Completo -->
+    <div class="container">
+        <div class="test-section">
+            <div class="test-title">🎯 Test Matching Completo</div>
+            <input type="text" id="matching-input" class="test-input" 
+                   placeholder="Inserisci un titolo completo per il test di matching" 
+                   value="Pokemon TCG - Mew V Star Universe">
+            <button class="test-button" onclick="testCompleteMatching()">Testa Matching Completo</button>
+            <div id="matching-result" class="result"></div>
+        </div>
+    </div>
+
+    <!-- Test Performance -->
+    <div class="container">
+        <div class="test-section">
+            <div class="test-title">⚡ Test Performance</div>
+            <button class="test-button" onclick="testPerformance()">Testa Performance</button>
+            <div id="performance-result" class="result"></div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="standalone-config.js"></script>
+    <script src="supabase-config.js"></script>
+    <script src="content.js"></script>
+    
+    <script>
+        let supabaseClient = null;
+        let testResults = [];
+
+        // Inizializza Supabase
+        async function initializeSupabase() {
+            try {
+                const config = getConfig();
+                supabaseClient = window.supabase.createClient(config.supabase.url, config.supabase.key);
+                window.supabaseClient = supabaseClient;
+                
+                // Testa la connessione
+                const { data, error } = await supabaseClient
+                    .from('cards')
+                    .select('count')
+                    .limit(1);
+                
+                if (error) {
+                    throw error;
+                }
+                
+                return true;
+            } catch (error) {
+                console.error('Errore inizializzazione Supabase:', error);
+                return false;
+            }
+        }
+
+        // Test connessione
+        async function testConnection() {
+            const resultDiv = document.getElementById('connection-result');
+            const statusDiv = document.getElementById('connection-status');
+            
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Testando connessione...';
+            
+            try {
+                const connected = await initializeSupabase();
+                
+                if (connected) {
+                    statusDiv.className = 'status connected';
+                    statusDiv.textContent = 'Connesso';
+                    resultDiv.className = 'result success';
+                    resultDiv.textContent = '✅ Connessione a Supabase riuscita!\n\nConfigurazione:\n- URL: ' + getConfig().supabase.url + '\n- Database: Connesso e funzionante';
+                } else {
+                    statusDiv.className = 'status disconnected';
+                    statusDiv.textContent = 'Disconnesso';
+                    resultDiv.className = 'result error';
+                    resultDiv.textContent = '❌ Errore nella connessione a Supabase';
+                }
+            } catch (error) {
+                statusDiv.className = 'status disconnected';
+                statusDiv.textContent = 'Disconnesso';
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Errore: ' + error.message;
+            }
+        }
+
+        // Test estrazione titolo
+        function testTitleExtraction() {
+            const title = document.getElementById('title-input').value;
+            const resultDiv = document.getElementById('title-result');
+            
+            if (!title.trim()) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Inserisci un titolo da testare';
+                return;
+            }
+            
+            try {
+                const titleInfo = extractTitleInfo(title);
+                resultDiv.className = 'result success';
+                resultDiv.textContent = '✅ Informazioni estratte:\n\n' + JSON.stringify(titleInfo, null, 2);
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Errore nell\'estrazione: ' + error.message;
+            }
+        }
+
+        // Test ricerca database
+        async function testDatabaseSearch() {
+            const searchTerm = document.getElementById('search-input').value;
+            const resultDiv = document.getElementById('search-result');
+            
+            if (!searchTerm.trim()) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Inserisci un termine di ricerca';
+                return;
+            }
+            
+            if (!supabaseClient) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Supabase non inizializzato. Esegui prima il test di connessione.';
+                return;
+            }
+            
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Ricercando...';
+            
+            try {
+                const { data: cards, error } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${searchTerm}%`)
+                    .limit(10);
+                
+                if (error) {
+                    throw error;
+                }
+                
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `✅ Trovate ${cards.length} carte per "${searchTerm}":\n\n` + 
+                    cards.map(card => 
+                        `📄 ${card.name_en} (${card.expansion_name_en || 'N/A'})`
+                    ).join('\n');
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Errore nella ricerca: ' + error.message;
+            }
+        }
+
+        // Test matching completo
+        async function testCompleteMatching() {
+            const title = document.getElementById('matching-input').value;
+            const resultDiv = document.getElementById('matching-result');
+            
+            if (!title.trim()) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Inserisci un titolo da testare';
+                return;
+            }
+            
+            if (!supabaseClient) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Supabase non inizializzato. Esegui prima il test di connessione.';
+                return;
+            }
+            
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Eseguendo matching completo...';
+            
+            try {
+                const titleInfo = extractTitleInfo(title);
+                const results = await searchCardInDatabase(titleInfo, title);
+                
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `✅ Matching completato per "${title}":\n\n` +
+                    `📊 Informazioni estratte:\n${JSON.stringify(titleInfo, null, 2)}\n\n` +
+                    `🎯 Risultati trovati: ${results.length}\n\n` +
+                    results.slice(0, 5).map((result, index) => 
+                        `<div class="card-result">
+                            <div class="card-name">${index + 1}. ${result.name_en || result.pokemon_name}</div>
+                            <div class="card-expansion">Espansione: ${result.expansion_name_en || 'N/A'}</div>
+                            <div class="card-score">Blueprint ID: ${result.blueprint_id}</div>
+                        </div>`
+                    ).join('');
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Errore nel matching: ' + error.message;
+            }
+        }
+
+        // Test performance
+        async function testPerformance() {
+            const resultDiv = document.getElementById('performance-result');
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Testando performance...';
+            
+            const testTitles = [
+                'Pokemon TCG - Mew V Star Universe',
+                'Charizard VMAX Darkness Ablaze',
+                'Pikachu V Union',
+                'Erika\'s Dragonair Gym Heroes',
+                'Ancient Mew Promo'
+            ];
+            
+            const results = [];
+            const startTime = performance.now();
+            
+            for (const title of testTitles) {
+                const titleStart = performance.now();
+                try {
+                    const titleInfo = extractTitleInfo(title);
+                    const searchResults = await searchCardInDatabase(titleInfo, title);
+                    const titleEnd = performance.now();
+                    
+                    results.push({
+                        title,
+                        time: titleEnd - titleStart,
+                        results: searchResults.length,
+                        success: true
+                    });
+                } catch (error) {
+                    const titleEnd = performance.now();
+                    results.push({
+                        title,
+                        time: titleEnd - titleStart,
+                        error: error.message,
+                        success: false
+                    });
+                }
+            }
+            
+            const endTime = performance.now();
+            const totalTime = endTime - startTime;
+            const avgTime = totalTime / testTitles.length;
+            
+            resultDiv.className = 'result success';
+            resultDiv.innerHTML = `⚡ Test Performance Completato:\n\n` +
+                `📊 Statistiche:\n` +
+                `- Tempo totale: ${totalTime.toFixed(2)}ms\n` +
+                `- Tempo medio per titolo: ${avgTime.toFixed(2)}ms\n` +
+                `- Titoli testati: ${testTitles.length}\n\n` +
+                `📋 Dettagli:\n` +
+                results.map(result => 
+                    `${result.success ? '✅' : '❌'} ${result.title}\n` +
+                    `   Tempo: ${result.time.toFixed(2)}ms\n` +
+                    `   Risultati: ${result.results || 0}\n` +
+                    (result.error ? `   Errore: ${result.error}\n` : '')
+                ).join('\n');
+        }
+
+        // Inizializza quando la pagina è caricata
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🧪 Test Database inizializzato');
+            // Testa automaticamente la connessione
+            setTimeout(testConnection, 1000);
+        });
+    </script>
+</body>
+</html> 

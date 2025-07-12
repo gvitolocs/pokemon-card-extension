@@ -4,8 +4,8 @@
 const STANDALONE_CONFIG = {
     // Configurazione Supabase
     supabase: {
-        url: 'https://your-project.supabase.co',
-        key: 'your-anon-key',
+        url: 'https://msngrrrihwudtnyjatlo.supabase.co',
+        key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo',
         // Fallback: se Supabase non è disponibile, usa un database locale o API alternative
         fallbackEnabled: true,
         localDataEnabled: true
