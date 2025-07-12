@@ -1303,7 +1303,78 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         
         console.log('🔍 [CardTrader] Cercando con criteri:', JSON.stringify(titleInfo, null, 2));
         
+        // PRIORITÀ 1: Se c'è un trainer name, cerca direttamente le carte di quell'allenatore
+        if (titleInfo.trainerName) {
+            console.log(`🎯 [CardTrader] RICERCA PRIORITARIA per trainer: ${titleInfo.trainerName} ${titleInfo.pokemonName}`);
+            
+            // Cerca tutte le carte del Pokemon con trainer name nell'URL
+            let trainerQuery = supabaseClient
+                .from('cards')
+                .select('*')
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .or(`image_url.ilike.%${titleInfo.trainerName}%,image_url.ilike.%${titleInfo.trainerName}s%,image_url.ilike.%${titleInfo.trainerName}'s%`);
+            
+            const { data: trainerResults, error: trainerError } = await trainerQuery;
+            
+            if (trainerError) {
+                console.error('❌ [CardTrader] Errore query trainer:', trainerError);
+            } else if (trainerResults && trainerResults.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${trainerResults.length} carte con trainer ${titleInfo.trainerName}`);
+                
+                // Se c'è anche un numero collezionista, filtra per quello
+                if (titleInfo.collectorNumber) {
+                    console.log(`🎯 [CardTrader] Filtro per numero: ${titleInfo.collectorNumber}`);
+                    
+                    const blueprintIds = trainerResults.map(card => card.blueprint_id).filter(id => id);
+                    
+                    if (blueprintIds.length > 0) {
+                        const numberQuery = supabaseClient
+                            .from('card_variants')
+                            .select('*')
+                            .in('blueprint_id', blueprintIds)
+                            .eq('collector_number', titleInfo.collectorNumber);
+                        
+                        const { data: numberResults, error: numberError } = await numberQuery;
+                        
+                        if (numberError) {
+                            console.error('❌ [CardTrader] Errore query numero:', numberError);
+                        } else if (numberResults && numberResults.length > 0) {
+                            console.log(`✅ [CardTrader] Trovate ${numberResults.length} carte con trainer + numero`);
+                            
+                            // Combina i risultati
+                            const combinedResults = numberResults.map(variant => {
+                                const card = trainerResults.find(c => c.blueprint_id === variant.blueprint_id);
+                                return {
+                                    ...variant,
+                                    name_en: card.name_en,
+                                    pokemon_name: card.name_en,
+                                    expansion_name_en: card.expansion_name_en,
+                                    expansion_code: card.expansion_code,
+                                    source: 'trainer_number_match',
+                                    exact_number_match: true
+                                };
+                            });
+                            
+                            return scoreAndValidateResults(combinedResults, titleInfo, originalTitle);
+                        }
+                    }
+                }
+                
+                // Se non c'è numero o non trovato, valida le carte trainer trovate
+                const trainerCards = trainerResults.map(card => ({
+                    ...card,
+                    source: 'trainer_match',
+                    exact_number_match: false
+                }));
+                
+                return scoreAndValidateResults(trainerCards, titleInfo, originalTitle);
+            }
+        }
+        
         let allResults = [];
+        
+        // FALLBACK: Ricerca tradizionale (solo se non c'è trainer name o non trovato)
+        console.log(`🔍 [CardTrader] Fallback: ricerca tradizionale per ${titleInfo.pokemonName}`);
         
         // 1. Cerca nelle carte con il nome Pokemon
         let query = supabaseClient
@@ -2323,6 +2394,151 @@ setTimeout(() => {
     patchEbayProductPage();
     patchVintedProductPage();
 }, 5000);
+
+// Funzione per punteggiare e validare i risultati
+function scoreAndValidateResults(results, titleInfo, originalTitle) {
+    console.log(`🔍 [CardTrader] Validando ${results.length} risultati`);
+    
+    const scoredResults = results.map(result => {
+        const name = result.name_en || result.pokemon_name || '';
+        const collectorNumber = result.collector_number || '';
+        const imageUrlLower = (result.image_url || '').toLowerCase();
+        
+        let score = 0;
+        let reason = '';
+        
+        // PRIORITÀ 1: Espansione (peso ridotto se c'è trainer name)
+        let expansionScore = 0;
+        let expansionReason = '';
+        
+        if (titleInfo.expansion && result.expansion_name_en) {
+            const expansionSimilarity = calculateSimilarity(titleInfo.expansion.toLowerCase(), result.expansion_name_en.toLowerCase());
+            if (expansionSimilarity >= 0.8) {
+                expansionScore = titleInfo.trainerName ? 100 : 200; // Peso ridotto per trainer
+                expansionReason = titleInfo.trainerName ? 'Espansione corretta (peso ridotto per trainer) ' : 'Espansione corretta ';
+            } else if (expansionSimilarity >= 0.5) {
+                expansionScore = titleInfo.trainerName ? 50 : 100; // Peso ridotto per trainer
+                expansionReason = titleInfo.trainerName ? 'Espansione simile (peso ridotto per trainer) ' : 'Espansione simile ';
+            } else {
+                expansionScore = -20;
+                expansionReason = 'Espansione completamente diversa ';
+            }
+        } else if (titleInfo.expansion) {
+            expansionScore = -20;
+            expansionReason = 'Espansione mancante nel database ';
+        }
+        score += expansionScore;
+        reason += expansionReason;
+        
+        // PRIORITÀ 2: Nome del Pokemon (peso massimo)
+        const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+        const resultNameLower = name.toLowerCase();
+        
+        if (resultNameLower.includes(pokemonNameLower) || pokemonNameLower.includes(resultNameLower)) {
+            score += 1000; // Peso massimo per il nome Pokemon
+            reason += 'Nome Pokemon PERFETTO ';
+        } else {
+            score -= 2000; // Penalità severa se il nome non corrisponde
+            reason += 'Nome Pokemon SBAGLIATO ';
+        }
+        
+        // PRIORITÀ 3: Numero collezionista
+        if (titleInfo.collectorNumber) {
+            if (collectorNumber === titleInfo.collectorNumber) {
+                score += 2000; // Peso MASSIMO per numero perfetto
+                reason += 'Numero collezionista PERFETTO ';
+            } else if (collectorNumber.includes(titleInfo.collectorNumber)) {
+                score += 200; // Peso medio per numero parziale
+                reason += 'Numero collezionista parziale ';
+            } else {
+                score -= 1000; // Penalità severa se il numero non corrisponde
+                reason += 'Numero collezionista SBAGLIATO ';
+            }
+        } else {
+            reason += 'Numero collezionista non richiesto ';
+        }
+        
+        // PRIORITÀ 4: Validazione obbligatoria per trainer name
+        if (titleInfo.trainerName) {
+            const trainerNameLower = titleInfo.trainerName.toLowerCase();
+            let trainerFound = false;
+            
+            // Cerca match esatto
+            if (imageUrlLower.includes(trainerNameLower)) {
+                score += 500; // Bonus MASSIMO per trainer name presente
+                reason += `Trainer ${titleInfo.trainerName} nell\'URL CORRETTO `;
+                console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} trovato in: "${result.image_url}" -> +500 punti`);
+                trainerFound = true;
+            } else {
+                // Cerca varianti comuni
+                const trainerVariants = [
+                    trainerNameLower + 's', // erika -> erikas
+                    trainerNameLower + '\'s', // erika -> erika's
+                    trainerNameLower.replace('lt. ', 'lt'), // lt. surge -> ltsurge
+                    trainerNameLower.replace('mr. ', 'mr'), // mr. mime -> mrmime
+                ];
+                
+                for (const variant of trainerVariants) {
+                    if (imageUrlLower.includes(variant)) {
+                        score += 400; // Bonus alto per variante trainer name
+                        reason += `Trainer ${titleInfo.trainerName} (variante ${variant}) nell\'URL CORRETTO `;
+                        console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} (variante ${variant}) trovato in: "${result.image_url}" -> +400 punti`);
+                        trainerFound = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!trainerFound) {
+                score -= 800; // Penalità MASSIMA per trainer name mancante
+                reason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nell\'URL `;
+                console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
+            }
+        }
+        
+        // PRIORITÀ 5: Validazione obbligatoria per Holo
+        if (originalTitle.toLowerCase().includes('holo') && !imageUrlLower.includes('holo')) {
+            score -= 500; // Penalità MASSIMA per Holo mancante
+            reason += 'Holo richiesto ma mancante nell\'URL ';
+            console.log(`❌ [CardTrader] Holo richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+        } else if (originalTitle.toLowerCase().includes('holo') && imageUrlLower.includes('holo')) {
+            score += 300; // Bonus MASSIMO per Holo presente
+            reason += 'Holo nell\'URL CORRETTO ';
+            console.log(`🎯 [CardTrader] Holo trovato in: "${result.image_url}" -> +300 punti`);
+        }
+        
+        // Bonus per match esatto del numero
+        if (result.exact_number_match) {
+            score += 500; // Bonus extra per match esatto
+            reason += 'Match esatto numero ';
+            console.log(`🎯 [CardTrader] BONUS MATCH ESATTO: +500 punti`);
+        }
+        
+        // Bonus per priorità alta
+        if (result.priority === 'high') {
+            score += 300; // Bonus per priorità alta
+            reason += 'Priorità alta ';
+            console.log(`🎯 [CardTrader] BONUS PRIORITÀ ALTA: +300 punti`);
+        }
+        
+        return { result, score, reason: reason.trim() };
+    });
+    
+    // Ordina per punteggio
+    scoredResults.sort((a, b) => b.score - a.score);
+    
+    // Filtra risultati con punteggi troppo bassi
+    const goodResults = scoredResults.filter(item => item.score > -100);
+    
+    console.log(`✅ [CardTrader] Risultati finali: ${goodResults.length} carte con punteggi validi`);
+    
+    // Log dei primi 3 risultati per debug
+    goodResults.slice(0, 3).forEach((item, index) => {
+        console.log(`🏆 [CardTrader] Risultato ${index + 1}: ${item.result.name_en || item.result.pokemon_name} - Punteggio: ${item.score} - Motivo: ${item.reason}`);
+    });
+    
+    return goodResults.map(item => item.result);
+}
 
 // Inizializza l'estensione
 initializeExtension();
