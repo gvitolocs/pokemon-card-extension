@@ -286,7 +286,7 @@ class SupabasePokemonDB {
             // First, search in the cards table to get blueprint_ids
             const { data: cards, error: cardsError } = await this.supabase
                 .from('cards')
-                .select('blueprint_id, name_en, expansion_name_en, expansion_code, collector_number')
+                .select('blueprint_id, name_en, expansion_name_en, expansion_code')
                 .ilike('name_en', `%${pokemonNameLower}%`)
                 .limit(50); // Increased limit to get more results
             
@@ -321,7 +321,7 @@ class SupabasePokemonDB {
                                 expansion_name_en: card?.expansion_name_en,
                                 expansion_name: card?.expansion_name_en,
                                 expansion_code: card?.expansion_code,
-                                collector_number: card?.collector_number,
+                                collector_number: variant.collector_number, // Get from variant, not card
                                 source_table: 'card_variants'
                             };
                         });
@@ -338,6 +338,7 @@ class SupabasePokemonDB {
                     pokemon_name: card.name_en,
                     expansion_name_en: card.expansion_name_en,
                     expansion_name: card.expansion_name_en,
+                    collector_number: null, // Cards table doesn't have collector_number
                     source_table: 'cards'
                 }));
                 

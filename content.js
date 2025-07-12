@@ -1500,13 +1500,73 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     const expansionInTitle = expansionToCheck && originalTitleLower.includes(expansionToCheck);
                     const codeInTitle = expansionCodeToCheck && originalTitleLower.includes(expansionCodeToCheck);
                     
-                    // Se l'espansione è nel titolo, deve matchare con il risultato
-                    if (expansionInTitle && resultExpansion && !resultExpansion.includes(expansionToCheck) && !expansionToCheck.includes(resultExpansion)) {
+                    // Se abbiamo un codice di espansione specifico nel titolo, verifica match intelligente
+                    if (codeInTitle && resultExpansionCode) {
+                        // Match esatto (priorità massima)
+                        if (resultExpansionCode === expansionCodeToCheck) {
+                            return true;
+                        }
+                        
+                        // Match per codici specifici che devono essere esatti (SL7, XY123, etc.)
+                        const exactMatchCodes = ['sl', 'xy', 'swsh', 'sm', 'bw'];
+                        const needsExactMatch = exactMatchCodes.some(code => 
+                            expansionCodeToCheck.startsWith(code) && expansionCodeToCheck.length <= 6
+                        );
+                        
+                        if (needsExactMatch) {
+                            console.log(`🔍 [CardTrader] Filtro: codice specifico ${resultExpansionCode} non matcha esatto ${expansionCodeToCheck}`);
+                            return false;
+                        }
+                        
+                        // Match per codici generici (SAR, SV, etc.) - più permissivo
+                        const genericCodes = ['sar', 'sv'];
+                        const isGenericCode = genericCodes.some(code => 
+                            expansionCodeToCheck.startsWith(code)
+                        );
+                        
+                        if (isGenericCode) {
+                            // Per codici generici, permette match parziale
+                            const hasPartialMatch = genericCodes.some(code => 
+                                originalTitleLower.includes(code) && resultExpansionCode.includes(code)
+                            );
+                            
+                            if (hasPartialMatch) {
+                                return true;
+                            }
+                        }
+                        
+                        console.log(`🔍 [CardTrader] Filtro: codice ${resultExpansionCode} non matcha ${expansionCodeToCheck}`);
                         return false;
                     }
                     
-                    // Se il codice è nel titolo, deve matchare con il risultato
-                    if (codeInTitle && resultExpansionCode && resultExpansionCode !== expansionCodeToCheck) {
+                    // Se abbiamo un'espansione nel titolo, verifica match più flessibile
+                    if (expansionInTitle && resultExpansion) {
+                        // Match diretto
+                        if (resultExpansion.includes(expansionToCheck) || expansionToCheck.includes(resultExpansion)) {
+                            return true;
+                        }
+                        
+                        // Match per parole chiave comuni
+                        const expansionKeywords = ['festival', 'terastal', 'ex', 'gx', 'v', 'vmax', 'vstar'];
+                        const hasKeyword = expansionKeywords.some(keyword => 
+                            resultExpansion.includes(keyword) && originalTitleLower.includes(keyword)
+                        );
+                        
+                        if (hasKeyword) {
+                            return true;
+                        }
+                        
+                        // Match per codici di espansione comuni nel titolo
+                        const commonCodes = ['sar', 'sv', 'swsh', 'sm', 'xy', 'bw'];
+                        const hasCommonCode = commonCodes.some(code => 
+                            originalTitleLower.includes(code) && resultExpansionCode.includes(code)
+                        );
+                        
+                        if (hasCommonCode) {
+                            return true;
+                        }
+                        
+                        console.log(`🔍 [CardTrader] Filtro: espansione ${resultExpansion} non matcha ${expansionToCheck}`);
                         return false;
                     }
                     
@@ -1515,6 +1575,15 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             }
             
             console.log(`🔍 [CardTrader] Filtro finale espansione: ${filteredResults.length} risultati rimasti`);
+        }
+        
+        // Se non abbiamo risultati dopo il filtro, prova a essere più permissivo
+        if (filteredResults.length === 0 && originalTitle) {
+            console.log(`🔍 [CardTrader] Nessun risultato dopo filtro, ripristino risultati originali`);
+            filteredResults = scoredResults
+                .filter(item => item.score > 0)
+                .map(item => item.result)
+                .slice(0, 5); // Prendi solo i primi 5 per sicurezza
         }
         
         console.log(`📊 [CardTrader] Risultati finali: ${filteredResults.length} carte con punteggio > 0`);

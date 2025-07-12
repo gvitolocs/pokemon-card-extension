@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Test Extension Search</title>
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .test-section {
+            margin-bottom: 30px;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .test-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 10px;
+        }
+        .result {
+            background: #f9f9f9;
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .error {
+            background: #ffe6e6;
+            color: #d32f2f;
+        }
+        .success {
+            background: #e8f5e8;
+            color: #2e7d32;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .loading {
+            color: #666;
+            font-style: italic;
+        }
+        .card-link {
+            color: #2196F3;
+            text-decoration: none;
+        }
+        .card-link:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🧪 Test Extension Search</h1>
+        <p>Test della funzionalità di ricerca dell'estensione con la struttura database corretta</p>
+        
+        <button onclick="testLeafeonSearch()">🔍 Test Ricerca Leafeon</button>
+        <button onclick="testLeafeonTerastal()">🎯 Test Leafeon Terastal #200</button>
+        <button onclick="testLugiaSearch()">🔍 Test Ricerca Lugia</button>
+        <button onclick="clearResults()">🗑️ Pulisci Risultati</button>
+        
+        <div id="results"></div>
+    </div>
+
+    <script>
+        // Configurazione Supabase
+        const supabaseUrl = 'https://msngrrrihwudtnyjatlo.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo';
+        
+        let supabase;
+        
+        // Inizializza Supabase quando la libreria è caricata
+        function initSupabase() {
+            if (window.supabase) {
+                supabase = window.supabase.createClient(supabaseUrl, supabaseKey);
+                console.log('✅ Supabase inizializzato');
+            } else {
+                console.log('⏳ Attendo caricamento Supabase...');
+                setTimeout(initSupabase, 100);
+            }
+        }
+        
+        // Avvia inizializzazione
+        initSupabase();
+        
+        function addResult(title, content, type = 'info') {
+            const resultsDiv = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = 'test-section';
+            
+            const titleDiv = document.createElement('div');
+            titleDiv.className = 'test-title';
+            titleDiv.textContent = title;
+            
+            const contentDiv = document.createElement('div');
+            contentDiv.className = `result ${type}`;
+            contentDiv.innerHTML = content;
+            
+            div.appendChild(titleDiv);
+            div.appendChild(contentDiv);
+            resultsDiv.appendChild(div);
+        }
+        
+        // Simula la logica dell'estensione per la ricerca
+        async function searchCardVariants(pokemonName) {
+            try {
+                const pokemonNameLower = pokemonName.toLowerCase();
+                let results = [];
+                
+                // Step 1: Cerca nella tabella cards
+                const { data: cards, error: cardsError } = await supabase
+                    .from('cards')
+                    .select('blueprint_id, name_en, expansion_name_en, expansion_code')
+                    .ilike('name_en', `%${pokemonNameLower}%`)
+                    .limit(50);
+                
+                if (cardsError) {
+                    console.log('Error searching cards table:', cardsError.message);
+                    return results;
+                }
+                
+                if (cards && cards.length > 0) {
+                    console.log(`✅ Found ${cards.length} base cards for ${pokemonName}`);
+                    
+                    // Step 2: Ottieni blueprint_ids
+                    const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
+                    
+                    if (blueprintIds.length > 0) {
+                        // Step 3: Cerca le varianti
+                        const { data: variants, error: variantsError } = await supabase
+                            .from('card_variants')
+                            .select('*')
+                            .in('blueprint_id', blueprintIds)
+                            .limit(100);
+                        
+                        if (!variantsError && variants && variants.length > 0) {
+                            // Step 4: Combina i dati
+                            const combinedResults = variants.map(variant => {
+                                const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
+                                return {
+                                    ...variant,
+                                    name_en: card?.name_en,
+                                    card_name: card?.name_en,
+                                    pokemon_name: card?.name_en,
+                                    expansion_name_en: card?.expansion_name_en,
+                                    expansion_name: card?.expansion_name_en,
+                                    expansion_code: card?.expansion_code,
+                                    collector_number: variant.collector_number,
+                                    source_table: 'card_variants'
+                                };
+                            });
+                            
+                            results.push(...combinedResults);
+                            console.log(`✅ Found ${combinedResults.length} variants for ${pokemonName}`);
+                        }
+                    }
+                    
+                    // Step 5: Aggiungi anche le carte base
+                    const baseCards = cards.map(card => ({
+                        ...card,
+                        name_en: card.name_en,
+                        pokemon_name: card.name_en,
+                        expansion_name_en: card.expansion_name_en,
+                        expansion_name: card.expansion_name_en,
+                        collector_number: null,
+                        source_table: 'cards'
+                    }));
+                    
+                    results.push(...baseCards);
+                    console.log(`✅ Added ${baseCards.length} base cards to results`);
+                }
+                
+                return results;
+            } catch (error) {
+                console.error('Error searching card variants:', error);
+                return [];
+            }
+        }
+        
+        // Genera link CardTrader
+        function generateCardTraderLink(pokemonData) {
+            if (!pokemonData) return null;
+            
+            const name = pokemonData.name_en || pokemonData.name || pokemonData.pokemon_name || pokemonData.card_name;
+            const blueprintId = pokemonData.blueprint_id || pokemonData.id;
+            
+            if (blueprintId) {
+                return `https://www.cardtrader.com/cards/${blueprintId}`;
+            }
+            
+            if (name) {
+                const cleanName = name.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+                return `https://www.cardtrader.com/cards/${cleanName}`;
+            }
+            
+            return null;
+        }
+        
+        async function testLeafeonSearch() {
+            addResult('🔍 Test Ricerca Leafeon', '<div class="loading">Caricamento...</div>');
+            
+            if (!supabase) {
+                addResult('❌ Errore', 'Supabase non inizializzato', 'error');
+                return;
+            }
+            
+            try {
+                const results = await searchCardVariants('Leafeon');
+                
+                let content = `<strong>Trovati ${results.length} risultati:</strong><br><br>`;
+                
+                if (results.length === 0) {
+                    content += 'Nessun risultato trovato';
+                } else {
+                    // Mostra i primi 10 risultati con link
+                    const topResults = results.slice(0, 10);
+                    topResults.forEach((card, index) => {
+                        const link = generateCardTraderLink(card);
+                        const collectorNum = card.collector_number ? `#${card.collector_number}` : '';
+                        const source = card.source_table || 'unknown';
+                        
+                        content += `${index + 1}. <a href="${link}" target="_blank" class="card-link">${card.name_en}</a> [${card.expansion_code}] ${collectorNum} (ID: ${card.blueprint_id}) [${source}]<br>`;
+                    });
+                    
+                    if (results.length > 10) {
+                        content += `<br><em>... e altri ${results.length - 10} risultati</em>`;
+                    }
+                }
+                
+                addResult('✅ Test Ricerca Leafeon Completato', content, 'success');
+            } catch (error) {
+                addResult('❌ Errore Test Ricerca Leafeon', error.message, 'error');
+            }
+        }
+        
+        async function testLeafeonTerastal() {
+            addResult('🎯 Test Leafeon Terastal #200', '<div class="loading">Caricamento...</div>');
+            
+            if (!supabase) {
+                addResult('❌ Errore', 'Supabase non inizializzato', 'error');
+                return;
+            }
+            
+            try {
+                // Step 1: Trova tutte le carte Leafeon
+                const { data: cards, error: cardsError } = await supabase
+                    .from('cards')
+                    .select('blueprint_id, name_en, expansion_code')
+                    .ilike('name_en', '%leafeon%')
+                    .eq('expansion_code', 'sv8a')
+                    .limit(10);
+                
+                if (cardsError) {
+                    addResult('❌ Errore', cardsError.message, 'error');
+                    return;
+                }
+                
+                if (!cards || cards.length === 0) {
+                    addResult('✅ Test Completato', 'Nessuna carta Leafeon trovata in sv8a', 'success');
+                    return;
+                }
+                
+                // Step 2: Trova varianti con numero 200
+                const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
+                const { data: variants, error: variantsError } = await supabase
+                    .from('card_variants')
+                    .select('*')
+                    .in('blueprint_id', blueprintIds)
+                    .eq('collector_number', '200')
+                    .limit(10);
+                
+                if (variantsError) {
+                    addResult('❌ Errore', variantsError.message, 'error');
+                    return;
+                }
+                
+                let content = `<strong>Risultati per Leafeon Terastal #200:</strong><br><br>`;
+                
+                if (variants.length === 0) {
+                    content += '❌ Leafeon Terastal #200 NON trovato<br><br>';
+                    content += '<strong>Carte Leafeon trovate in sv8a:</strong><br>';
+                    cards.forEach(card => {
+                        const link = generateCardTraderLink(card);
+                        content += `• <a href="${link}" target="_blank" class="card-link">${card.name_en}</a> [${card.expansion_code}] (ID: ${card.blueprint_id})<br>`;
+                    });
+                } else {
+                    content += '🎯 <strong>Leafeon Terastal #200 TROVATO!</strong><br><br>';
+                    variants.forEach(variant => {
+                        const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
+                        const link = generateCardTraderLink(variant);
+                        content += `• <a href="${link}" target="_blank" class="card-link">${card?.name_en}</a> [${card?.expansion_code}] #${variant.collector_number} (ID: ${variant.blueprint_id})<br>`;
+                    });
+                }
+                
+                addResult('✅ Test Leafeon Terastal Completato', content, 'success');
+            } catch (error) {
+                addResult('❌ Errore Test Leafeon Terastal', error.message, 'error');
+            }
+        }
+        
+        async function testLugiaSearch() {
+            addResult('🔍 Test Ricerca Lugia', '<div class="loading">Caricamento...</div>');
+            
+            if (!supabase) {
+                addResult('❌ Errore', 'Supabase non inizializzato', 'error');
+                return;
+            }
+            
+            try {
+                const results = await searchCardVariants('Lugia');
+                
+                let content = `<strong>Trovati ${results.length} risultati:</strong><br><br>`;
+                
+                if (results.length === 0) {
+                    content += 'Nessun risultato trovato';
+                } else {
+                    // Mostra i primi 10 risultati con link
+                    const topResults = results.slice(0, 10);
+                    topResults.forEach((card, index) => {
+                        const link = generateCardTraderLink(card);
+                        const collectorNum = card.collector_number ? `#${card.collector_number}` : '';
+                        const source = card.source_table || 'unknown';
+                        
+                        content += `${index + 1}. <a href="${link}" target="_blank" class="card-link">${card.name_en}</a> [${card.expansion_code}] ${collectorNum} (ID: ${card.blueprint_id}) [${source}]<br>`;
+                    });
+                    
+                    if (results.length > 10) {
+                        content += `<br><em>... e altri ${results.length - 10} risultati</em>`;
+                    }
+                }
+                
+                addResult('✅ Test Ricerca Lugia Completato', content, 'success');
+            } catch (error) {
+                addResult('❌ Errore Test Ricerca Lugia', error.message, 'error');
+            }
+        }
+        
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+    </script>
+</body>
+</html> 

@@ -5,7 +5,7 @@
     <title>Pokemon Card Trader Linker</title>
     <style>
         body {
-            width: 350px;
+            width: 400px;
             margin: 0;
             padding: 15px;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -30,147 +30,203 @@
             opacity: 0.8;
         }
         
-        .status-section {
-            margin-bottom: 10px;
-        }
-        
-        .status-title {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 11px;
-        }
-        
-        .status-indicator {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            display: inline-block;
-        }
-        
-        .status-connected {
-            background: #4CAF50;
-            box-shadow: 0 0 6px #4CAF50;
-        }
-        
-        .status-disconnected {
-            background: #F44336;
-            box-shadow: 0 0 6px #F44336;
-        }
-        
-        .status-loading {
-            background: #FF9800;
-            box-shadow: 0 0 6px #FF9800;
-            animation: pulse 2s infinite;
-        }
-        
-        @keyframes pulse {
-            0% { opacity: 1; }
-            50% { opacity: 0.5; }
-            100% { opacity: 1; }
-        }
-        
-        .result-section {
+        .add-section {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 8px;
             padding: 12px;
-            margin-top: 10px;
-            display: none;
+            margin-bottom: 15px;
         }
         
-        .result-title {
+        .add-title {
             font-weight: bold;
             margin-bottom: 8px;
             color: #4CAF50;
             font-size: 12px;
         }
         
-        .result-item {
+        .add-input {
+            width: 100%;
+            padding: 8px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-bottom: 8px;
+            box-sizing: border-box;
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+        
+        .add-button {
+            width: 100%;
+            padding: 8px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .add-button:hover {
+            background: #45a049;
+        }
+        
+        .notes-section {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .notes-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #4CAF50;
+            font-size: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .clear-button {
+            background: #f44336;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 3px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        
+        .clear-button:hover {
+            background: #d32f2f;
+        }
+        
+        .note-item {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 4px;
-            padding: 6px;
+            padding: 8px;
             margin-bottom: 6px;
             font-size: 11px;
-            cursor: pointer;
-            transition: background 0.2s;
+            position: relative;
         }
         
-        .result-item:hover {
-            background: rgba(255, 255, 255, 0.2);
+        .note-text {
+            margin-bottom: 4px;
+            word-wrap: break-word;
         }
         
-        .result-link {
+        .note-date {
+            font-size: 9px;
+            opacity: 0.7;
+            margin-bottom: 4px;
+        }
+        
+        .note-actions {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .note-link {
             color: #81C784;
             text-decoration: none;
+            font-size: 10px;
             font-weight: bold;
-            display: block;
         }
         
-        .result-link:hover {
+        .note-link:hover {
             text-decoration: underline;
         }
         
-        .card-info {
-            font-size: 10px;
-            opacity: 0.8;
-            margin-top: 3px;
-        }
-        
-        .score-badge {
-            float: right;
-            padding: 2px 6px;
-            border-radius: 3px;
-            font-size: 9px;
-            font-weight: bold;
+        .delete-button {
+            background: #f44336;
             color: white;
+            border: none;
+            border-radius: 2px;
+            padding: 2px 6px;
+            font-size: 9px;
+            cursor: pointer;
+            transition: background 0.3s;
         }
         
-        .score-perfect {
-            background: #4CAF50;
+        .delete-button:hover {
+            background: #d32f2f;
         }
         
-        .score-good {
+        .empty-notes {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            opacity: 0.7;
+        }
+        
+        .auto-add-section {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 10px;
+            font-size: 11px;
+        }
+        
+        .auto-add-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+            color: #FF9800;
+        }
+        
+        .auto-add-text {
+            opacity: 0.9;
+            margin-bottom: 5px;
+        }
+        
+        .auto-add-button {
             background: #FF9800;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 4px 8px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
         }
         
-        .score-low {
-            background: #F44336;
-        }
-        
-        .loading {
-            text-align: center;
-            padding: 20px;
-            font-style: italic;
-            opacity: 0.7;
-        }
-        
-        .no-results {
-            text-align: center;
-            padding: 20px;
-            font-style: italic;
-            opacity: 0.7;
+        .auto-add-button:hover {
+            background: #F57C00;
         }
     </style>
 </head>
 <body>
     <div class="header">
-        <div class="logo">🃏 Pokemon Card Trader</div>
-        <div class="subtitle">Linker Extension</div>
+        <div class="logo">📝 Blocco Note Carte</div>
+        <div class="subtitle">Pokemon Card Trader Linker</div>
     </div>
     
-    <div class="status-section">
-        <div class="status-title">
-            <span class="status-indicator status-loading" id="statusIndicator"></span>
-            <span id="statusText">Cercando carte...</span>
+    <div class="add-section">
+        <div class="add-title">➕ Aggiungi Carta</div>
+        <input type="text" id="cardInput" class="add-input" placeholder="Es: Leafeon sv8a, Charizard XY..." />
+        <button id="addButton" class="add-button">➕ Aggiungi al Blocco Note</button>
+    </div>
+    
+    <div class="auto-add-section" id="autoAddSection" style="display: none;">
+        <div class="auto-add-title">🎯 Carta Trovata Automaticamente</div>
+        <div class="auto-add-text" id="autoAddText"></div>
+        <button id="autoAddButton" class="auto-add-button">➕ Aggiungi Questa Carta</button>
+    </div>
+    
+    <div class="notes-section">
+        <div class="notes-title">
+            📋 Le Mie Carte
+            <button id="clearButton" class="clear-button">🗑️ Svuota</button>
         </div>
-    </div>
-    
-    <div class="result-section" id="resultSection">
-        <div class="result-title">🎯 Top 10 Carte Più Probabili</div>
-        <div id="resultContent"></div>
+        <div id="notesContent">
+            <div class="empty-notes">Nessuna carta salvata</div>
+        </div>
     </div>
     
     <script src="popup.js"></script>
 </body>
-</html> 
 </html> 
