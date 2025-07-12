@@ -969,6 +969,8 @@ function extractTitleInfo(title) {
         /sv8a/i,
         /sv\d+[a-z]*/i,
         /sar\s+sv\d+[a-z]*/i,
+        /terastal\s+festival/i,
+        /festival\s+terastal/i,
         /ex delta species/i,
         /ex deoxys/i,
         /ex emerald/i,
@@ -1202,9 +1204,12 @@ function extractTitleInfo(title) {
     let rarity = null;
     const rarityPatterns = [
         /special illustration rare/i,
+        /special-illustration-rare/i,
         /ultra rare/i,
         /full art/i,
-        /secret rare/i
+        /secret rare/i,
+        /illustration rare/i,
+        /special rare/i
     ];
     
     for (const pattern of rarityPatterns) {
@@ -1415,26 +1420,75 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             }
         }
         
-        // 4. Ricerca nel titolo completo nell'image_url
-        console.log(`🔍 [CardTrader] Ricerca nel titolo completo per: ${titleInfo.pokemonName}`);
+        // 4. Ricerca avanzata nell'image_url per match precisi
+        console.log(`🔍 [CardTrader] Ricerca avanzata nell'image_url per: ${titleInfo.pokemonName}`);
         
-        // Cerca carte che hanno informazioni del titolo nell'image_url
-        const { data: titleCards, error: titleError } = await supabaseClient
-            .from('cards')
-            .select('*')
-            .ilike('name_en', `%${titleInfo.pokemonName}%`)
-            .limit(10);
+        // Costruisci pattern di ricerca basati sui dati estratti
+        let imageUrlPatterns = [];
         
-        if (!titleError && titleCards && titleCards.length > 0) {
-            console.log(`✅ [CardTrader] Trovate ${titleCards.length} carte con match nel titolo URL`);
-            titleCards.forEach(card => {
+        // Pattern base: nome Pokemon
+        imageUrlPatterns.push(titleInfo.pokemonName);
+        
+        // Pattern con tipo carta (ex, gx, v, etc.)
+        if (titleInfo.pokemonName.includes(' ex')) {
+            imageUrlPatterns.push(titleInfo.pokemonName.replace(' ex', '-ex'));
+        } else if (titleInfo.pokemonName.includes(' gx')) {
+            imageUrlPatterns.push(titleInfo.pokemonName.replace(' gx', '-gx'));
+        } else if (titleInfo.pokemonName.includes(' v')) {
+            imageUrlPatterns.push(titleInfo.pokemonName.replace(' v', '-v'));
+        }
+        
+        // Pattern con numero collezionista
+        if (titleInfo.collectorNumber) {
+            imageUrlPatterns.push(titleInfo.collectorNumber);
+            // Pattern con formato X/Y
+            if (titleInfo.collectorNumber.match(/\d+\/\d+/)) {
+                imageUrlPatterns.push(titleInfo.collectorNumber.replace('/', '-'));
+            }
+        }
+        
+        // Pattern con espansione
+        if (titleInfo.expansion) {
+            const expansionLower = titleInfo.expansion.toLowerCase();
+            imageUrlPatterns.push(expansionLower.replace(/\s+/g, '-'));
+        }
+        
+        if (titleInfo.expansionCode) {
+            imageUrlPatterns.push(titleInfo.expansionCode.toLowerCase());
+        }
+        
+        console.log(`🔍 [CardTrader] Pattern di ricerca image_url:`, imageUrlPatterns);
+        
+        // Cerca carte che hanno pattern nell'image_url
+        let imageUrlResults = [];
+        for (const pattern of imageUrlPatterns) {
+            const { data: patternCards, error: patternError } = await supabaseClient
+                .from('cards')
+                .select('*')
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .ilike('image_url', `%${pattern}%`)
+                .limit(5);
+            
+            if (!patternError && patternCards) {
+                imageUrlResults.push(...patternCards.map(card => ({ 
+                    ...card, 
+                    source: 'cards_image_url',
+                    matched_pattern: pattern 
+                })));
+            }
+        }
+        
+        if (imageUrlResults && imageUrlResults.length > 0) {
+            console.log(`✅ [CardTrader] Trovate ${imageUrlResults.length} carte con match nell'image_url`);
+            imageUrlResults.forEach(card => {
                 // Evita duplicati
                 const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
                 if (!existing) {
                     allResults.push({ 
                         ...card, 
-                        source: 'cards', 
-                        title_url_match: true
+                        source: 'cards_image_url', 
+                        image_url_match: true,
+                        matched_pattern: card.matched_pattern
                     });
                 }
             });
@@ -1513,10 +1567,34 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] Variante -> +50 punti`);
             }
             
-            // Bonus per match del titolo nell'URL (75 punti)
-            if (result.title_url_match) {
-                score += 75;
-                console.log(`🎯 [CardTrader] Match titolo nell'URL -> +75 punti`);
+            // Bonus per match nell'image_url (PRIORITÀ ALTA - 800 punti)
+            if (result.image_url_match) {
+                score += 800;
+                console.log(`🎯 [CardTrader] Match nell'image_url (pattern: ${result.matched_pattern}) -> +800 punti (PRIORITÀ ALTA)`);
+                
+                // Bonus extra per match multipli nell'image_url
+                if (result.matched_pattern) {
+                    const pattern = result.matched_pattern.toLowerCase();
+                    const imageUrl = (result.image_url || '').toLowerCase();
+                    
+                    // Bonus per match del numero collezionista nell'image_url
+                    if (titleInfo.collectorNumber && imageUrl.includes(titleInfo.collectorNumber)) {
+                        score += 500;
+                        console.log(`🎯 [CardTrader] Numero collezionista ${titleInfo.collectorNumber} nell'image_url -> +500 punti EXTRA`);
+                    }
+                    
+                    // Bonus per match dell'espansione nell'image_url
+                    if (titleInfo.expansion && imageUrl.includes(titleInfo.expansion.toLowerCase().replace(/\s+/g, '-'))) {
+                        score += 400;
+                        console.log(`🎯 [CardTrader] Espansione ${titleInfo.expansion} nell'image_url -> +400 punti EXTRA`);
+                    }
+                    
+                    // Bonus per match del codice espansione nell'image_url
+                    if (titleInfo.expansionCode && imageUrl.includes(titleInfo.expansionCode.toLowerCase())) {
+                        score += 600;
+                        console.log(`🎯 [CardTrader] Codice espansione ${titleInfo.expansionCode} nell'image_url -> +600 punti EXTRA`);
+                    }
+                }
             }
             
             // Bonus per carte "ex" (300 punti)
@@ -1524,6 +1602,16 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             if (cardName.includes(' ex') || cardName.endsWith('ex')) {
                 score += 300;
                 console.log(`🎯 [CardTrader] Carta EX rilevata: ${cardName} -> +300 punti`);
+            }
+            
+            // Bonus per rarità (200 punti)
+            if (titleInfo.rarity) {
+                const imageUrl = (result.image_url || '').toLowerCase();
+                const rarityLower = titleInfo.rarity.toLowerCase();
+                if (imageUrl.includes(rarityLower) || imageUrl.includes(rarityLower.replace(/\s+/g, '-'))) {
+                    score += 200;
+                    console.log(`🎯 [CardTrader] Rarità ${titleInfo.rarity} nell'image_url -> +200 punti`);
+                }
             }
             
             console.log(`📊 [CardTrader] ${result.name_en || result.pokemon_name} - Punteggio totale: ${score}`);
