@@ -897,6 +897,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         if (!cardsError && cards && cards.length > 0) {
             console.log(`✅ [CardTrader] Trovate ${cards.length} carte base per ${titleInfo.pokemonName}`);
             
+            // Aggiungi le carte base
             cards.forEach(card => {
                 allResults.push({ 
                     ...card, 
@@ -904,6 +905,39 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     pokemon_match: true
                 });
             });
+            
+            // Cerca anche le varianti con image_url per queste carte
+            const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
+            
+            if (blueprintIds.length > 0) {
+                console.log(`🔍 [CardTrader] Cercando varianti con image_url per ${blueprintIds.length} carte`);
+                
+                const { data: variants, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('*')
+                    .in('blueprint_id', blueprintIds)
+                    .not('image_url', 'is', null)
+                    .limit(50); // Limita per performance
+                
+                if (!variantsError && variants && variants.length > 0) {
+                    console.log(`✅ [CardTrader] Trovate ${variants.length} varianti con image_url`);
+                    
+                    variants.forEach(variant => {
+                        const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
+                        if (card) {
+                            const combinedResult = {
+                                ...variant,
+                                name_en: card.name_en,
+                                pokemon_name: card.name_en,
+                                expansion_name_en: card.expansion_name_en,
+                                expansion_code: card.expansion_code,
+                                source: 'card_variants_with_image'
+                            };
+                            allResults.push(combinedResult);
+                        }
+                    });
+                }
+            }
         }
         
         // 2. Se abbiamo un numero collezionista specifico, cerca le varianti
@@ -998,8 +1032,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             return [];
         }
         
-        // 4. Sistema di punteggi ULTRA-SEMPLICE
-        console.log(`🔍 [CardTrader] Applicando sistema di punteggi ultra-semplice`);
+        // 4. Sistema di punteggi BASATO SU MATCHING PAROLA PER PAROLA
+        console.log(`🔍 [CardTrader] Applicando sistema di punteggi parola per parola`);
+        
+        // Estrai TUTTE le parole dal titolo originale (escludendo Pokemon name e collector number)
+        const titleWords = extractAllWordsFromTitle(originalTitle, titleInfo);
+        console.log(`📝 [CardTrader] Parole estratte dal titolo:`, titleWords);
         
         const finalResults = allResults.map(result => {
             let score = 0;
@@ -1035,6 +1073,15 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
+            // PRIORITÀ 4: MATCHING PAROLA PER PAROLA CON IMAGE_URL
+            if (result.image_url && titleWords.length > 0) {
+                const imageUrlScore = calculateImageUrlWordMatch(result.image_url, titleWords);
+                score += imageUrlScore;
+                if (imageUrlScore > 0) {
+                    console.log(`🎯 [CardTrader] MATCH IMAGE_URL: ${imageUrlScore} punti per "${result.image_url}"`);
+                }
+            }
+            
             return { result, score };
         });
         
@@ -1063,6 +1110,87 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         console.error('❌ [CardTrader] Errore nella ricerca database:', error);
         return [];
     }
+}
+
+// Funzione per estrarre TUTTE le parole dal titolo (escludendo Pokemon name e collector number)
+function extractAllWordsFromTitle(originalTitle, titleInfo) {
+    if (!originalTitle) return [];
+    
+    // Converti in minuscolo e rimuovi caratteri speciali
+    let cleanTitle = originalTitle.toLowerCase()
+        .replace(/[^\w\s]/g, ' ') // Sostituisci caratteri speciali con spazi
+        .replace(/\s+/g, ' ') // Normalizza spazi multipli
+        .trim();
+    
+    // Rimuovi il nome Pokemon se presente
+    if (titleInfo.pokemonName) {
+        const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+        cleanTitle = cleanTitle.replace(new RegExp(`\\b${pokemonNameLower}\\b`, 'gi'), '');
+    }
+    
+    // Rimuovi il numero collezionista se presente
+    if (titleInfo.collectorNumber) {
+        const collectorNumberStr = titleInfo.collectorNumber.toString();
+        cleanTitle = cleanTitle.replace(new RegExp(`\\b${collectorNumberStr}\\b`, 'gi'), '');
+    }
+    
+    // Rimuovi l'espansione se presente
+    if (titleInfo.expansion) {
+        const expansionLower = titleInfo.expansion.toLowerCase();
+        cleanTitle = cleanTitle.replace(new RegExp(`\\b${expansionLower}\\b`, 'gi'), '');
+    }
+    
+    // Estrai tutte le parole rimanenti (lunghezza >= 2 caratteri)
+    const words = cleanTitle.split(/\s+/)
+        .filter(word => word.length >= 2)
+        .filter(word => !['card', 'pokemon', 'game', 'trading', 'collectible'].includes(word)); // Rimuovi parole generiche
+    
+    console.log(`🔍 [CardTrader] Parole estratte da "${originalTitle}":`, words);
+    return words;
+}
+
+// Funzione per calcolare il punteggio di matching parola per parola con image_url
+function calculateImageUrlWordMatch(imageUrl, titleWords) {
+    if (!imageUrl || !titleWords || titleWords.length === 0) return 0;
+    
+    // Estrai la parte finale dell'URL (dopo l'ultimo /)
+    const urlParts = imageUrl.split('/');
+    const finalPart = urlParts[urlParts.length - 1] || '';
+    
+    // Rimuovi l'estensione del file se presente
+    const finalPartWithoutExt = finalPart.replace(/\.(jpg|jpeg|png|webp)$/i, '');
+    
+    // Converti in minuscolo e normalizza
+    const normalizedFinalPart = finalPartWithoutExt.toLowerCase()
+        .replace(/[^\w\s]/g, ' ') // Sostituisci caratteri speciali con spazi
+        .replace(/\s+/g, ' ') // Normalizza spazi multipli
+        .trim();
+    
+    console.log(`🔍 [CardTrader] Parte finale URL: "${normalizedFinalPart}"`);
+    
+    let totalScore = 0;
+    let matchedWords = [];
+    
+    // Per ogni parola del titolo, cerca match nella parte finale dell'URL
+    titleWords.forEach((word, index) => {
+        const wordLower = word.toLowerCase();
+        
+        // Controlla se la parola è presente nella parte finale dell'URL
+        if (normalizedFinalPart.includes(wordLower)) {
+            // Punteggio progressivo: prima parola = 1000, seconda = 900, terza = 800, ecc.
+            const progressiveScore = Math.max(100, 1000 - (index * 100));
+            totalScore += progressiveScore;
+            matchedWords.push({ word: wordLower, score: progressiveScore });
+            
+            console.log(`🎯 [CardTrader] MATCH PAROLA: "${wordLower}" -> +${progressiveScore} punti`);
+        }
+    });
+    
+    if (matchedWords.length > 0) {
+        console.log(`📊 [CardTrader] Parole matchate:`, matchedWords);
+    }
+    
+    return totalScore;
 }
 
 // Funzione per generare link CardTrader
