@@ -504,7 +504,7 @@ if (document.readyState === 'loading') {
 function patchEbayProductPage() {
     if (!window.location.hostname.includes('ebay')) return;
     
-    console.log('🔍 [CardTrader] Cercando box del titolo...');
+    console.log('🔍 [CardTrader] Cercando box del titolo eBay...');
     
     // Cerca il box del titolo con più selettori
     const titleBox = document.querySelector('.x-item-title, [data-testid="x-item-title"], .item-title-container, .title-section');
@@ -597,6 +597,104 @@ function patchEbayProductPage() {
         });
     } else {
         console.log('❌ [CardTrader] Box del titolo non trovato o pulsante CARDTRADER già presente');
+    }
+}
+
+function patchVintedProductPage() {
+    if (!window.location.hostname.includes('vinted')) return;
+    
+    console.log('🔍 [CardTrader] Cercando box del titolo Vinted...');
+    
+    // Cerca il box del titolo con più selettori per Vinted
+    const titleBox = document.querySelector('.summary-max-lines-4, [data-testid="item-title"], .item-title-container, .title-section');
+    console.log('🔍 [CardTrader] Box del titolo Vinted trovato:', !!titleBox);
+    
+    if (titleBox && !document.querySelector('.pokemon-card-linker-product')) {
+        console.log('✅ [CardTrader] Box del titolo Vinted trovato, cercando titolo...');
+        
+        // Trova il titolo con più selettori per Vinted
+        const titleSelectors = [
+            'h1.web_ui__Text__text.web_ui__Text__title.web_ui__Text__left',
+            '.web_ui__Text__text.web_ui__Text__title',
+            '[data-testid="item-title"]',
+            '.item-title',
+            'h1'
+        ];
+        
+        let titleElem = null;
+        for (const selector of titleSelectors) {
+            titleElem = document.querySelector(selector);
+            if (titleElem) {
+                console.log('✅ [CardTrader] Titolo Vinted trovato con selettore:', selector);
+                break;
+            }
+        }
+        
+        const title = titleElem ? titleElem.textContent.replace(/\s+/g, ' ').trim() : null;
+        console.log('📝 [CardTrader] Titolo Vinted estratto:', title);
+        console.log('📝 [CardTrader] Elemento titolo Vinted:', titleElem);
+        console.log('📝 [CardTrader] HTML titolo Vinted:', titleElem ? titleElem.innerHTML : 'null');
+        
+        if (!title) {
+            console.log('❌ [CardTrader] Nessun titolo Vinted trovato');
+            return;
+        }
+        
+        // Estrai info
+        const titleInfo = extractTitleInfo(title);
+        console.log('🔍 [CardTrader] Info estratte Vinted:', titleInfo);
+        console.log('🎯 [CardTrader] Pokemon trovato Vinted:', titleInfo.pokemonName);
+        
+        if (!titleInfo.pokemonName) {
+            console.log('❌ [CardTrader] Nessun Pokemon trovato nel titolo Vinted');
+            return;
+        }
+        
+        // Cerca nel database e inserisci il bottone
+        console.log('🔍 [CardTrader] Cercando nel database Vinted...');
+        console.log('🔍 [CardTrader] Client Supabase disponibile:', !!window.supabaseClient);
+        searchCardInDatabase(titleInfo, title).then(results => {
+            console.log('📊 [CardTrader] Risultati database Vinted:', results);
+            
+            if (!results || results.length === 0) {
+                console.log('❌ [CardTrader] Nessun risultato trovato nel database Vinted');
+                return;
+            }
+            
+            const bestMatch = results[0];
+            const cardTraderLink = generateCardTraderLink(bestMatch.blueprint_id);
+            console.log('🔗 [CardTrader] Link generato Vinted:', cardTraderLink);
+            
+            // Crea il bottone CardTrader
+            const ctBtn = document.createElement('a');
+            ctBtn.href = cardTraderLink;
+            ctBtn.target = '_blank';
+            ctBtn.className = 'pokemon-card-linker-product';
+            ctBtn.style.cssText = 'display:inline-block;margin-left:10px;padding:6px 12px;background:#28a745;color:white;border:1px solid #1e7e34;border-radius:4px;text-decoration:none;font-size:12px;font-weight:bold;transition:background 0.3s;';
+            ctBtn.textContent = 'CARDTRADER';
+            ctBtn.title = 'Vedi su CardTrader';
+            
+            // Aggiungi hover effect
+            ctBtn.addEventListener('mouseenter', () => {
+                ctBtn.style.background = '#218838';
+            });
+            ctBtn.addEventListener('mouseleave', () => {
+                ctBtn.style.background = '#28a745';
+            });
+            
+            // Inserisci nel box del titolo, dopo il titolo principale
+            const titleElement = titleBox.querySelector('h1, .web_ui__Text__text.web_ui__Text__title, [data-testid="item-title"]');
+            if (titleElement && titleElement.parentNode) {
+                titleElement.parentNode.insertBefore(ctBtn, titleElement.nextSibling);
+            } else {
+                titleBox.appendChild(ctBtn);
+            }
+            console.log('✅ [CardTrader] Pulsante CARDTRADER aggiunto a Vinted!');
+        }).catch(error => {
+            console.error('❌ [CardTrader] Errore nella ricerca database Vinted:', error);
+        });
+    } else {
+        console.log('❌ [CardTrader] Box del titolo Vinted non trovato o pulsante CARDTRADER già presente');
     }
 }
 
@@ -1306,7 +1404,6 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 const expansionCode = (result.expansion_code || '').toUpperCase();
                 const searchExpansion = titleInfo.expansion ? titleInfo.expansion.toLowerCase() : '';
                 const searchExpansionCode = titleInfo.expansionCode || '';
-                
                 // Match per codice di espansione (priorità alta)
                 if (searchExpansionCode && expansionCode === searchExpansionCode) {
                     score += 300;
@@ -1323,6 +1420,11 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 } else if (result.expansion_match) {
                     score += 100;
                     console.log(`🎯 [CardTrader] Match espansione parziale: ${expansion} -> +100 punti`);
+                }
+                // Punti extra se expansionCode è presente in image_url
+                if (searchExpansionCode && result.image_url && result.image_url.toUpperCase().includes(searchExpansionCode)) {
+                    score += 200;
+                    console.log(`🎯 [CardTrader] Codice espansione ${searchExpansionCode} presente in image_url -> +200 punti EXTRA`);
                 }
             }
             
@@ -1391,16 +1493,19 @@ async function updateStats(type, increment = 1) {
     }
 }
 
-// Esegui il patch iniziale
+// Esegui il patch iniziale per entrambi i siti
 patchEbayProductPage();
+patchVintedProductPage();
 
 // Retry del patch per pagine che si caricano dopo
 setTimeout(() => {
     console.log('🔄 [CardTrader] Retry patch pagina prodotto...');
     patchEbayProductPage();
+    patchVintedProductPage();
 }, 3000);
 
 setTimeout(() => {
     console.log('🔄 [CardTrader] Secondo retry patch pagina prodotto...');
     patchEbayProductPage();
+    patchVintedProductPage();
 }, 5000); 
