@@ -2583,8 +2583,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             return [];
         }
         
-        // 4. Sistema di punteggi SEMPLIFICATO - SOLO MATCH ESSENZIALI
-        console.log(`🔍 [CardTrader] Applicando sistema di punteggi semplificato`);
+        // 4. Sistema di punteggi ULTRA-RIGOROSO - SOLO MATCH ESSENZIALI
+        console.log(`🔍 [CardTrader] Applicando sistema di punteggi ultra-rigoroso`);
         
         const finalResults = allResults.map(result => {
             let nameScore = 0;
@@ -2657,135 +2657,55 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
-            // BONUS SPECIFICI SOLO SE PRESENTI NEL TITOLO
+            // BONUS ULTRA-RIGOROSI: SOLO parole specifiche presenti nel titolo
             const titleLower = originalTitle.toLowerCase();
             
-            // BONUS per carte VMAX (SOLO se il titolo contiene "vmax")
-            if (titleLower.includes('vmax') && cardName.includes('vmax')) {
-                nameScore += 8000; // Bonus per match "vmax" (solo se nel titolo)
-                console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +8000 punti (solo se nel titolo)`);
+            // BONUS per carte VMAX (SOLO se il titolo contiene "vmax" come parola separata)
+            if ((titleLower.includes(' vmax ') || titleLower.startsWith('vmax ') || titleLower.endsWith(' vmax') || titleLower === 'vmax') && cardName.includes('vmax')) {
+                nameScore += 8000; // Bonus per match "vmax" (solo se nel titolo come parola separata)
+                console.log(`🎯 [CardTrader] MATCH VMAX TROVATO in "${cardName}" -> +8000 punti (solo se nel titolo come parola separata)`);
             }
             
-            // BONUS per carte V (SOLO se il titolo contiene "v" e non "vmax" o "vstar")
-            if (titleLower.includes('v') && !titleLower.includes('vmax') && !titleLower.includes('vstar') && cardName.includes('v') && !cardName.includes('vmax') && !cardName.includes('vstar')) {
-                nameScore += 6000; // Bonus per match "v" (solo se nel titolo)
-                console.log(`🎯 [CardTrader] MATCH V TROVATO in "${cardName}" -> +6000 punti (solo se nel titolo)`);
+            // BONUS per carte VSTAR (SOLO se il titolo contiene "vstar" come parola separata)
+            if ((titleLower.includes(' vstar ') || titleLower.startsWith('vstar ') || titleLower.endsWith(' vstar') || titleLower === 'vstar') && cardName.includes('vstar')) {
+                nameScore += 7000; // Bonus per match "vstar" (solo se nel titolo come parola separata)
+                console.log(`🎯 [CardTrader] MATCH VSTAR TROVATO in "${cardName}" -> +7000 punti (solo se nel titolo come parola separata)`);
             }
             
-            // BONUS per carte VSTAR (SOLO se il titolo contiene "vstar")
-            if (titleLower.includes('vstar') && cardName.includes('vstar')) {
-                nameScore += 7000; // Bonus per match "vstar" (solo se nel titolo)
-                console.log(`🎯 [CardTrader] MATCH VSTAR TROVATO in "${cardName}" -> +7000 punti (solo se nel titolo)`);
+            // BONUS per carte V (SOLO se il titolo contiene "v" come parola separata e non "vmax" o "vstar")
+            if ((titleLower.includes(' v ') || titleLower.startsWith('v ') || titleLower.endsWith(' v') || titleLower === 'v') && 
+                !titleLower.includes('vmax') && !titleLower.includes('vstar') && 
+                cardName.includes('v') && !cardName.includes('vmax') && !cardName.includes('vstar')) {
+                nameScore += 6000; // Bonus per match "v" (solo se nel titolo come parola separata)
+                console.log(`🎯 [CardTrader] MATCH V TROVATO in "${cardName}" -> +6000 punti (solo se nel titolo come parola separata)`);
             }
             
             // BONUS per carte EX (SOLO se il titolo contiene "ex" come parola separata)
-            if (titleLower.includes(' ex ') || titleLower.startsWith('ex ') || titleLower.endsWith(' ex') || titleLower === 'ex') {
-                if (cardName.includes('ex')) {
-                    nameScore += 5000; // Bonus per match "ex" (solo se nel titolo come parola separata)
-                    console.log(`🎯 [CardTrader] MATCH EX TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo come parola separata)`);
-                }
+            if ((titleLower.includes(' ex ') || titleLower.startsWith('ex ') || titleLower.endsWith(' ex') || titleLower === 'ex') && cardName.includes('ex')) {
+                nameScore += 5000; // Bonus per match "ex" (solo se nel titolo come parola separata)
+                console.log(`🎯 [CardTrader] MATCH EX TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo come parola separata)`);
             }
             
-            // BONUS per carte GX (SOLO se il titolo contiene "gx")
-            if (titleLower.includes('gx') && cardName.includes('gx')) {
-                nameScore += 5000; // Bonus per match "gx" (solo se nel titolo)
-                console.log(`🎯 [CardTrader] MATCH GX TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo)`);
+            // BONUS per carte GX (SOLO se il titolo contiene "gx" come parola separata)
+            if ((titleLower.includes(' gx ') || titleLower.startsWith('gx ') || titleLower.endsWith(' gx') || titleLower === 'gx') && cardName.includes('gx')) {
+                nameScore += 5000; // Bonus per match "gx" (solo se nel titolo come parola separata)
+                console.log(`🎯 [CardTrader] MATCH GX TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo come parola separata)`);
             }
             
-            // BONUS per carte Shiny (SOLO se il titolo contiene "shiny")
-            if (titleLower.includes('shiny') && cardName.includes('shiny')) {
-                nameScore += 5000; // Bonus per match "shiny" (solo se nel titolo)
-                console.log(`🎯 [CardTrader] MATCH SHINY TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo)`);
+            // BONUS per carte Shiny (SOLO se il titolo contiene "shiny" come parola separata)
+            if ((titleLower.includes(' shiny ') || titleLower.startsWith('shiny ') || titleLower.endsWith(' shiny') || titleLower === 'shiny') && cardName.includes('shiny')) {
+                nameScore += 5000; // Bonus per match "shiny" (solo se nel titolo come parola separata)
+                console.log(`🎯 [CardTrader] MATCH SHINY TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo come parola separata)`);
             }
             
-            // BONUS per carte Promo (SOLO se il titolo contiene "promo")
-            if (titleLower.includes('promo') && cardName.includes('promo')) {
-                nameScore += 5000; // Bonus per match "promo" (solo se nel titolo)
-                console.log(`🎯 [CardTrader] MATCH PROMO TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo)`);
+            // BONUS per carte Promo (SOLO se il titolo contiene "promo" come parola separata)
+            if ((titleLower.includes(' promo ') || titleLower.startsWith('promo ') || titleLower.endsWith(' promo') || titleLower === 'promo') && cardName.includes('promo')) {
+                nameScore += 5000; // Bonus per match "promo" (solo se nel titolo come parola separata)
+                console.log(`🎯 [CardTrader] MATCH PROMO TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo come parola separata)`);
             }
             
-            // BONUS per keyword nella parte finale dell'image_url (solo se presenti nel titolo)
-            if (result.image_url && originalTitle) {
-                // Estrai solo la parte finale dell'image_url (dopo l'ultimo slash)
-                const urlParts = result.image_url.split('/');
-                const imageUrlFinal = urlParts[urlParts.length - 1].toLowerCase();
-                
-                console.log(`🎯 [CardTrader] ImageUrlFinal: "${imageUrlFinal}"`);
-                
-                // Estrai parole dal titolo (escludendo Pokemon e numero collezione)
-                const titleWords = titleLower.split(/\s+/).filter(word => {
-                    // Escludi parole troppo corte
-                    if (word.length < 2) return false;
-                    
-                    // Escludi parole generiche
-                    if (['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon'].includes(word)) return false;
-                    
-                    // Escludi il nome del Pokemon
-                    if (word === titleInfo.pokemonName.toLowerCase()) return false;
-                    
-                    // Escludi il numero di collezione
-                    if (titleInfo.collectorNumber && word === titleInfo.collectorNumber.toString()) return false;
-                    
-                    return true;
-                });
-                
-                console.log(`🎯 [CardTrader] Parole estratte dal titolo: [${titleWords.join(', ')}]`);
-                
-                // Cerca match tra parole del titolo e image_url finale
-                let matchedWords = [];
-                
-                titleWords.forEach(word => {
-                    // CONTROLLO RIGOROSO: Verifica che la parola sia effettivamente presente nel titolo originale
-                    const wordInTitle = titleLower.includes(word) || 
-                                       titleLower.includes(word + ' ') || 
-                                       titleLower.includes(' ' + word) || 
-                                       titleLower.includes(' ' + word + ' ') ||
-                                       titleLower.startsWith(word + ' ') ||
-                                       titleLower.endsWith(' ' + word) ||
-                                       titleLower === word;
-                    
-                    if (!wordInTitle) {
-                        console.log(`🚫 [CardTrader] Parola "${word}" NON presente nel titolo originale, saltando`);
-                        return; // Salta questa parola
-                    }
-                    
-                    if (imageUrlFinal.includes(word) && !matchedWords.includes(word)) {
-                        let bonus = 0;
-                        
-                        // Bonus basato sull'importanza della parola - SOLO se presente nel titolo
-                        if (['vmax', 'vstar', 'sl', 'tg'].includes(word)) {
-                            bonus = 8000; // Bonus ALTO per parole importanti
-                        } else if (['gx', 'v', 'shiny', 'promo'].includes(word)) {
-                            bonus = 6000; // Bonus MEDIO per parole medie
-                        } else if (['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'].includes(word)) {
-                            bonus = 5000; // Bonus MEDIO per parole di espansione
-                        } else if (word === 'ex') {
-                            // CONTROLLO RIGOROSO: "ex" deve essere una parola esatta, non parte di altre parole
-                            bonus = 6000; // Bonus MEDIO per "ex" esatto
-                            console.log(`🎯 [CardTrader] PAROLA "ex" ESATTA TROVATA -> +${bonus} punti`);
-                        } else {
-                            bonus = 3000; // Bonus BASE per altre parole
-                        }
-                        
-                        nameScore += bonus;
-                        matchedWords.push(word);
-                        console.log(`🎯 [CardTrader] PAROLA "${word}" TROVATA nel titolo E in imageUrlFinal -> +${bonus} punti`);
-                    } else {
-                        if (imageUrlFinal.includes(word)) {
-                            console.log(`⚠️ [CardTrader] Parola "${word}" già matchata, saltando`);
-                        } else {
-                            console.log(`❌ [CardTrader] Parola "${word}" NON trovata in imageUrlFinal`);
-                        }
-                    }
-                });
-                
-                // Bonus extra per match multipli nell'image_url
-                if (matchedWords.length >= 2) {
-                    const extraBonus = 5000; // Bonus per match multipli
-                    nameScore += extraBonus;
-                    console.log(`🎯 [CardTrader] ${matchedWords.length} PAROLE MATCHATE in imageUrlFinal -> +${extraBonus} punti (bonus multipli)`);
-                }
-            }
+            // RIMOSSO COMPLETAMENTE: Bonus per keyword nell'image_url
+            // Non ha senso dare bonus per parole che potrebbero non essere nel titolo
             
             return { result, nameScore };
         });
