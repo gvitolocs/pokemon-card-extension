@@ -1896,7 +1896,13 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     console.log(`❌ [CardTrader] Pokeball richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
                 }
                 
-                // Bonus se Masterball/Pokeball sono presenti nell'URL quando richiesti
+                if (titleLower.includes('shiny') && !imageUrlLower.includes('shiny')) {
+                    validationScore -= 500; // Penalità MASSIMA per Shiny mancante
+                    validationReason += 'Shiny richiesto ma mancante nell\'URL ';
+                    console.log(`❌ [CardTrader] Shiny richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+                }
+                
+                // Bonus se Masterball/Pokeball/Shiny sono presenti nell'URL quando richiesti
                 if (titleLower.includes('masterball') && imageUrlLower.includes('masterball')) {
                     validationScore += 300; // Bonus alto per Masterball presente
                     validationReason += 'Masterball nell\'URL CORRETTO ';
@@ -1907,6 +1913,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     validationScore += 300; // Bonus alto per Pokeball presente
                     validationReason += 'Pokeball nell\'URL CORRETTO ';
                     console.log(`🎯 [CardTrader] Pokeball trovato in: "${result.image_url}" -> +300 punti`);
+                }
+                
+                if (titleLower.includes('shiny') && imageUrlLower.includes('shiny')) {
+                    validationScore += 300; // Bonus alto per Shiny presente
+                    validationReason += 'Shiny nell\'URL CORRETTO ';
+                    console.log(`🎯 [CardTrader] Shiny trovato in: "${result.image_url}" -> +300 punti`);
                 }
                 
                 score += validationScore;
