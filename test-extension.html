@@ -201,6 +201,57 @@
             <input type="text" id="testTitle" placeholder="Inserisci un titolo eBay per testare..." 
                    value="Carta Pokemon Jolteon ex SAR 209/187 sv8a Terastal Festival ex JP">
             <button onclick="testExtraction()">🔍 Testa Estrazione</button>
+            
+            <div style="margin: 15px 0;">
+                <h4>🎯 Esempi di Test (clicca per inserire):</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px;">
+                    <button onclick="setTestTitle('Carta Pokemon Jolteon ex SAR 209/187 sv8a Terastal Festival ex JP')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        🃏 Jolteon ex #209 Terastal Festival
+                    </button>
+                    <button onclick="setTestTitle('Pikachu ex SAR 184/187 sv8a Terastal Festival ex JP')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ⚡ Pikachu ex #184 Terastal Festival
+                    </button>
+                    <button onclick="setTestTitle('Charizard ex SAR 184/187 sv8a Terastal Festival ex JP')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        🔥 Charizard ex #184 Terastal Festival
+                    </button>
+                    <button onclick="setTestTitle('Light Jolteon Neo Destiny 48/105')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ⚡ Light Jolteon #48 Neo Destiny
+                    </button>
+                    <button onclick="setTestTitle('Jolteon ex EX Delta Species 109/113')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ⚡ Jolteon ex #109 EX Delta Species
+                    </button>
+                    <button onclick="setTestTitle('Jolteon Jungle 20/64')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ⚡ Jolteon #20 Jungle
+                    </button>
+                    <button onclick="setTestTitle('Dark Jolteon Team Rocket 38/82')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ⚡ Dark Jolteon #38 Team Rocket
+                    </button>
+                    <button onclick="setTestTitle('Lt. Surge\'s Jolteon Gym Challenge 28/132')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ⚡ Lt. Surge's Jolteon #28 Gym Challenge
+                    </button>
+                    <button onclick="setTestTitle('Carta Pokemon Glaceon ex SAR 206/187 sv8a Terastal Festival JP')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ❄️ Glaceon ex #206 Terastal Festival
+                    </button>
+                    <button onclick="setTestTitle('Glaceon ex(Special Illustration Rare | 150')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ❄️ Glaceon ex Special Illustration Rare #150
+                    </button>
+                    <button onclick="setTestTitle('Glaceon ex Prismatic Evolution 150/131')" 
+                            style="text-align: left; font-size: 12px; padding: 8px;">
+                        ❄️ Glaceon ex Prismatic Evolution #150
+                    </button>
+                </div>
+            </div>
+            
             <div id="extractionResult"></div>
         </div>
 
@@ -215,6 +266,41 @@
             <h3>📊 Statistiche Database</h3>
             <button onclick="getDatabaseStats()">📈 Carica Statistiche</button>
             <div id="statsResult"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>🧪 Test Rapidi</h3>
+            <p>Testa rapidamente il sistema con diversi tipi di carte:</p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px; margin: 15px 0;">
+                <button onclick="quickTest('jolteon')" style="background: linear-gradient(45deg, #ff6b6b, #ee5a24);">
+                    🔍 Test Jolteon Generico
+                </button>
+                <button onclick="quickTest('pikachu')" style="background: linear-gradient(45deg, #feca57, #ff9ff3);">
+                    ⚡ Test Pikachu Generico
+                </button>
+                <button onclick="quickTest('charizard')" style="background: linear-gradient(45deg, #ff9ff3, #54a0ff);">
+                    🔥 Test Charizard Generico
+                </button>
+                <button onclick="quickTest('terastal')" style="background: linear-gradient(45deg, #48dbfb, #0abde3);">
+                    🎭 Test Terastal Festival
+                </button>
+                <button onclick="searchByNumber('150')" style="background: linear-gradient(45deg, #ff9ff3, #f368e0);">
+                    🔢 Cerca Numero 150
+                </button>
+                <button onclick="searchPrismaticEvolution()" style="background: linear-gradient(45deg, #a8e6cf, #88d8c0);">
+                    🔍 Cerca Prismatic Evolution
+                </button>
+                <button onclick="searchGlaceonExpansions()" style="background: linear-gradient(45deg, #ffb3ba, #ffdfba);">
+                    ❄️ Espansioni Glaceon
+                </button>
+                <button onclick="testRaritySearch('special illustration rare')" style="background: linear-gradient(45deg, #ffd700, #ffa500);">
+                    ✨ Test Special Illustration Rare
+                </button>
+                <button onclick="testRaritySearch('ultra rare')" style="background: linear-gradient(45deg, #c0c0c0, #a0a0a0);">
+                    💎 Test Ultra Rare
+                </button>
+            </div>
+            <div id="quickTestResult"></div>
         </div>
     </div>
 
@@ -289,6 +375,7 @@
             const titleLower = title.toLowerCase();
             
             const pokemonList = [
+                // Generazione 1 (151 Pokemon)
                 'bulbasaur', 'ivysaur', 'venusaur', 'charmander', 'charmeleon', 'charizard',
                 'squirtle', 'wartortle', 'blastoise', 'caterpie', 'metapod', 'butterfree',
                 'weedle', 'kakuna', 'beedrill', 'pidgey', 'pidgeotto', 'pidgeot',
@@ -314,12 +401,207 @@
                 'magikarp', 'gyarados', 'lapras', 'ditto', 'vaporeon', 'jolteon',
                 'flareon', 'omanyte', 'omastar', 'kabuto', 'kabutops', 'aerodactyl',
                 'snorlax', 'articuno', 'zapdos', 'moltres', 'dratini', 'dragonair',
-                'dragonite', 'mewtwo', 'mew'
+                'dragonite', 'mewtwo', 'mew',
+                
+                // Generazione 2 (100 Pokemon)
+                'chikorita', 'bayleef', 'meganium', 'cyndaquil', 'quilava', 'typhlosion',
+                'totodile', 'croconaw', 'feraligatr', 'sentret', 'furret', 'hooth',
+                'noctowl', 'ledyba', 'ledian', 'spinarak', 'ariados', 'crobat',
+                'chinchou', 'lanturn', 'pichu', 'cleffa', 'igglybuff', 'togepi',
+                'togetic', 'natu', 'xatu', 'mareep', 'flaaffy', 'ampharos',
+                'bellossom', 'marill', 'azumarill', 'sudowoodo', 'politoed', 'hoppip',
+                'skiploom', 'jumpluff', 'aipom', 'sunkern', 'sunflora', 'yanma',
+                'wooper', 'quagsire', 'espeon', 'umbreon', 'murkrow', 'slowking',
+                'misdreavus', 'unown', 'wobbuffet', 'girafarig', 'pineco', 'forretress',
+                'dunsparce', 'gligar', 'steelix', 'snubbull', 'granbull', 'qwilfish',
+                'scizor', 'shuckle', 'heracross', 'sneasel', 'teddiursa', 'ursaring',
+                'slugma', 'magcargo', 'swinub', 'piloswine', 'corsola', 'remoraid',
+                'octillery', 'delibird', 'mantine', 'skarmory', 'houndour', 'houndoom',
+                'kingdra', 'phanpy', 'donphan', 'porygon2', 'stantler', 'smeargle',
+                'tyrogue', 'hitmontop', 'smoochum', 'elekid', 'magby', 'miltank',
+                'blissey', 'raikou', 'entei', 'suicune', 'larvitar', 'pupitar',
+                'tyranitar', 'lugia', 'ho-oh', 'celebi',
+                
+                // Generazione 3 (135 Pokemon)
+                'treecko', 'grovyle', 'sceptile', 'torchic', 'combusken', 'blaziken',
+                'mudkip', 'marshtomp', 'swampert', 'poochyena', 'mightyena', 'zigzagoon',
+                'linoone', 'wurmple', 'silcoon', 'beautifly', 'cascoon', 'dustox',
+                'lotad', 'lombre', 'ludicolo', 'seedot', 'nuzleaf', 'shiftry',
+                'taillow', 'swellow', 'wingull', 'pelipper', 'ralts', 'kirlia',
+                'gardevoir', 'surskit', 'masquerain', 'shroomish', 'breloom', 'slakoth',
+                'vigoroth', 'slaking', 'nincada', 'ninjask', 'shedinja', 'whismur',
+                'loudred', 'exploud', 'makuhita', 'hariyama', 'azurill', 'nosepass',
+                'skitty', 'delcatty', 'sableye', 'mawile', 'aron', 'lairon',
+                'aggron', 'meditite', 'medicham', 'electrike', 'manectric', 'plusle',
+                'minun', 'volbeat', 'illumise', 'roselia', 'gulpin', 'swalot',
+                'carvanha', 'sharpedo', 'wailmer', 'wailord', 'numel', 'camerupt',
+                'torkoal', 'spoink', 'grumpig', 'spinda', 'trapinch', 'vibrava',
+                'flygon', 'cacnea', 'cacturne', 'swablu', 'altaria', 'zangoose',
+                'seviper', 'lunatone', 'solrock', 'barboach', 'whiscash', 'corphish',
+                'crawdaunt', 'baltoy', 'claydol', 'lileep', 'cradily', 'anorith',
+                'armaldo', 'feebas', 'milotic', 'castform', 'kecleon', 'shuppet',
+                'banette', 'duskull', 'dusclops', 'tropius', 'chimecho', 'absol',
+                'wynaut', 'snorunt', 'glalie', 'spheal', 'sealeo', 'walrein',
+                'clamperl', 'huntail', 'gorebyss', 'relicanth', 'luvdisc', 'bagon',
+                'shelgon', 'salamence', 'beldum', 'metang', 'metagross', 'regirock',
+                'regice', 'registeel', 'latias', 'latios', 'kyogre', 'groudon',
+                'rayquaza', 'jirachi', 'deoxys',
+                
+                // Generazione 4 (107 Pokemon) - Include Glaceon!
+                'turtwig', 'grotle', 'torterra', 'chimchar', 'monferno', 'infernape',
+                'piplup', 'prinplup', 'empoleon', 'starly', 'staravia', 'staraptor',
+                'bidoof', 'bibarel', 'kricketot', 'kricketune', 'shinx', 'luxio',
+                'luxray', 'budew', 'roserade', 'cranidos', 'rampardos', 'shieldon',
+                'bastiodon', 'burmy', 'wormadam', 'mothim', 'combee', 'vespiquen',
+                'pachirisu', 'buizel', 'floatzel', 'cherubi', 'cherrim', 'shellos',
+                'gastrodon', 'ambipom', 'drifloon', 'drifblim', 'buneary', 'lopunny',
+                'mismagius', 'honchkrow', 'glameow', 'purugly', 'chingling', 'stunky',
+                'skuntank', 'bronzor', 'bronzong', 'bonsly', 'mime jr.', 'happiny',
+                'chatot', 'spiritomb', 'gible', 'gabite', 'garchomp', 'munchlax',
+                'riolu', 'lucario', 'hippopotas', 'hippowdon', 'skorupi', 'drapion',
+                'croagunk', 'toxicroak', 'carnivine', 'finneon', 'lumineon', 'mantyke',
+                'snover', 'abomasnow', 'weavile', 'magnezone', 'lickilicky', 'rhyperior',
+                'tangrowth', 'electivire', 'magmortar', 'togekiss', 'yanmega', 'leafeon',
+                'glaceon', 'gliscor', 'mamoswine', 'porygon-z', 'gallade', 'probopass',
+                'dusknoir', 'froslass', 'rotom', 'uxie', 'mesprit', 'azelf',
+                'dialga', 'palkia', 'heatran', 'regigigas', 'giratina', 'cresselia',
+                'phione', 'manaphy', 'darkrai', 'shaymin', 'arceus',
+                
+                // Generazione 5+ (Pokemon popolari)
+                'snivy', 'servine', 'serperior', 'tepig', 'pignite', 'emboar',
+                'oshawott', 'dewott', 'samurott', 'patrat', 'watchog', 'lillipup',
+                'herdier', 'stoutland', 'purrloin', 'liepard', 'pansage', 'simisage',
+                'pansear', 'simisear', 'panpour', 'simipour', 'munna', 'musharna',
+                'pidove', 'tranquill', 'unfezant', 'blitzle', 'zebstrika', 'roggenrola',
+                'boldore', 'gigalith', 'woobat', 'swoobat', 'drilbur', 'excadrill',
+                'audino', 'timburr', 'gurdurr', 'conkeldurr', 'tympole', 'palpitoad',
+                'seismitoad', 'throh', 'sawk', 'sewaddle', 'swadloon', 'leavanny',
+                'venipede', 'whirlipede', 'scolipede', 'cottonee', 'whimsicott', 'petilil',
+                'lilligant', 'basculin', 'sandile', 'krokorok', 'krookodile', 'darumaka',
+                'darmanitan', 'maractus', 'dwebble', 'crustle', 'scraggy', 'scrafty',
+                'sigilyph', 'yamask', 'cofagrigus', 'tirtouga', 'carracosta', 'archen',
+                'archeops', 'trubbish', 'garbodor', 'zorua', 'zoroark', 'minccino',
+                'cinccino', 'gothita', 'gothorita', 'gothitelle', 'solosis', 'duosion',
+                'reuniclus', 'ducklett', 'swanna', 'vanillite', 'vanillish', 'vanilluxe',
+                'deerling', 'sawsbuck', 'emolga', 'karrablast', 'escavalier', 'foongus',
+                'amoonguss', 'frillish', 'jellicent', 'alomomola', 'joltik', 'galvantula',
+                'ferroseed', 'ferrothorn', 'klink', 'klang', 'klinklang', 'tynamo',
+                'eelektrik', 'eelektross', 'elgyem', 'beheeyem', 'litwick', 'lampent',
+                'chandelure', 'axew', 'fraxure', 'haxorus', 'cubchoo', 'beartic',
+                'cryogonal', 'shelmet', 'accelgor', 'stunfisk', 'mienfoo', 'mienshao',
+                'druddigon', 'golett', 'golurk', 'pawniard', 'bisharp', 'bouffalant',
+                'rufflet', 'braviary', 'vullaby', 'mandibuzz', 'heatmor', 'durant',
+                'deino', 'zweilous', 'hydreigon', 'larvesta', 'volcarona', 'cobalion',
+                'terrakion', 'virizion', 'tornadus', 'thundurus', 'reshiram', 'zekrom',
+                'landorus', 'kyurem', 'keldeo', 'meloetta', 'genesect',
+                
+                // Generazione 6+ (Pokemon popolari)
+                'chespin', 'quilladin', 'chesnaught', 'fennekin', 'braixen', 'delphox',
+                'froakie', 'frogadier', 'greninja', 'bunnelby', 'diggersby', 'fletchling',
+                'fletchinder', 'talonflame', 'scatterbug', 'spewpa', 'vivillon', 'litleo',
+                'pyroar', 'flabebe', 'floette', 'florges', 'skiddo', 'gogoat',
+                'pancham', 'pangoro', 'furfrou', 'espurr', 'meowstic', 'honedge',
+                'doublade', 'aegislash', 'spritzee', 'aromatisse', 'swirlix', 'slurpuff',
+                'inkay', 'malamar', 'binacle', 'barbaracle', 'skrelp', 'dragalge',
+                'clauncher', 'clawitzer', 'helioptile', 'heliolisk', 'tyrunt', 'tyrantrum',
+                'amaura', 'aurorus', 'sylveon', 'hawlucha', 'dedenne', 'carbink',
+                'goomy', 'sliggoo', 'goodra', 'klefki', 'phantump', 'trevenant',
+                'pumpkaboo', 'gourgeist', 'bergmite', 'avalugg', 'noibat', 'noivern',
+                'xerneas', 'yveltal', 'zygarde', 'diancie', 'hoopa', 'volcanion',
+                
+                // Generazione 7+ (Pokemon popolari)
+                'rowlet', 'dartrix', 'decidueye', 'litten', 'torracat', 'incineroar',
+                'popplio', 'brionne', 'primarina', 'pikipek', 'trumbeak', 'toucannon',
+                'yungoos', 'gumshoos', 'grubbin', 'charjabug', 'vikavolt', 'crabrawler',
+                'crabominable', 'oricorio', 'cutiefly', 'ribombee', 'rockruff', 'lycanroc',
+                'wishiwashi', 'mareanie', 'toxapex', 'mudbray', 'mudsdale', 'dewpider',
+                'araquanid', 'fomantis', 'lurantis', 'morelull', 'shiinotic', 'salandit',
+                'salazzle', 'stufful', 'bewear', 'bounsweet', 'steenee', 'tsareena',
+                'comfey', 'oranguru', 'passimian', 'wimpod', 'golisopod', 'sandygast',
+                'palossand', 'pyukumuku', 'type: null', 'silvally', 'minior', 'komala',
+                'turtonator', 'togedemaru', 'mimikyu', 'bruxish', 'drampa', 'dhelmise',
+                'jangmo-o', 'hakamo-o', 'kommo-o', 'tapu koko', 'tapu lele', 'tapu bulu',
+                'tapu fini', 'cosmog', 'cosmoem', 'solgaleo', 'lunala', 'nihilego',
+                'buzzwole', 'pheromosa', 'xurkitree', 'celesteela', 'kartana', 'guzzlord',
+                'necrozma', 'magearna', 'marshadow', 'poipole', 'naganadel', 'stakataka',
+                'blacephalon', 'zeraora', 'meltan', 'melmetal',
+                
+                // Generazione 8+ (Pokemon popolari)
+                'grookey', 'thwackey', 'rillaboom', 'scorbunny', 'raboot', 'cinderace',
+                'sobble', 'drizzile', 'inteleon', 'skwovet', 'greedent', 'rookidee',
+                'corvisquire', 'corviknight', 'blipbug', 'dottler', 'orbeetle', 'nickit',
+                'thievul', 'gossifleur', 'eldegoss', 'wooloo', 'dubwool', 'chewtle',
+                'drednaw', 'yamper', 'boltund', 'rolycoly', 'carkol', 'coalossal',
+                'applin', 'flapple', 'appletun', 'silicobra', 'sandaconda', 'cramorant',
+                'arrokuda', 'barraskewda', 'toxel', 'toxtricity', 'sizzlipede', 'centiskorch',
+                'clobbopus', 'grapploct', 'sinistea', 'polteageist', 'hatenna', 'hattrem',
+                'hatterene', 'impidimp', 'morgrem', 'grimmsnarl', 'obstagoon', 'perrserker',
+                'cursola', 'sirfetch\'d', 'mr. rime', 'runerigus', 'milcery', 'alcremie',
+                'falinks', 'pincurchin', 'snom', 'frosmoth', 'stonjourner', 'eiscue',
+                'indeedee', 'morpeko', 'cufant', 'copperajah', 'dracozolt', 'arctozolt',
+                'dracovish', 'arctovish', 'duraludon', 'dreepy', 'drakloak', 'dragapult',
+                'zacian', 'zamazenta', 'eternatus', 'kubfu', 'urshifu', 'zarude',
+                'regieleki', 'regidrago', 'glastrier', 'spectrier', 'calyrex',
+                
+                // Generazione 9+ (Pokemon popolari)
+                'sprigatito', 'floragato', 'meowscarada', 'fuecoco', 'crocalor', 'skeledirge',
+                'quaxly', 'quaxwell', 'quaquaval', 'lechonk', 'oinkologne', 'tarountula',
+                'spidops', 'nymble', 'lokix', 'pawmi', 'pawmo', 'pawmot',
+                'tandemaus', 'maushold', 'fidough', 'dachsbun', 'smoliv', 'dolliv',
+                'arboliva', 'squawkabilly', 'nacli', 'naclstack', 'garganacl', 'charcadet',
+                'armarouge', 'ceruledge', 'tadbulb', 'bellibolt', 'wattrel', 'kilowattrel',
+                'maschiff', 'mabosstiff', 'shroodle', 'grafaiai', 'bramblin', 'brambleghast',
+                'toedscool', 'toedscruel', 'klawf', 'capsakid', 'scovillain', 'rellor',
+                'rabsca', 'flittle', 'espathra', 'tinkatink', 'tinkatuff', 'tinkaton',
+                'wiglett', 'wugtrio', 'bombirdier', 'finizen', 'palafin', 'varoom',
+                'revavroom', 'cyclizar', 'orthworm', 'glimmet', 'glimmora', 'greavard',
+                'houndstone', 'flamigo', 'cetoddle', 'cetitan', 'veluza', 'dondozo',
+                'tatsugiri', 'annihilape', 'clodsire', 'farigiraf', 'dudunsparce', 'kingambit',
+                'great tusk', 'scream tail', 'brute bonnet', 'flutter mane', 'slither wing',
+                'sandy shocks', 'iron treads', 'iron bundle', 'iron hands', 'iron jugulis',
+                'iron moth', 'iron thorns', 'frigibax', 'arctibax', 'baxcalibur', 'gimmighoul',
+                'gholdengo', 'wo-chien', 'chien-pao', 'ting-lu', 'chi-yu', 'roaring moon',
+                'iron valiant', 'koraidon', 'miraidon', 'walking wake', 'iron leaves',
+                'dipplin', 'poltchageist', 'sinistcha', 'okidogi', 'munkidori', 'fezandipiti',
+                'ogerpon', 'archaludon', 'hydrapple', 'gouging fire', 'raging bolt',
+                'iron boulder', 'iron crown', 'terapagos', 'pecharunt'
             ];
             
             for (const pokemon of pokemonList) {
                 if (titleLower.includes(pokemon.toLowerCase())) {
+                    console.log('✅ Pokemon trovato:', pokemon, 'in:', titleLower);
                     return pokemon.toLowerCase();
+                }
+            }
+            
+            console.log('❌ Nessun Pokemon trovato in:', titleLower);
+            console.log('🔍 Cercando Pokemon che contengono "glaceon":', pokemonList.filter(p => p.includes('glaceon')));
+            return null;
+        }
+        
+        // Funzione per estrarre la rarità dall'URL dell'immagine
+        function extractRarityFromImageUrl(imageUrl) {
+            if (!imageUrl) return null;
+            
+            const url = imageUrl.toLowerCase();
+            
+            // Pattern per rarità comuni negli URL
+            const rarityPatterns = [
+                { pattern: /special-illustration-rare|special_illustration_rare/, name: 'Special Illustration Rare' },
+                { pattern: /ultra-rare|ultra_rare/, name: 'Ultra Rare' },
+                { pattern: /full-art|full_art/, name: 'Full Art' },
+                { pattern: /secret-rare|secret_rare/, name: 'Secret Rare' },
+                { pattern: /rainbow-rare|rainbow_rare/, name: 'Rainbow Rare' },
+                { pattern: /gold-rare|gold_rare/, name: 'Gold Rare' },
+                { pattern: /alternate-art|alt-art|alt_art/, name: 'Alternate Art' },
+                { pattern: /prismatic/, name: 'Prismatic' },
+                { pattern: /holo/, name: 'Holo' },
+                { pattern: /reverse-holo|reverse_holo/, name: 'Reverse Holo' }
+            ];
+            
+            for (const rarity of rarityPatterns) {
+                if (rarity.pattern.test(url)) {
+                    return rarity.name;
                 }
             }
             
@@ -373,10 +655,19 @@
             
             info.pokemonName = extractPokemonName(title);
             
+            // Debug: log per capire cosa viene estratto
+            console.log('🔍 Debug estrazione Pokemon:', {
+                title: title,
+                titleLower: titleLower,
+                pokemonFound: info.pokemonName
+            });
+            
                     const expansionPatterns = [
             // Scarlet & Violet - priorità alta per Terastal Festival
-            /terastal festival/i,
             /terastal festival ex/i,
+            /terastal festival/i,
+            /prismatic evolution/i,
+            /prismatic evolution/i,
             /sv\d+/i,
             /scarlet & violet/i,
             /sv base set/i,
@@ -494,18 +785,49 @@
             for (const pattern of expansionPatterns) {
                 const match = titleLower.match(pattern);
                 if (match) {
-                    info.expansion = match[0];
+                    // Pulisci l'espansione da suffissi come "JP", "EN", etc.
+                    let expansion = match[0];
+                    expansion = expansion.replace(/\s+(jp|en|it|de|fr|kr|zh-cn|zh-tw)$/i, '');
+                    info.expansion = expansion;
+                    console.log('✅ Espansione estratta:', expansion);
                     break;
                 }
             }
             
-            const collectorPattern = /(\d+)\/(\d+)/;
-            const collectorMatch = titleLower.match(collectorPattern);
-            if (collectorMatch) {
-                info.collectorNumber = collectorMatch[1];
+            // Deduzioni intelligenti per espansioni mancanti
+            if (!info.expansion) {
+                console.log('⚠️ Nessuna espansione trovata nel titolo');
+                
+                // Se abbiamo un numero collezionista e rarità, possiamo dedurre l'espansione
+                if (info.collectorNumber && info.rarity) {
+                    // Special Illustration Rare con numero 150 potrebbe essere Prismatic Evolution
+                    if (info.rarity.includes('special illustration rare') && info.collectorNumber === '150') {
+                        info.expansion = 'prismatic evolution';
+                        console.log('✅ Espansione dedotta per Special Illustration Rare #150:', info.expansion);
+                    }
+                }
+            }
+            
+            // Pattern per numeri collezionista: sia "150/187" che "150"
+            const collectorPatterns = [
+                /(\d+)\/(\d+)/,  // Formato standard: 150/187
+                /\|\s*(\d+)/,    // Formato con pipe: | 150
+                /\s+(\d+)\s*$/,  // Numero alla fine: ... 150
+                /\s+(\d+)\s*\(/, // Numero prima di parentesi: ... 150(
+                /\((\d+)\)/      // Numero tra parentesi: (150)
+            ];
+            
+            for (const pattern of collectorPatterns) {
+                const collectorMatch = titleLower.match(pattern);
+                if (collectorMatch) {
+                    info.collectorNumber = collectorMatch[1];
+                    console.log('✅ Numero collezionista estratto:', collectorMatch[1], 'con pattern:', pattern);
+                    break;
+                }
             }
             
             const rarityPatterns = [
+                /special illustration rare/i,
                 /full art/i,
                 /ultra rare/i,
                 /secret rare/i,
@@ -530,8 +852,11 @@
             const title = document.getElementById('testTitle').value;
             const result = extractTitleInfo(title);
             
+            // Debug: mostra anche il titolo originale per confronto
             showResult('extractionResult', `
                 <h4>✅ Informazioni estratte:</h4>
+                <p><strong>Titolo originale:</strong> ${title}</p>
+                <p><strong>Titolo lowercase:</strong> ${title.toLowerCase()}</p>
                 <pre>${JSON.stringify(result, null, 2)}</pre>
             `, 'success');
         }
@@ -551,49 +876,206 @@
             }
             
             try {
-                // Prima cerca le carte che corrispondono al Pokemon
-                const { data: cards, error: cardsError } = await supabaseClient
-                    .from('cards')
-                    .select('*')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .limit(20);
-                
-                if (cardsError) throw cardsError;
-                
+                // Inizializza allResults all'inizio
                 let allResults = [];
                 
-                // Aggiungi le carte trovate
-                if (cards && cards.length > 0) {
-                    allResults.push(...cards.map(card => ({ ...card, source: 'cards' })));
+                                    // Debug: mostra cosa stiamo cercando
+                    console.log('🔍 Debug ricerca:', {
+                        pokemon: titleInfo.pokemonName,
+                        expansion: titleInfo.expansion,
+                        collectorNumber: titleInfo.collectorNumber,
+                        rarity: titleInfo.rarity
+                    });
                     
-                    // Per ogni carta, cerca le sue varianti
-                    const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
+                    // Debug: mostra tutti i risultati trovati
+                    console.log('🔍 Tutti i risultati trovati:', allResults);
                     
-                    if (blueprintIds.length > 0) {
-                        const { data: variants, error: variantsError } = await supabaseClient
+                    // Debug: mostra quanti risultati per fonte
+                    const resultsBySource = {};
+                    allResults.forEach(result => {
+                        const source = result.source || 'unknown';
+                        resultsBySource[source] = (resultsBySource[source] || 0) + 1;
+                    });
+                    console.log('🔍 Risultati per fonte:', resultsBySource);
+                
+                // Fai una query JOIN tra cards e card_variants
+                let joinQuery = supabaseClient
+                    .from('cards')
+                    .select(`
+                        *,
+                        card_variants(*)
+                    `)
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`);
+                
+                // Se abbiamo un'espansione specifica, filtra per quella
+                if (titleInfo.expansion) {
+                    if (titleInfo.expansion.includes('prismatic')) {
+                        joinQuery = joinQuery.or('expansion_name_en.ilike.%prismatic%');
+                    } else {
+                        joinQuery = joinQuery.or(`expansion_name_en.ilike.%${titleInfo.expansion}%,expansion_code.ilike.%${titleInfo.expansion}%`);
+                    }
+                }
+                
+                // Se l'espansione contiene "terastal", cerca anche per codice sv8a
+                if (titleInfo.expansion && titleInfo.expansion.includes('terastal')) {
+                    joinQuery = joinQuery.or('expansion_code.eq.sv8a');
+                }
+                
+                const { data: cardsWithVariants, error: joinError } = await joinQuery;
+                
+                if (joinError) throw joinError;
+                
+                console.log('🔍 Carte con varianti trovate:', cardsWithVariants);
+                
+                // Processa i risultati del JOIN
+                if (cardsWithVariants && cardsWithVariants.length > 0) {
+                    cardsWithVariants.forEach(card => {
+                        // Aggiungi la carta principale
+                        allResults.push({ ...card, source: 'cards_join' });
+                        
+                        // Aggiungi le varianti se esistono
+                        if (card.card_variants && card.card_variants.length > 0) {
+                            card.card_variants.forEach(variant => {
+                                const combinedVariant = {
+                                    ...variant,
+                                    name_en: card.name_en,
+                                    pokemon_name: card.name_en,
+                                    expansion_name_en: card.expansion_name_en,
+                                    expansion_name: card.expansion_name_en,
+                                    expansion_code: card.expansion_code,
+                                    source: 'card_variants_join'
+                                };
+                                allResults.push(combinedVariant);
+                            });
+                        }
+                    });
+                }
+                
+                // Se abbiamo una rarità specifica, cerca anche per rarità nell'URL dell'immagine
+                if (titleInfo.rarity) {
+                    console.log('🔍 Cercando carte per rarità:', titleInfo.rarity);
+                    
+                    // Cerca carte che contengono la rarità nell'URL dell'immagine
+                    const { data: cardsByRarity, error: rarityError } = await supabaseClient
+                        .from('cards')
+                        .select('*')
+                        .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                        .ilike('image_url', `%${titleInfo.rarity.toLowerCase().replace(/\s+/g, '-')}%`);
+                    
+                    if (!rarityError && cardsByRarity && cardsByRarity.length > 0) {
+                        console.log('🔍 Carte trovate per rarità:', cardsByRarity.length);
+                        cardsByRarity.forEach(card => {
+                            allResults.push({ ...card, source: 'cards_rarity_search' });
+                        });
+                    }
+                    
+                    // Cerca anche nelle varianti per rarità
+                    const { data: variantsByRarity, error: variantsRarityError } = await supabaseClient
+                        .from('card_variants')
+                        .select('*')
+                        .ilike('image_url', `%${titleInfo.rarity.toLowerCase().replace(/\s+/g, '-')}%`);
+                    
+                    if (!variantsRarityError && variantsByRarity && variantsByRarity.length > 0) {
+                        console.log('🔍 Varianti trovate per rarità:', variantsByRarity.length);
+                        
+                        // Trova le carte corrispondenti per queste varianti
+                        const variantBlueprintIds = variantsByRarity.map(v => v.blueprint_id).filter(id => id);
+                        
+                        if (variantBlueprintIds.length > 0) {
+                            const { data: cardsForVariants, error: cardsForVariantsError } = await supabaseClient
+                                .from('cards')
+                                .select('blueprint_id, name_en, expansion_name_en, expansion_code')
+                                .in('blueprint_id', variantBlueprintIds)
+                                .ilike('name_en', `%${titleInfo.pokemonName}%`);
+                            
+                            if (!cardsForVariantsError && cardsForVariants && cardsForVariants.length > 0) {
+                                variantsByRarity.forEach(variant => {
+                                    const card = cardsForVariants.find(c => c.blueprint_id === variant.blueprint_id);
+                                    if (card) {
+                                        const combinedVariant = {
+                                            ...variant,
+                                            name_en: card.name_en,
+                                            pokemon_name: card.name_en,
+                                            expansion_name_en: card.expansion_name_en,
+                                            expansion_name: card.expansion_name_en,
+                                            expansion_code: card.expansion_code,
+                                            source: 'card_variants_rarity_search'
+                                        };
+                                        allResults.push(combinedVariant);
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+                
+                // Se abbiamo un numero collezionista specifico, cerca anche nelle varianti
+                if (titleInfo.collectorNumber) {
+                    // Prima trova le carte del Pokemon con nome più specifico
+                    const { data: pokemonCards, error: cardsError } = await supabaseClient
+                        .from('cards')
+                        .select('blueprint_id, name_en, expansion_name_en, expansion_code')
+                        .ilike('name_en', `%${titleInfo.pokemonName}%`);
+                    
+                    // Filtra ulteriormente per assicurarsi che il nome contenga effettivamente il Pokemon
+                    const filteredPokemonCards = pokemonCards?.filter(card => {
+                        const cardNameLower = card.name_en.toLowerCase();
+                        const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                        return cardNameLower.includes(pokemonNameLower) || pokemonNameLower.includes(cardNameLower);
+                    }) || [];
+                    
+                    if (!cardsError && filteredPokemonCards && filteredPokemonCards.length > 0) {
+                        console.log('🔍 Carte Pokemon trovate:', filteredPokemonCards.map(c => ({ name: c.name_en, blueprint_id: c.blueprint_id })));
+                        
+                        const blueprintIds = filteredPokemonCards.map(card => card.blueprint_id).filter(id => id);
+                        
+                        // Poi cerca le varianti di quelle carte con il numero specifico
+                        const { data: variantsWithNumber, error: variantsError } = await supabaseClient
                             .from('card_variants')
                             .select('*')
                             .in('blueprint_id', blueprintIds)
-                            .limit(50);
+                            .or(`collector_number.eq.${titleInfo.collectorNumber},collector_number.ilike.%${titleInfo.collectorNumber}%`);
                         
-                        if (variantsError) throw variantsError;
-                        
-                        if (variants && variants.length > 0) {
-                            // Combina i dati delle carte con le varianti
-                            const combinedVariants = variants.map(variant => {
-                                const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
-                                return {
-                                    ...variant,
-                                    name_en: card?.name_en,
-                                    pokemon_name: card?.name_en,
-                                    expansion_name_en: card?.expansion_name_en,
-                                    expansion_name: card?.expansion_name_en,
-                                    expansion_code: card?.expansion_code,
-                                    source: 'card_variants'
-                                };
+                        if (!variantsError && variantsWithNumber && variantsWithNumber.length > 0) {
+                            console.log('🔍 Varianti con numero trovate:', variantsWithNumber);
+                            
+                            // Filtra per numero e assicurati che appartenga a una carta del Pokemon corretto
+                            const filteredVariants = variantsWithNumber.filter(variant => {
+                                const collectorNum = variant.collector_number ? variant.collector_number.toString() : '';
+                                const hasCorrectNumber = collectorNum.includes(titleInfo.collectorNumber);
+                                
+                                // Verifica che la variante appartenga a una carta del Pokemon corretto
+                                const belongsToCorrectPokemon = filteredPokemonCards.some(card => 
+                                    card.blueprint_id === variant.blueprint_id
+                                );
+                                
+                                return hasCorrectNumber && belongsToCorrectPokemon;
                             });
                             
-                            allResults.push(...combinedVariants);
+                            if (filteredVariants.length > 0) {
+                                filteredVariants.forEach(variant => {
+                                    const card = filteredPokemonCards.find(c => c.blueprint_id === variant.blueprint_id);
+                                    console.log('🔍 Debug variant matching:', {
+                                        variant_blueprint_id: variant.blueprint_id,
+                                        variant_collector_number: variant.collector_number,
+                                        found_card: card ? { name: card.name_en, blueprint_id: card.blueprint_id } : null
+                                    });
+                                    if (card) { // Solo se troviamo la carta corrispondente
+                                        const combinedVariant = {
+                                            ...variant,
+                                            name_en: card.name_en,
+                                            pokemon_name: card.name_en,
+                                            expansion_name_en: card.expansion_name_en,
+                                            expansion_name: card.expansion_name_en,
+                                            expansion_code: card.expansion_code,
+                                            source: 'card_variants_number_join'
+                                        };
+                                        allResults.push(combinedVariant);
+                                    } else {
+                                        console.log('⚠️ Variant senza carta corrispondente:', variant);
+                                    }
+                                });
+                            }
                         }
                     }
                 }
@@ -604,88 +1086,244 @@
                 }
                 
                 // Sistema di punteggi
-                const scoredResults = allResults.map(result => {
+                let scoredResults = allResults.map(result => {
                     // Gestisci i nomi delle colonne per entrambe le tabelle
                     const name = result.source === 'cards' 
                         ? (result.name_en || result.name || '').toLowerCase()
                         : (result.pokemon_name || result.name || '').toLowerCase();
-                    
                     const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
                     const collectorNumber = result.collector_number ? result.collector_number.toString() : '';
                     
+                    // Estrai la rarità dall'URL dell'immagine se disponibile
+                    const imageRarity = extractRarityFromImageUrl(result.image_url);
+                    
                     let score = 0;
                     let reason = '';
-                    
-                    if (title.toLowerCase().includes(name) || name.includes(titleInfo.pokemonName)) {
-                        score += 10;
-                        reason += 'Nome Pokemon ';
-                    }
-                    
-                    if (title.toLowerCase().includes(' ex ') && name.includes(' ex')) {
-                        score += 15;
-                        reason += 'Match ex ';
-                    }
-                    
+                    // Prima controlla l'espansione - è il fattore più importante
+                    let expansionScore = 0;
+                    let expansionReason = '';
                     if (titleInfo.expansion && expansion) {
-                        // Calcola la similarità tra l'espansione del titolo e quella del database
                         const similarity = calculateSimilarity(titleInfo.expansion, expansion);
-                        
-                        if (similarity >= 0.8) { // Match molto simile (80%+ similarità)
-                            score += 50;
-                            reason += `Espansione simile (${Math.round(similarity * 100)}%) `;
-                            
-                            // Bonus extra per match esatto o molto simile
+                        if (similarity >= 0.8) {
+                            expansionScore = 100;
+                            expansionReason = `Espansione corretta (${Math.round(similarity * 100)}%) `;
                             if (similarity >= 0.95) {
-                                score += 25;
-                                reason += 'Espansione quasi esatta ';
+                                expansionScore += 50;
+                                expansionReason += 'Espansione quasi esatta ';
                             } else if (similarity >= 0.9) {
-                                score += 15;
-                                reason += 'Espansione molto simile ';
+                                expansionScore += 25;
+                                expansionReason += 'Espansione molto simile ';
                             }
                         } else if (expansion.includes(titleInfo.expansion) || titleInfo.expansion.includes(expansion)) {
-                            // Fallback per match parziale
-                            score += 30;
-                            reason += 'Espansione parziale ';
-                        }
-                    }
-                    
-                    if (titleInfo.collectorNumber && collectorNumber.includes(titleInfo.collectorNumber)) {
-                        score += 30;
-                        reason += 'Numero collezionista ';
-                        
-                        // Bonus extra se abbiamo anche l'espansione corretta
-                        if (titleInfo.expansion && expansion) {
-                            const similarity = calculateSimilarity(titleInfo.expansion, expansion);
-                            if (similarity >= 0.8) {
-                                score += 20;
-                                reason += 'Numero+Espansione ';
+                            expansionScore = 60;
+                            expansionReason = 'Espansione parziale ';
+                        } else if ((titleInfo.expansion.includes('terastal') && expansion.includes('terastal')) ||
+                                   (titleInfo.expansion.includes('terastal') && expansion.includes('terastal festival ex'))) {
+                            expansionScore = 80;
+                            expansionReason = 'Terastal Festival match ';
+                        } else {
+                            if (similarity < 0.3) {
+                                expansionScore = -200;
+                                expansionReason = `Espansione completamente diversa (${Math.round(similarity * 100)}%) `;
+                            } else if (similarity < 0.5) {
+                                expansionScore = -100;
+                                expansionReason = `Espansione molto diversa (${Math.round(similarity * 100)}%) `;
+                            } else if (similarity < 0.7) {
+                                expansionScore = -50;
+                                expansionReason = `Espansione diversa (${Math.round(similarity * 100)}%) `;
                             }
                         }
+                    } else if (titleInfo.expansion) {
+                        expansionScore = -20;
+                        expansionReason = 'Espansione mancante nel database ';
+                    }
+                    score += expansionScore;
+                    reason += expansionReason;
+                    // PRIORITÀ 1: Nome del Pokemon (peso massimo)
+                    const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                    const resultNameLower = name.toLowerCase();
+                    
+                    // Debug: mostra cosa stiamo confrontando
+                    console.log('🔍 Debug nome Pokemon:', {
+                        cercato: pokemonNameLower,
+                        trovato: resultNameLower,
+                        include: resultNameLower.includes(pokemonNameLower),
+                        reverse: pokemonNameLower.includes(resultNameLower)
+                    });
+                    
+                    if (resultNameLower.includes(pokemonNameLower) || pokemonNameLower.includes(resultNameLower)) {
+                        score += 1000; // Peso massimo per il nome Pokemon
+                        reason += 'Nome Pokemon PERFETTO ';
+                    } else {
+                        score -= 2000; // Penalità severa se il nome non corrisponde
+                        reason += 'Nome Pokemon SBAGLIATO ';
                     }
                     
-                    if (result.image_url) score += 5;
-                    if (result.blueprint_id || result.id) score += 5;
+                    // PRIORITÀ 2: Numero collezionista
+                    if (titleInfo.collectorNumber && collectorNumber === titleInfo.collectorNumber) {
+                        score += 500; // Peso alto per numero perfetto
+                        reason += 'Numero collezionista PERFETTO ';
+                    } else if (titleInfo.collectorNumber && collectorNumber.includes(titleInfo.collectorNumber)) {
+                        score += 100; // Peso medio per numero parziale
+                        reason += 'Numero collezionista parziale ';
+                    } else if (titleInfo.collectorNumber) {
+                        score -= 500; // Penalità se il numero non corrisponde
+                        reason += 'Numero collezionista SBAGLIATO ';
+                    }
                     
-                    // Penalità per espansioni che non corrispondono
+                    // PRIORITÀ 3: Espansione
                     if (titleInfo.expansion && expansion) {
                         const similarity = calculateSimilarity(titleInfo.expansion, expansion);
-                        if (similarity < 0.5) { // Molto diversa (meno del 50% similarità)
-                            score -= 30;
+                        if (similarity >= 0.8) {
+                            score += 200; // Peso alto per espansione corretta
+                            reason += `Espansione corretta (${Math.round(similarity * 100)}%) `;
+                        } else if (similarity >= 0.5) {
+                            score += 50; // Peso medio per espansione simile
+                            reason += `Espansione simile (${Math.round(similarity * 100)}%) `;
+                        } else {
+                            score -= 100; // Penalità per espansione diversa
                             reason += `Espansione diversa (${Math.round(similarity * 100)}%) `;
-                        } else if (similarity < 0.7) { // Abbastanza diversa
-                            score -= 15;
-                            reason += `Espansione leggermente diversa (${Math.round(similarity * 100)}%) `;
                         }
                     }
                     
+                    // PRIORITÀ 4: Rarità
+                    let rarityScore = 0;
+                    let rarityReason = '';
+                    
+                    // Controlla la rarità dal titolo vs rarità dal database
+                    if (titleInfo.rarity && result.rarity) {
+                        const raritySimilarity = calculateSimilarity(titleInfo.rarity.toLowerCase(), result.rarity.toLowerCase());
+                        if (raritySimilarity >= 0.8) {
+                            rarityScore += 100; // Peso alto per rarità corretta
+                            rarityReason += 'Rarità titolo corretta ';
+                        } else if (raritySimilarity >= 0.5) {
+                            rarityScore += 25; // Peso medio per rarità simile
+                            rarityReason += 'Rarità titolo simile ';
+                        }
+                    }
+                    
+                    // Controlla la rarità dal titolo vs rarità dall'URL dell'immagine
+                    if (titleInfo.rarity && imageRarity) {
+                        const imageRaritySimilarity = calculateSimilarity(titleInfo.rarity.toLowerCase(), imageRarity.toLowerCase());
+                        if (imageRaritySimilarity >= 0.8) {
+                            rarityScore += 150; // Peso molto alto per rarità URL corretta
+                            rarityReason += 'Rarità URL corretta ';
+                        } else if (imageRaritySimilarity >= 0.5) {
+                            rarityScore += 50; // Peso alto per rarità URL simile
+                            rarityReason += 'Rarità URL simile ';
+                        }
+                    }
+                    
+                    // Controlla la rarità dal database vs rarità dall'URL dell'immagine
+                    if (result.rarity && imageRarity) {
+                        const dbImageRaritySimilarity = calculateSimilarity(result.rarity.toLowerCase(), imageRarity.toLowerCase());
+                        if (dbImageRaritySimilarity >= 0.8) {
+                            rarityScore += 50; // Peso medio per coerenza database-URL
+                            rarityReason += 'Rarità DB-URL coerente ';
+                        }
+                    }
+                    
+                    score += rarityScore;
+                    reason += rarityReason;
+                    
+                    // PRIORITÀ 5: Match ex
+                    if (title.toLowerCase().includes(' ex ') && name.includes(' ex')) {
+                        score += 50;
+                        reason += 'Match ex ';
+                    }
+                    if (result.image_url) score += 5;
+                    if (result.blueprint_id || result.id) score += 5;
                     return { result, score, reason: reason.trim() };
                 });
-                
+                // Deduplica i risultati per blueprint_id + collector_number
+                const uniqueMap = new Map();
+                scoredResults.forEach(item => {
+                    const key = (item.result.blueprint_id || item.result.id || '') + '|' + (item.result.collector_number || '');
+                    if (!uniqueMap.has(key) || uniqueMap.get(key).score < item.score) {
+                        uniqueMap.set(key, item);
+                    }
+                });
+                scoredResults = Array.from(uniqueMap.values());
                 scoredResults.sort((a, b) => b.score - a.score);
+                // Filtra risultati con punteggi troppo bassi, ma sii più permissivo
+                const goodResults = scoredResults.filter(item => item.score > -100);
+                // Se abbiamo un numero collezionista, mostra solo le varianti con quel numero E quel Pokemon
+                if (titleInfo.collectorNumber) {
+                    const matchesWithNumber = goodResults.filter(item => {
+                        const hasCorrectNumber = item.result.collector_number && 
+                            item.result.collector_number.toString() === titleInfo.collectorNumber;
+                        
+                        const hasCorrectPokemon = (item.result.name_en || item.result.pokemon_name || '')
+                            .toLowerCase()
+                            .includes(titleInfo.pokemonName.toLowerCase());
+                        
+                        return hasCorrectNumber && hasCorrectPokemon;
+                    });
+                    
+                    if (matchesWithNumber.length > 0) {
+                        let resultHtml = `<h4>✅ Varianti ${titleInfo.pokemonName} trovate con numero ${titleInfo.collectorNumber}:</h4><ol>`;
+                        matchesWithNumber.forEach(item => {
+                            const name = item.result.name_en || item.result.pokemon_name || 'Nome sconosciuto';
+                            const expansion = item.result.expansion_name_en || item.result.expansion_name || 'N/A';
+                            const blueprintId = item.result.blueprint_id || item.result.id;
+                            const link = blueprintId ? `https://www.cardtrader.com/cards/${blueprintId}` : '#';
+                            resultHtml += `<li><a href="${link}" target="_blank">${name} (${expansion})</a> - ${item.reason}</li>`;
+                        });
+                        resultHtml += '</ol>';
+                        showResult('matchingResult', resultHtml, 'success');
+                        return;
+                    }
+                }
                 
-                const bestMatch = scoredResults[0];
+                if (goodResults.length === 0) {
+                    // Se non ci sono buoni risultati, mostra i migliori 3 comunque
+                    const bestResults = scoredResults.slice(0, 3);
+                    
+                    let resultHtml = `
+                        <h4>⚠️ Nessun match perfetto trovato</h4>
+                        <p>Non sono state trovate carte che corrispondano perfettamente ai criteri:</p>
+                        <ul>
+                            <li><strong>Pokemon:</strong> ${titleInfo.pokemonName}</li>
+                            <li><strong>Espansione:</strong> ${titleInfo.expansion || 'Non specificata'}</li>
+                            <li><strong>Numero:</strong> ${titleInfo.collectorNumber || 'Non specificato'}</li>
+                        </ul>
+                        <h5>🔍 Migliori alternative trovate:</h5>
+                    `;
+                    
+                    bestResults.forEach((item, index) => {
+                        const name = item.result.source === 'cards' 
+                            ? (item.result.name_en || item.result.name || 'Nome sconosciuto')
+                            : (item.result.pokemon_name || item.result.name || 'Nome sconosciuto');
+                        
+                        const blueprintId = item.result.blueprint_id || item.result.id;
+                        const link = blueprintId ? `https://www.cardtrader.com/cards/${blueprintId}` : '#';
+                        
+                        resultHtml += `
+                            <div style="margin: 10px 0; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                                <p><strong>${index + 1}. ${name}</strong> (${item.result.expansion_name_en || item.result.expansion_name})</p>
+                                <p>Punteggio: ${item.score} - ${item.reason}</p>
+                                <p><a href="${link}" target="_blank">🔗 Vedi su CardTrader</a></p>
+                            </div>
+                        `;
+                    });
+                    
+                    resultHtml += `<p><em>💡 Suggerimento:</em> Prova a cercare tutte le varianti per vedere se la carta esiste nel database.</p>`;
+                    
+                    showResult('matchingResult', resultHtml, 'warning');
+                    return;
+                }
+                
+                const bestMatch = goodResults[0];
                 const blueprintId = bestMatch.result.blueprint_id || bestMatch.result.id;
                 const link = blueprintId ? `https://www.cardtrader.com/cards/${blueprintId}` : 'Link non disponibile';
+                
+                // Debug: mostra informazioni sull'espansione
+                const titleExpansion = titleInfo.expansion;
+                const dbExpansion = bestMatch.result.expansion_name_en || bestMatch.result.expansion_name || bestMatch.result.expansion_code || '';
+                const similarity = titleExpansion && dbExpansion ? calculateSimilarity(titleExpansion, dbExpansion) : 0;
+                
+                // Debug: mostra la rarità estratta dall'URL dell'immagine
+                const bestMatchImageRarity = extractRarityFromImageUrl(bestMatch.result.image_url);
                 
                 let resultHtml = `
                     <h4>✅ Miglior match trovato:</h4>
@@ -693,18 +1331,39 @@
                     <p><strong>Motivo:</strong> ${bestMatch.reason}</p>
                     <p><strong>Fonte:</strong> ${bestMatch.result.source}</p>
                     <p><strong>Link:</strong> <a href="${link}" target="_blank">${link}</a></p>
+                    <p><strong>Debug Espansione:</strong></p>
+                    <ul>
+                        <li>Espansione titolo: "${titleExpansion}"</li>
+                        <li>Espansione database: "${dbExpansion}"</li>
+                        <li>Similarità: ${Math.round(similarity * 100)}%</li>
+                    </ul>
+                    <p><strong>Debug Rarità:</strong></p>
+                    <ul>
+                        <li>Rarità titolo: "${titleInfo.rarity || 'N/A'}"</li>
+                        <li>Rarità database: "${bestMatch.result.rarity || 'N/A'}"</li>
+                        <li>Rarità URL immagine: "${bestMatchImageRarity || 'N/A'}"</li>
+                    </ul>
                     <pre>${JSON.stringify(bestMatch.result, null, 2)}</pre>
                 `;
                 
-                if (scoredResults.length > 1) {
+                if (goodResults.length > 1) {
                     resultHtml += `
-                        <h4>📊 Top 5 Risultati:</h4>
+                        <h4>📊 Top 5 Risultati (solo match validi):</h4>
                         <ol>
                     `;
-                    scoredResults.slice(0, 5).forEach((item, index) => {
+                    goodResults.slice(0, 5).forEach((item, index) => {
                         const name = item.result.source === 'cards' 
                             ? (item.result.name_en || item.result.name || 'Nome sconosciuto')
                             : (item.result.pokemon_name || item.result.name || 'Nome sconosciuto');
+                        
+                        // Debug: mostra i dettagli del risultato
+                        console.log('🔍 Debug risultato display:', {
+                            source: item.result.source,
+                            name_en: item.result.name_en,
+                            pokemon_name: item.result.pokemon_name,
+                            name: item.result.name,
+                            final_name: name
+                        });
                         
                         resultHtml += `
                             <li>${name} 
@@ -713,6 +1372,14 @@
                         `;
                     });
                     resultHtml += '</ol>';
+                }
+                
+                // Mostra anche quanti risultati sono stati scartati
+                const discardedCount = scoredResults.length - goodResults.length;
+                if (discardedCount > 0) {
+                    resultHtml += `
+                        <p><em>ℹ️ ${discardedCount} risultati scartati per punteggio troppo basso (espansioni non corrispondenti)</em></p>
+                    `;
                 }
                 
                 showResult('matchingResult', resultHtml, 'success');
@@ -741,8 +1408,7 @@
                 const { data: cards, error: cardsError } = await supabaseClient
                     .from('cards')
                     .select('*')
-                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .limit(50);
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`);
                 
                 if (cardsError) throw cardsError;
                 
@@ -759,8 +1425,7 @@
                         const { data: variants, error: variantsError } = await supabaseClient
                             .from('card_variants')
                             .select('*')
-                            .in('blueprint_id', blueprintIds)
-                            .limit(100);
+                            .in('blueprint_id', blueprintIds);
                         
                         if (variantsError) throw variantsError;
                         
@@ -864,6 +1529,340 @@
         function showResult(elementId, content, type) {
             const element = document.getElementById(elementId);
             element.innerHTML = `<div class="result ${type}">${content}</div>`;
+        }
+        
+        function setTestTitle(title) {
+            document.getElementById('testTitle').value = title;
+            // Pulisci i risultati precedenti
+            document.getElementById('extractionResult').innerHTML = '';
+            document.getElementById('matchingResult').innerHTML = '';
+        }
+        
+        async function searchByNumber(number) {
+            if (!supabaseClient) {
+                showResult('quickTestResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            try {
+                console.log(`🔍 Cercando carte con numero ${number}...`);
+                
+                // Cerca nelle varianti
+                const { data: variants, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('*')
+                    .eq('collector_number', number)
+                    .limit(20);
+                
+                if (variantsError) throw variantsError;
+                
+                let resultHtml = `
+                    <h4>🔍 Ricerca per numero: ${number}</h4>
+                    <p><strong>Varianti trovate:</strong> ${variants ? variants.length : 0}</p>
+                `;
+                
+                if (variants && variants.length > 0) {
+                    resultHtml += '<h5>📋 Varianti trovate:</h5><ul>';
+                    variants.forEach(variant => {
+                        resultHtml += `<li>${variant.name_en || variant.pokemon_name || 'N/A'} - ${variant.expansion_name_en || variant.expansion_name || 'N/A'} - Blueprint: ${variant.blueprint_id}</li>`;
+                    });
+                    resultHtml += '</ul>';
+                } else {
+                    resultHtml += '<p>❌ Nessuna variante trovata con questo numero</p>';
+                }
+                
+                showResult('quickTestResult', resultHtml, 'info');
+                
+            } catch (error) {
+                showResult('quickTestResult', '❌ Errore durante la ricerca: ' + error.message, 'error');
+            }
+        }
+        
+        async function searchPrismaticEvolution() {
+            if (!supabaseClient) {
+                showResult('quickTestResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            try {
+                console.log('🔍 Cercando carte Prismatic Evolution...');
+                
+                // Cerca nelle carte
+                const { data: cards, error: cardsError } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('expansion_name_en', '%prismatic%')
+                    .limit(20);
+                
+                if (cardsError) throw cardsError;
+                
+                // Cerca nelle varianti
+                const { data: variants, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('*')
+                    .ilike('expansion_name_en', '%prismatic%')
+                    .limit(20);
+                
+                if (variantsError) throw variantsError;
+                
+                let resultHtml = `
+                    <h4>🔍 Ricerca Prismatic Evolution:</h4>
+                    <p><strong>Carte trovate:</strong> ${cards ? cards.length : 0}</p>
+                    <p><strong>Varianti trovate:</strong> ${variants ? variants.length : 0}</p>
+                `;
+                
+                if (cards && cards.length > 0) {
+                    resultHtml += '<h5>📋 Carte Prismatic Evolution:</h5><ul>';
+                    cards.forEach(card => {
+                        resultHtml += `<li>${card.name_en} - ${card.expansion_name_en} - Blueprint: ${card.blueprint_id}</li>`;
+                    });
+                    resultHtml += '</ul>';
+                }
+                
+                if (variants && variants.length > 0) {
+                    resultHtml += '<h5>📋 Varianti Prismatic Evolution:</h5><ul>';
+                    variants.forEach(variant => {
+                        resultHtml += `<li>${variant.name_en || variant.pokemon_name || 'N/A'} - ${variant.expansion_name_en || variant.expansion_name || 'N/A'} - Blueprint: ${variant.blueprint_id}</li>`;
+                    });
+                    resultHtml += '</ul>';
+                }
+                
+                if ((!cards || cards.length === 0) && (!variants || variants.length === 0)) {
+                    resultHtml += '<p>❌ Nessuna carta Prismatic Evolution trovata nel database</p>';
+                    
+                    // Mostra alcune espansioni disponibili per riferimento
+                    const { data: sampleExpansions, error: sampleError } = await supabaseClient
+                        .from('cards')
+                        .select('expansion_name_en')
+                        .not('expansion_name_en', 'is', null)
+                        .limit(10);
+                    
+                    if (!sampleError && sampleExpansions && sampleExpansions.length > 0) {
+                        resultHtml += '<h5>📋 Esempi di espansioni disponibili:</h5><ul>';
+                        const uniqueExpansions = [...new Set(sampleExpansions.map(card => card.expansion_name_en))];
+                        uniqueExpansions.forEach(expansion => {
+                            resultHtml += `<li>${expansion}</li>`;
+                        });
+                        resultHtml += '</ul>';
+                    }
+                }
+                
+                showResult('quickTestResult', resultHtml, 'info');
+                
+            } catch (error) {
+                showResult('quickTestResult', '❌ Errore durante la ricerca: ' + error.message, 'error');
+            }
+        }
+        
+        async function searchGlaceonExpansions() {
+            if (!supabaseClient) {
+                showResult('quickTestResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            try {
+                console.log('🔍 Cercando espansioni per Glaceon...');
+                
+                // Cerca tutte le carte Glaceon
+                const { data: cards, error: cardsError } = await supabaseClient
+                    .from('cards')
+                    .select('name_en, expansion_name_en, expansion_code')
+                    .ilike('name_en', '%glaceon%')
+                    .limit(50);
+                
+                if (cardsError) throw cardsError;
+                
+                // Cerca tutte le varianti Glaceon
+                const { data: variants, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('name_en, pokemon_name, expansion_name_en, expansion_name, expansion_code, collector_number')
+                    .ilike('name_en', '%glaceon%')
+                    .limit(50);
+                
+                if (variantsError) throw variantsError;
+                
+                // Raccogli tutte le espansioni uniche
+                const allExpansions = new Set();
+                
+                if (cards && cards.length > 0) {
+                    cards.forEach(card => {
+                        if (card.expansion_name_en) allExpansions.add(card.expansion_name_en);
+                        if (card.expansion_code) allExpansions.add(card.expansion_code);
+                    });
+                }
+                
+                if (variants && variants.length > 0) {
+                    variants.forEach(variant => {
+                        if (variant.expansion_name_en) allExpansions.add(variant.expansion_name_en);
+                        if (variant.expansion_name) allExpansions.add(variant.expansion_name);
+                        if (variant.expansion_code) allExpansions.add(variant.expansion_code);
+                    });
+                }
+                
+                let resultHtml = `
+                    <h4>❄️ Espansioni disponibili per Glaceon:</h4>
+                    <p><strong>Carte trovate:</strong> ${cards ? cards.length : 0}</p>
+                    <p><strong>Varianti trovate:</strong> ${variants ? variants.length : 0}</p>
+                    <p><strong>Espansioni uniche:</strong> ${allExpansions.size}</p>
+                `;
+                
+                if (allExpansions.size > 0) {
+                    resultHtml += '<h5>📋 Espansioni per Glaceon:</h5><ul>';
+                    Array.from(allExpansions).sort().forEach(expansion => {
+                        resultHtml += `<li>${expansion}</li>`;
+                    });
+                    resultHtml += '</ul>';
+                }
+                
+                // Mostra anche le carte con numero 150
+                if (variants && variants.length > 0) {
+                    const variants150 = variants.filter(v => v.collector_number === '150');
+                    if (variants150.length > 0) {
+                        resultHtml += '<h5>🔢 Varianti Glaceon con numero 150:</h5><ul>';
+                        variants150.forEach(variant => {
+                            resultHtml += `<li>${variant.name_en || variant.pokemon_name || 'N/A'} - ${variant.expansion_name_en || variant.expansion_name || 'N/A'} - ${variant.collector_number}</li>`;
+                        });
+                        resultHtml += '</ul>';
+                    }
+                }
+                
+                showResult('quickTestResult', resultHtml, 'info');
+                
+            } catch (error) {
+                showResult('quickTestResult', '❌ Errore durante la ricerca: ' + error.message, 'error');
+            }
+        }
+        
+        async function testRaritySearch(rarity) {
+            if (!supabaseClient) {
+                showResult('quickTestResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            try {
+                console.log('🔍 Testando ricerca per rarità:', rarity);
+                
+                // Cerca carte che contengono la rarità nell'URL dell'immagine
+                const { data: cards, error: cardsError } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('image_url', `%${rarity.toLowerCase().replace(/\s+/g, '-')}%`)
+                    .limit(10);
+                
+                if (cardsError) throw cardsError;
+                
+                // Cerca varianti che contengono la rarità nell'URL dell'immagine
+                const { data: variants, error: variantsError } = await supabaseClient
+                    .from('card_variants')
+                    .select('*')
+                    .ilike('image_url', `%${rarity.toLowerCase().replace(/\s+/g, '-')}%`)
+                    .limit(10);
+                
+                if (variantsError) throw variantsError;
+                
+                let resultHtml = `
+                    <h4>✨ Test Ricerca Rarità: ${rarity}</h4>
+                    <p><strong>Carte trovate:</strong> ${cards ? cards.length : 0}</p>
+                    <p><strong>Varianti trovate:</strong> ${variants ? variants.length : 0}</p>
+                `;
+                
+                if (cards && cards.length > 0) {
+                    resultHtml += '<h5>📋 Carte con rarità nell\'URL:</h5><ul>';
+                    cards.forEach(card => {
+                        const extractedRarity = extractRarityFromImageUrl(card.image_url);
+                        resultHtml += `<li>${card.name_en} - ${card.expansion_name_en} - Rarità estratta: ${extractedRarity || 'N/A'} - <a href="${card.image_url}" target="_blank">🔗 Immagine</a></li>`;
+                    });
+                    resultHtml += '</ul>';
+                }
+                
+                if (variants && variants.length > 0) {
+                    resultHtml += '<h5>📋 Varianti con rarità nell\'URL:</h5><ul>';
+                    variants.forEach(variant => {
+                        const extractedRarity = extractRarityFromImageUrl(variant.image_url);
+                        resultHtml += `<li>Blueprint ${variant.blueprint_id} - Numero ${variant.collector_number} - Rarità estratta: ${extractedRarity || 'N/A'} - <a href="${variant.image_url}" target="_blank">🔗 Immagine</a></li>`;
+                    });
+                    resultHtml += '</ul>';
+                }
+                
+                if ((!cards || cards.length === 0) && (!variants || variants.length === 0)) {
+                    resultHtml += '<p>❌ Nessuna carta trovata con questa rarità nell\'URL dell\'immagine</p>';
+                }
+                
+                showResult('quickTestResult', resultHtml, 'info');
+                
+            } catch (error) {
+                showResult('quickTestResult', '❌ Errore durante la ricerca: ' + error.message, 'error');
+            }
+        }
+        
+        async function quickTest(pokemon) {
+            if (!supabaseClient) {
+                showResult('quickTestResult', '❌ Connetti prima a Supabase', 'error');
+                return;
+            }
+            
+            try {
+                let testTitle = '';
+                let expectedExpansion = '';
+                
+                switch(pokemon) {
+                    case 'jolteon':
+                        testTitle = 'Jolteon ex SAR 209/187 sv8a Terastal Festival ex JP';
+                        expectedExpansion = 'Terastal Festival';
+                        break;
+                    case 'pikachu':
+                        testTitle = 'Pikachu ex SAR 184/187 sv8a Terastal Festival ex JP';
+                        expectedExpansion = 'Terastal Festival';
+                        break;
+                    case 'charizard':
+                        testTitle = 'Charizard ex SAR 184/187 sv8a Terastal Festival ex JP';
+                        expectedExpansion = 'Terastal Festival';
+                        break;
+                    case 'terastal':
+                        testTitle = 'Vaporeon ex SAR 031/187 sv8a Terastal Festival ex JP';
+                        expectedExpansion = 'Terastal Festival';
+                        break;
+                }
+                
+                const titleInfo = extractTitleInfo(testTitle);
+                
+                // Cerca nel database con espansione specifica
+                let cardsQuery = supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`);
+                
+                // Se l'espansione contiene "terastal", cerca per codice sv8a
+                if (titleInfo.expansion && titleInfo.expansion.includes('terastal')) {
+                    cardsQuery = cardsQuery.or('expansion_code.eq.sv8a');
+                }
+                
+                const { data: cards, error: cardsError } = await cardsQuery.limit(20);
+                
+                if (cardsError) throw cardsError;
+                
+                let resultHtml = `
+                    <h4>🧪 Test Rapido: ${pokemon.toUpperCase()}</h4>
+                    <p><strong>Titolo:</strong> ${testTitle}</p>
+                    <p><strong>Pokemon estratto:</strong> ${titleInfo.pokemonName}</p>
+                    <p><strong>Espansione estratta:</strong> ${titleInfo.expansion}</p>
+                    <p><strong>Numero estratto:</strong> ${titleInfo.collectorNumber}</p>
+                    <p><strong>Carte trovate:</strong> ${cards ? cards.length : 0}</p>
+                `;
+                
+                if (cards && cards.length > 0) {
+                    resultHtml += '<h5>📋 Prime 5 carte trovate:</h5><ul>';
+                    cards.slice(0, 5).forEach(card => {
+                        resultHtml += `<li>${card.name_en} (${card.expansion_name_en}) - Blueprint: ${card.blueprint_id}</li>`;
+                    });
+                    resultHtml += '</ul>';
+                }
+                
+                showResult('quickTestResult', resultHtml, 'info');
+                
+            } catch (error) {
+                showResult('quickTestResult', '❌ Errore durante il test: ' + error.message, 'error');
+            }
         }
         
         // Inizializzazione

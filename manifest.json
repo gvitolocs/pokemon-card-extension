@@ -18,7 +18,6 @@
     "https://www.vinted.com/*",
     "https://vinted.com/*",
     "https://www.cardtrader.com/*",
-    "https://api.cardtrader.com/*",
     "https://*.supabase.co/*"
   ],
   "content_scripts": [
@@ -33,13 +32,25 @@
         "https://www.vinted.com/*",
         "https://vinted.com/*"
       ],
-      "js": ["api-config.js", "supabase-config.js", "cardtrader-api.js", "supabase-integration.js", "content.js"],
+      "js": ["api-config.js", "supabase-config.js", "supabase-integration.js", "content.js"],
       "css": ["styles.css"]
     }
   ],
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Pokemon Card Trader Linker"
+    "default_title": "Pokemon Card Trader Linker",
+    "default_icon": {
+      "16": "icon.svg",
+      "32": "icon.svg",
+      "48": "icon.svg",
+      "128": "icon.svg"
+    }
+  },
+  "icons": {
+    "16": "icon.svg",
+    "32": "icon.svg",
+    "48": "icon.svg",
+    "128": "icon.svg"
   },
   "web_accessible_resources": [
     {

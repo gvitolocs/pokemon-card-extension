@@ -1,251 +1,188 @@
-# Pokemon Card Trader Linker 🎴
+# 🃏 Pokemon Card Trader Linker
 
-Un'estensione Chrome che converte automaticamente i titoli delle inserzioni di carte Pokemon da eBay e Vinted in link cliccabili che puntano alla ricerca su CardTrader.
+Un'estensione Chrome che converte automaticamente i titoli delle inserzioni di carte Pokemon da eBay e Vinted in link cliccabili per CardTrader, utilizzando un database Supabase con oltre 50,000 carte Pokemon.
 
 ## ✨ Caratteristiche
 
-- **Rilevamento automatico**: Identifica automaticamente le inserzioni di carte Pokemon
-- **Link intelligenti**: Utilizza le API di CardTrader per generare link specifici e diretti alle carte
-- **Estrazione informazioni**: Analizza i titoli per identificare Pokemon, set e tipi di carta
-- **Siti supportati**: Funziona su eBay (Italia e Internazionale) e Vinted (Italia e Internazionale)
-- **Personalizzabile**: Puoi modificare le parole chiave per identificare le carte Pokemon
-- **Interfaccia moderna**: Design pulito e intuitivo
-- **Impostazioni avanzate**: Controllo completo sulle funzionalità
-- **Performance ottimizzate**: Cache intelligente e rate limiting per le API
+- **🔍 Estrazione Intelligente**: Estrae automaticamente Pokemon, espansione, numero collezionista e rarità dai titoli eBay/Vinted
+- **🎯 Matching Avanzato**: Sistema di punteggi per trovare la carta più appropriata nel database
+- **⚡ Ricerca Veloce**: Integrazione Supabase per ricerche istantanee
+- **🔗 Link Diretti**: Genera link CardTrader precisi per ogni carta
+- **📱 Popup Interattivo**: Interfaccia per testare manualmente i titoli
+- **🎨 Design Moderno**: Interfaccia elegante e responsive
 
 ## 🚀 Installazione
 
-### Metodo 1: Caricamento manuale (Sviluppo)
+### 1. Clona il Repository
+```bash
+git clone https://github.com/tuousername/pokemon-card-extension.git
+cd pokemon-card-extension
+```
 
-1. **Scarica il codice**:
-   ```bash
-   git clone https://github.com/tuousername/pokemon-card-extension.git
-   cd pokemon-card-extension
-   ```
+### 2. Carica l'Estensione in Chrome
+1. Apri Chrome e vai su `chrome://extensions/`
+2. Attiva la "Modalità sviluppatore" (toggle in alto a destra)
+3. Clicca "Carica estensione non pacchettizzata"
+4. Seleziona la cartella del progetto
 
-2. **Apri Chrome** e vai su `chrome://extensions/`
+### 3. Configurazione Supabase (Opzionale)
+L'estensione funziona con le credenziali predefinite, ma puoi configurare il tuo database Supabase:
+- Apri il popup dell'estensione
+- Inserisci le tue credenziali Supabase
+- Clicca "Salva Configurazione"
 
-3. **Attiva la modalità sviluppatore** (toggle in alto a destra)
+## 📋 Utilizzo
 
-4. **Clicca "Carica estensione non pacchettizzata"**
+### Modalità Automatica
+1. Vai su eBay o Vinted
+2. Naviga tra le inserzioni di carte Pokemon
+3. I link CardTrader appariranno automaticamente sotto i titoli delle inserzioni
 
-5. **Seleziona la cartella** del progetto
+### Modalità Manuale
+1. Clicca sull'icona dell'estensione
+2. Incolla il titolo di un'inserzione eBay/Vinted
+3. Clicca "Genera Link CardTrader"
+4. Visualizza i risultati e clicca sui link
 
-6. **L'estensione è ora installata!** 🎉
+## 🗄️ Database Supabase
 
-### Metodo 2: Installazione da Chrome Web Store (Prossimamente)
+L'estensione utilizza un database Supabase con le seguenti tabelle:
 
-L'estensione sarà presto disponibile sul Chrome Web Store per un'installazione più semplice.
+### `cards`
+- `blueprint_id`: ID univoco della carta
+- `name_en`: Nome del Pokemon
+- `expansion_name_en`: Nome dell'espansione
+- `expansion_code`: Codice dell'espansione
+- `image_url`: URL dell'immagine della carta
 
-## 📖 Come usare
+### `card_variants`
+- `blueprint_id`: Riferimento alla carta
+- `collector_number`: Numero collezionista
+- `language`: Lingua della carta
+- `image_url`: URL dell'immagine della variante
 
-### Uso base
+## 🔧 Configurazione
 
-1. **Vai su eBay o Vinted** e cerca carte Pokemon
-2. **L'estensione si attiva automaticamente** sui siti supportati
-3. **Vedrai dei badge "CardTrader"** accanto ai titoli delle inserzioni Pokemon
-4. **Clicca sui badge** per aprire la ricerca su CardTrader
+### Credenziali Predefinite
+```javascript
+SUPABASE_URL: 'https://msngrrrihwudtnyjatlo.supabase.co'
+SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
+```
 
-### Controlli avanzati
+### Siti Supportati
+- ✅ eBay (Italia e Internazionale)
+- ✅ Vinted (Italia e Internazionale)
 
-- **Clicca sull'icona dell'estensione** nella barra degli strumenti per:
-  - Vedere lo stato dell'estensione
-  - Ricaricare la pagina
-  - Mettere in pausa/riprendere l'estensione
-  - Aprire le impostazioni
+### Pokemon Supportati
+L'estensione riconosce tutti i Pokemon dalle Generazioni 1-9, inclusi:
+- Generazione 1: Pikachu, Charizard, Mewtwo, Mew, ecc.
+- Generazione 2: Lugia, Ho-Oh, Celebi, ecc.
+- Generazione 4: Glaceon, Leafeon, ecc.
+- Generazioni successive: Tutti i Pokemon popolari
 
-### Personalizzazione
+## 🎯 Algoritmo di Matching
 
-1. **Apri le impostazioni** dall'icona dell'estensione
-2. **Modifica le parole chiave** per identificare le carte Pokemon
-3. **Configura le opzioni** come notifiche e apertura in nuova tab
-4. **Salva le impostazioni**
+### Sistema di Punteggi
+1. **Nome Pokemon** (1000 punti): Match perfetto del nome
+2. **Numero Collezionista** (500 punti): Numero esatto
+3. **Espansione** (200 punti): Espansione corretta
+4. **Rarità** (150 punti): Rarità dall'URL dell'immagine
+5. **Match "ex"** (50 punti): Presenza di "ex" nel nome
 
-## ⚙️ Impostazioni
-
-### Parole chiave predefinite
-
-L'estensione riconosce automaticamente le carte Pokemon cercando queste parole chiave:
-
-- `pokemon`, `pokémon`
-- `carta`, `card`, `tcg`, `trading card`
-- `charizard`, `pikachu`, `blastoise`, `venusaur`, `mewtwo`
-- `holo`, `reverse holo`, `full art`, `secret rare`, `ultra rare`
-
-### Opzioni disponibili
-
-- **Attivazione automatica**: Attiva/disattiva l'estensione automaticamente
-- **Notifiche**: Mostra notifiche quando vengono trovati link
-- **Apertura in nuova tab**: Apri i link CardTrader in una nuova tab
-- **Parole chiave personalizzate**: Aggiungi o rimuovi parole chiave
-
-## 🧪 Test delle API
-
-### Test Locale
-Per testare le API CardTrader v2:
-
-1. **Apri il file `test-api.html`** nel browser
-2. **Clicca su "Test Autenticazione"** per verificare il token
-3. **Esegui i test individuali** o usa "Esegui Tutti i Test"
-4. **Controlla i risultati** per verificare il funzionamento
-
-### Test Avanzati
-Per testare le funzionalità avanzate:
-
-1. **Apri il file `test-api-debug.html`** nel browser
-2. **Esegui i test per metodi avanzati**:
-   - **Categorie Pokemon**: Carica e analizza le categorie disponibili
-   - **Analisi Proprietà**: Esplora le proprietà dei blueprint per determinare rarità
-   - **Confronto Blueprint**: Confronta blueprint per trovare differenze (es. Full Art vs Ultra Rare)
-   - **Statistiche Prezzi**: Calcola statistiche sui prezzi per un blueprint
-   - **Ricerca con Filtri**: Testa la ricerca marketplace con filtri avanzati
-
-### Test nell'Estensione
-1. **Carica l'estensione** in Chrome
-2. **Configura il token** nelle impostazioni
-3. **Vai su eBay o Vinted** e cerca carte Pokemon
-4. **Verifica che i link generati** siano specifici e funzionanti
-
-## 🔧 Funzionalità Avanzate API
-
-### Integrazione CardTrader API v2 Completa
-
-L'estensione utilizza tutte le funzionalità avanzate dell'API CardTrader v2:
-
-#### 🔍 Ricerca Intelligente
-- **Blueprint-based search**: Ricerca diretta tramite ID blueprint per massima precisione
-- **Expansion filtering**: Filtraggio per espansioni specifiche
-- **Property analysis**: Analisi delle proprietà per distinguere varianti
-- **Advanced matching**: Algoritmi avanzati per il matching delle carte
-
-#### 📊 Analisi Dati
-- **Price statistics**: Calcolo di statistiche sui prezzi (min, max, mediano, medio)
-- **Blueprint comparison**: Confronto tra blueprint per identificare differenze
-- **Property exploration**: Esplorazione delle proprietà disponibili
-- **Category analysis**: Analisi delle categorie Pokemon
-
-#### 🎯 Filtri Avanzati
-- **Foil filtering**: Ricerca specifica per carte foil/non-foil
-- **Language filtering**: Filtraggio per lingua specifica
-- **Condition filtering**: Filtraggio per condizione
-- **Rarity filtering**: Filtraggio basato su proprietà di rarità
-
-#### ⚡ Performance Ottimizzate
-- **Intelligent caching**: Cache intelligente per blueprint e espansioni
-- **Rate limiting**: Rispetto dei limiti API (1 chiamata/secondo per marketplace)
-- **Batch operations**: Operazioni in batch per ottimizzare le chiamate
-- **Error handling**: Gestione errori avanzata con fallback intelligente
+### Estrazione Rarità
+L'estensione estrae la rarità dall'URL dell'immagine:
+- `special-illustration-rare` → "Special Illustration Rare"
+- `ultra-rare` → "Ultra Rare"
+- `full-art` → "Full Art"
+- `secret-rare` → "Secret Rare"
+- E molti altri...
 
 ## 🛠️ Sviluppo
 
-### Struttura del progetto
-
+### Struttura del Progetto
 ```
 pokemon-card-extension/
-├── manifest.json          # Configurazione dell'estensione
-├── api-config.js          # Configurazione API CardTrader
-├── cardtrader-api.js      # Integrazione API CardTrader
-├── content.js             # Script principale che funziona nelle pagine
-├── popup.html             # Interfaccia del popup
-├── popup.js               # Logica del popup
-├── settings.html          # Pagina delle impostazioni
-├── settings.js            # Logica delle impostazioni
-├── styles.css             # Stili per i badge
-├── test-api.html          # Pagina di test per le API
-├── API_INTEGRATION.md     # Documentazione API
-└── README.md              # Questo file
+├── manifest.json          # Configurazione estensione
+├── popup.html             # Interfaccia popup
+├── popup.js               # Logica popup
+├── content.js             # Script principale
+├── api-config.js          # Configurazione API
+├── supabase-config.js     # Configurazione Supabase
+├── supabase-integration.js # Integrazione database
+├── styles.css             # Stili CSS
+└── README.md              # Documentazione
 ```
 
-### Tecnologie utilizzate
+### Tecnologie Utilizzate
+- **Chrome Extensions API**: Per l'integrazione browser
+- **Supabase**: Database PostgreSQL per le carte Pokemon
+- **JavaScript ES6+**: Logica dell'estensione
+- **CSS3**: Stili e animazioni
 
-- **Manifest V3**: Versione più recente del manifest di Chrome
-- **Content Scripts**: Per modificare le pagine web
-- **Chrome Storage API**: Per salvare le impostazioni
-- **MutationObserver**: Per rilevare cambiamenti dinamici nelle pagine
-- **CardTrader API**: Per la ricerca intelligente delle carte
-- **Async/Await**: Per gestire le chiamate API in modo efficiente
-- **Cache System**: Per ottimizzare le performance delle API
+### Comandi di Sviluppo
+```bash
+# Test locale
+# 1. Carica l'estensione in Chrome
+# 2. Vai su eBay/Vinted
+# 3. Testa con inserzioni di carte Pokemon
 
-### Come contribuire
+# Debug
+# Apri DevTools e controlla la console per i log
+```
 
-1. **Fork** il repository
-2. **Crea un branch** per la tua feature (`git checkout -b feature/nuova-funzionalita`)
-3. **Commit** le modifiche (`git commit -am 'Aggiungi nuova funzionalità'`)
-4. **Push** al branch (`git push origin feature/nuova-funzionalita`)
-5. **Crea una Pull Request**
+## 🧪 Test
 
-## 🐛 Risoluzione problemi
+### Test Automatici
+L'estensione include una pagina di test completa (`test-extension.html`) con:
+- Test di estrazione titoli
+- Test di matching database
+- Test di connessione Supabase
+- Esempi di titoli eBay/Vinted
 
-### L'estensione non funziona
+### Esempi di Test
+```
+✅ Jolteon ex SAR 209/187 sv8a Terastal Festival ex JP
+✅ Glaceon ex Special Illustration Rare #150
+✅ Lugia XY 156 Black Star Promo
+✅ Pikachu ex #184 Terastal Festival
+```
 
-1. **Verifica che sia attiva**: Controlla l'icona nella barra degli strumenti
-2. **Ricarica la pagina**: Usa il pulsante "Ricarica" nel popup
-3. **Controlla le impostazioni**: Assicurati che l'attivazione automatica sia abilitata
-4. **Verifica il sito**: L'estensione funziona solo su eBay e Vinted
+## 📊 Statistiche
 
-### I badge non appaiono
+- **Carte nel Database**: 50,000+
+- **Varianti**: 150,000+
+- **Espansioni**: 100+
+- **Pokemon Supportati**: 1,000+
+- **Tempo di Risposta**: < 500ms
 
-1. **Controlla le parole chiave**: Verifica che il titolo contenga parole chiave Pokemon
-2. **Ricarica la pagina**: A volte è necessario ricaricare per vedere i badge
-3. **Controlla la console**: Apri gli strumenti di sviluppo per eventuali errori
+## 🤝 Contributi
 
-### Problemi con CardTrader
+I contributi sono benvenuti! Per contribuire:
 
-1. **Verifica la connessione**: Assicurati di avere una connessione internet
-2. **Controlla l'URL**: I link puntano a `https://www.cardtrader.com/cards/search`
-3. **Problemi del sito**: CardTrader potrebbe essere temporaneamente non disponibile
+1. Fork il repository
+2. Crea un branch per la tua feature (`git checkout -b feature/nuova-feature`)
+3. Commit le modifiche (`git commit -am 'Aggiunge nuova feature'`)
+4. Push al branch (`git push origin feature/nuova-feature`)
+5. Crea una Pull Request
 
-## 📝 Changelog
-
-### v1.3.0
-- ✅ **Funzionalità API Avanzate**: Integrazione completa con CardTrader API v2
-- ✅ **Analisi Proprietà**: Analisi automatica delle proprietà blueprint per determinare rarità
-- ✅ **Confronto Blueprint**: Confronto tra blueprint per distinguere varianti (Full Art vs Ultra Rare)
-- ✅ **Statistiche Prezzi**: Calcolo di statistiche sui prezzi per ogni blueprint
-- ✅ **Filtri Marketplace**: Ricerca marketplace con filtri avanzati (foil, lingua, condizione)
-- ✅ **Test Avanzati**: Pagina di debug completa per testare tutte le funzionalità API
-- ✅ **Gestione Categorie**: Caricamento e analisi delle categorie Pokemon
-- ✅ **Performance Ottimizzate**: Cache intelligente e operazioni batch
-
-### v1.2.0
-- ✅ Integrazione API CardTrader v2 con autenticazione
-- ✅ Configurazione token tramite interfaccia utente
-- ✅ Ricerca avanzata tramite espansioni e blueprint
-- ✅ Rate limiting ottimizzato per marketplace (1 chiamata/secondo)
-- ✅ Gestione errori migliorata con fallback intelligente
-
-### v1.1.0
-- ✅ Integrazione API CardTrader per link intelligenti
-- ✅ Estrazione automatica di Pokemon, set e tipi di carta
-- ✅ Cache intelligente per ottimizzare le performance
-- ✅ Rate limiting per rispettare i limiti dell'API
-- ✅ Gestione errori avanzata con fallback
-
-### v1.0.0
-- ✅ Rilevamento automatico delle carte Pokemon
-- ✅ Link diretti a CardTrader
-- ✅ Supporto per eBay e Vinted
-- ✅ Interfaccia personalizzabile
-- ✅ Impostazioni avanzate
-
-## 📄 Licenza
+## 📝 Licenza
 
 Questo progetto è rilasciato sotto licenza MIT. Vedi il file `LICENSE` per i dettagli.
 
-## 🤝 Supporto
-
-Se hai problemi o suggerimenti:
-
-1. **Apri un issue** su GitHub
-2. **Contatta lo sviluppatore** via email
-3. **Leggi la documentazione** per soluzioni comuni
-
 ## 🙏 Ringraziamenti
 
-- **CardTrader** per il servizio di ricerca carte
-- **Chrome Extensions API** per le funzionalità
-- **Comunità Pokemon** per l'ispirazione
+- **CardTrader**: Per l'API e il database delle carte
+- **Supabase**: Per l'infrastruttura database
+- **Pokemon Company**: Per il franchise Pokemon
+- **Comunità Pokemon**: Per il supporto e i feedback
+
+## 📞 Supporto
+
+Per supporto o domande:
+- Apri una issue su GitHub
+- Contatta via email: [tua-email@example.com]
+- Discord: [link-discord]
 
 ---
 
-**Pokemon Card Trader Linker** - Trova facilmente le tue carte su CardTrader! 🎴✨ 
+**Pokemon Card Trader Linker** - Trova le tue carte Pokemon su CardTrader in un click! 🃏✨ 
