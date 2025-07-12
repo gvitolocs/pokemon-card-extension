@@ -613,6 +613,31 @@ function insertLinkContainer(listingElement, button) {
         if (!listingElement.querySelector('.pokemon-linker-button')) {
             listingElement.appendChild(button);
         }
+    } else if (hostname.includes('cardmarket')) {
+        // Per Cardmarket, inserisci dopo il titolo
+        const insertAfterSelectors = [
+            'h1',
+            '.col-12 .d-flex .flex-grow-1 h1',
+            '.product-details h1',
+            '.card-title',
+            '.product-title'
+        ];
+        
+        for (const selector of insertAfterSelectors) {
+            const element = listingElement.querySelector(selector);
+            if (element && element.parentNode) {
+                // Verifica che il pulsante non sia già presente
+                if (!element.parentNode.querySelector('.pokemon-linker-button')) {
+                    element.parentNode.insertBefore(button, element.nextSibling);
+                    return;
+                }
+            }
+        }
+        
+        // Fallback: inserisci alla fine dell'elemento se non è già presente
+        if (!listingElement.querySelector('.pokemon-linker-button')) {
+            listingElement.appendChild(button);
+        }
     }
 }
 
@@ -841,6 +866,73 @@ function patchVintedProductPage() {
         
     } catch (error) {
         console.error('❌ [CardTrader] Errore nel patch pagina prodotto Vinted:', error);
+    }
+}
+
+// Patch per pagine prodotto Cardmarket
+function patchCardmarketProductPage() {
+    if (!window.location.hostname.includes('cardmarket')) return;
+    
+    try {
+        // Cerca il titolo del prodotto
+        const titleSelectors = [
+            'h1',
+            '.col-12 .d-flex .flex-grow-1 h1',
+            '.product-details h1',
+            '.card-title',
+            '.product-title'
+        ];
+        
+        let titleElement = null;
+        for (const selector of titleSelectors) {
+            titleElement = document.querySelector(selector);
+            if (titleElement) break;
+        }
+        
+        if (!titleElement) {
+            console.log('⚠️ [CardTrader] Titolo prodotto Cardmarket non trovato');
+            return;
+        }
+        
+        // Estrai il titolo escludendo gli span (come nella logica di estrazione)
+        let title = '';
+        if (titleElement.querySelector('span')) {
+            // Se ci sono span, prendi solo il testo principale
+            const spans = titleElement.querySelectorAll('span');
+            title = titleElement.textContent;
+            spans.forEach(span => {
+                title = title.replace(span.textContent, '').trim();
+            });
+        } else {
+            title = titleElement.textContent.trim();
+        }
+        
+        if (!title) {
+            console.log('⚠️ [CardTrader] Titolo prodotto Cardmarket vuoto');
+            return;
+        }
+        
+        console.log(`🔍 [CardTrader] Titolo prodotto Cardmarket: "${title}"`);
+        
+        // Estrai informazioni dal titolo
+        const titleInfo = extractTitleInfo(title);
+        if (!titleInfo.pokemonName) {
+            console.log('🚫 [CardTrader] Nessun Pokemon trovato nel titolo prodotto');
+            return;
+        }
+        
+        // Cerca nel database
+        searchCardInDatabase(titleInfo, title).then(results => {
+            if (results && results.length > 0) {
+                // Usa il pulsante CT come nelle liste
+                addCardTraderLinks(titleElement.parentNode, results, titleInfo);
+                
+                console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket`);
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ [CardTrader] Errore nel patch pagina prodotto Cardmarket:', error);
     }
 }
 
@@ -2504,18 +2596,21 @@ async function updateStats(type, increment = 1) {
 // Esegui il patch iniziale per entrambi i siti
 patchEbayProductPage();
 patchVintedProductPage();
+patchCardmarketProductPage();
 
 // Retry del patch per pagine che si caricano dopo
 setTimeout(() => {
     console.log('🔄 [CardTrader] Retry patch pagina prodotto...');
     patchEbayProductPage();
     patchVintedProductPage();
+    patchCardmarketProductPage();
 }, 3000);
 
 setTimeout(() => {
     console.log('🔄 [CardTrader] Secondo retry patch pagina prodotto...');
     patchEbayProductPage();
     patchVintedProductPage();
+    patchCardmarketProductPage();
 }, 5000);
 
 // Funzione per punteggiare e validare i risultati
