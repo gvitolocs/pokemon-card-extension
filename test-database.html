@@ -178,22 +178,73 @@
     <!-- Scripts -->
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="standalone-config.js"></script>
-    <script src="supabase-config.js"></script>
-    <script src="content.js"></script>
     
     <script>
-        let supabaseClient = null;
+        let testSupabaseClient = null;
         let testResults = [];
+
+        // Funzione per estrarre informazioni dal titolo (versione semplificata per test)
+        function extractTitleInfo(title) {
+            const titleLower = title.toLowerCase();
+            
+            // Lista semplificata dei Pokemon per il test
+            const pokemonList = ['mew', 'charizard', 'pikachu', 'dragonair', 'ancient'];
+            
+            let pokemonName = null;
+            let trainerName = null;
+            let expansion = null;
+            let collectorNumber = null;
+            let expansionCode = null;
+            
+            // Cerca Pokemon
+            for (const pokemon of pokemonList) {
+                if (titleLower.includes(pokemon)) {
+                    pokemonName = pokemon;
+                    break;
+                }
+            }
+            
+            // Cerca espansione
+            if (titleLower.includes('v star universe')) {
+                expansion = 'v star universe';
+            } else if (titleLower.includes('dragon frontiers')) {
+                expansion = 'dragon frontiers';
+            } else if (titleLower.includes('darkness ablaze')) {
+                expansion = 'darkness ablaze';
+            } else if (titleLower.includes('gym heroes')) {
+                expansion = 'gym heroes';
+            }
+            
+            // Cerca numero collezionista
+            const numberMatch = titleLower.match(/(\d+)\/(\d+)/);
+            if (numberMatch) {
+                collectorNumber = numberMatch[1];
+            }
+            
+            // Cerca codice espansione
+            if (titleLower.includes('sv')) {
+                expansionCode = 'SV';
+            } else if (titleLower.includes('swsh')) {
+                expansionCode = 'SWSH';
+            }
+            
+            return {
+                pokemonName,
+                trainerName,
+                expansion,
+                expansionCode,
+                collectorNumber
+            };
+        }
 
         // Inizializza Supabase
         async function initializeSupabase() {
             try {
                 const config = getConfig();
-                supabaseClient = window.supabase.createClient(config.supabase.url, config.supabase.key);
-                window.supabaseClient = supabaseClient;
+                testSupabaseClient = window.supabase.createClient(config.supabase.url, config.supabase.key);
                 
                 // Testa la connessione
-                const { data, error } = await supabaseClient
+                const { data, error } = await testSupabaseClient
                     .from('cards')
                     .select('count')
                     .limit(1);
@@ -260,6 +311,63 @@
             }
         }
 
+        // Funzione semplificata per ricerca nel database
+        async function searchCardInDatabase(titleInfo, originalTitle) {
+            try {
+                if (!testSupabaseClient) {
+                    throw new Error('Supabase non inizializzato');
+                }
+                
+                console.log('🔍 Test: Cercando con criteri:', titleInfo);
+                
+                // Cerca carte con il nome Pokemon
+                const { data: cards, error: cardsError } = await testSupabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .limit(10);
+                
+                if (cardsError) {
+                    throw cardsError;
+                }
+                
+                if (!cards || cards.length === 0) {
+                    return [];
+                }
+                
+                // Simula il sistema di punteggi
+                const scoredResults = cards.map(card => {
+                    let score = 0;
+                    
+                    // Bonus base per match Pokemon
+                    if (card.name_en && card.name_en.toLowerCase().includes(titleInfo.pokemonName)) {
+                        score += 10000;
+                    }
+                    
+                    // Bonus per espansione
+                    if (titleInfo.expansion && card.expansion_name_en) {
+                        const titleExpansion = titleInfo.expansion.toLowerCase();
+                        const cardExpansion = card.expansion_name_en.toLowerCase();
+                        
+                        if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
+                            score += 40000;
+                        }
+                    }
+                    
+                    return { ...card, score };
+                });
+                
+                // Ordina per punteggio
+                scoredResults.sort((a, b) => b.score - a.score);
+                
+                return scoredResults.slice(0, 5);
+                
+            } catch (error) {
+                console.error('❌ Errore nella ricerca database:', error);
+                return [];
+            }
+        }
+
         // Test ricerca database
         async function testDatabaseSearch() {
             const searchTerm = document.getElementById('search-input').value;
@@ -271,7 +379,7 @@
                 return;
             }
             
-            if (!supabaseClient) {
+            if (!testSupabaseClient) {
                 resultDiv.className = 'result error';
                 resultDiv.textContent = '❌ Supabase non inizializzato. Esegui prima il test di connessione.';
                 return;
@@ -281,7 +389,7 @@
             resultDiv.textContent = 'Ricercando...';
             
             try {
-                const { data: cards, error } = await supabaseClient
+                const { data: cards, error } = await testSupabaseClient
                     .from('cards')
                     .select('*')
                     .ilike('name_en', `%${searchTerm}%`)
@@ -313,7 +421,7 @@
                 return;
             }
             
-            if (!supabaseClient) {
+            if (!testSupabaseClient) {
                 resultDiv.className = 'result error';
                 resultDiv.textContent = '❌ Supabase non inizializzato. Esegui prima il test di connessione.';
                 return;
@@ -332,7 +440,7 @@
                     `🎯 Risultati trovati: ${results.length}\n\n` +
                     results.slice(0, 5).map((result, index) => 
                         `<div class="card-result">
-                            <div class="card-name">${index + 1}. ${result.name_en || result.pokemon_name}</div>
+                            <div class="card-name">${index + 1}. ${result.name_en || result.pokemon_name} (Punteggio: ${result.score || 0})</div>
                             <div class="card-expansion">Espansione: ${result.expansion_name_en || 'N/A'}</div>
                             <div class="card-score">Blueprint ID: ${result.blueprint_id}</div>
                         </div>`
@@ -348,6 +456,12 @@
             const resultDiv = document.getElementById('performance-result');
             resultDiv.className = 'result info';
             resultDiv.textContent = 'Testando performance...';
+            
+            if (!testSupabaseClient) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Supabase non inizializzato. Esegui prima il test di connessione.';
+                return;
+            }
             
             const testTitles = [
                 'Pokemon TCG - Mew V Star Universe',
@@ -409,6 +523,13 @@
             // Testa automaticamente la connessione
             setTimeout(testConnection, 1000);
         });
+
+        // Funzioni globali per i pulsanti
+        window.testConnection = testConnection;
+        window.testTitleExtraction = testTitleExtraction;
+        window.testDatabaseSearch = testDatabaseSearch;
+        window.testCompleteMatching = testCompleteMatching;
+        window.testPerformance = testPerformance;
     </script>
 </body>
 </html> 
