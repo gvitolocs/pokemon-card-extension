@@ -2259,10 +2259,21 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             const titleLower = originalTitle.toLowerCase();
             const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
             
-            // Match base del Pokemon
+            // Match base del Pokemon (con controllo per carte speciali)
             if (cardName.includes(titleInfo.pokemonName.toLowerCase())) {
-                nameScore += 10000; // Base score per match Pokemon
-                console.log(`🎯 [CardTrader] MATCH POKEMON BASE: "${titleInfo.pokemonName}" in "${cardName}" -> +10000 punti`);
+                // CONTROLLO: Se è una carta speciale come Ancient Mew, riduci il punteggio
+                const isSpecialCard = cardName.includes('ancient') || 
+                                     cardName.includes('promo') || 
+                                     cardName.includes('miscellaneous') ||
+                                     cardName.includes('international');
+                
+                if (isSpecialCard) {
+                    nameScore += 2000; // Punteggio ridotto per carte speciali
+                    console.log(`🎯 [CardTrader] MATCH POKEMON SPECIALE: "${titleInfo.pokemonName}" in "${cardName}" -> +2000 punti (carta speciale)`);
+                } else {
+                    nameScore += 10000; // Base score per match Pokemon normale
+                    console.log(`🎯 [CardTrader] MATCH POKEMON BASE: "${titleInfo.pokemonName}" in "${cardName}" -> +10000 punti`);
+                }
             }
             
             // PRIORITÀ 2: MATCH NUMERO COLLEZIONE (ALTA PRIORITÀ)
@@ -2382,15 +2393,35 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     }
                 }
                 
-                // BONUS per espansioni generiche trovate nel titolo
+                // BONUS per espansioni generiche trovate nel titolo (CONTROLLO RIGOROSO)
                 const genericExpansionKeywords = ['dragon frontier', 'ex dragon frontiers', 'delta species', 'holo', 'rare', 'ex', 'v star universe', 'vstar universe'];
                 for (const keyword of genericExpansionKeywords) {
                     if (originalTitle.toLowerCase().includes(keyword) && result.expansion_name_en) {
                         const cardExpansion = result.expansion_name_en.toLowerCase();
-                        if (cardExpansion.includes(keyword) || keyword.includes(cardExpansion)) {
-                            nameScore += 25000; // Bonus per keyword espansione
-                            console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +25000 punti`);
-                            break; // Solo il primo match
+                        
+                        // CONTROLLO RIGOROSO: Verifica che l'espansione sia effettivamente correlata
+                        const isExpansionMatch = cardExpansion.includes(keyword) || keyword.includes(cardExpansion);
+                        
+                        if (isExpansionMatch) {
+                            // CONTROLLO AGGIUNTIVO: Per "v star universe", verifica che sia effettivamente V Star Universe
+                            if (keyword.includes('v star universe') || keyword.includes('vstar universe')) {
+                                const isVStarUniverse = cardExpansion.includes('v star universe') || 
+                                                      cardExpansion.includes('vstar universe') ||
+                                                      cardExpansion.includes('v-star universe');
+                                
+                                if (isVStarUniverse) {
+                                    nameScore += 25000; // Bonus per keyword espansione
+                                    console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE V STAR UNIVERSE TROVATO: "${keyword}" in "${cardExpansion}" -> +25000 punti`);
+                                    break; // Solo il primo match
+                                } else {
+                                    console.log(`🚫 [CardTrader] Keyword "${keyword}" trovato ma espansione "${cardExpansion}" NON è V Star Universe, saltando bonus`);
+                                }
+                            } else {
+                                // Per altre espansioni, procedi normalmente
+                                nameScore += 25000; // Bonus per keyword espansione
+                                console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +25000 punti`);
+                                break; // Solo il primo match
+                            }
                         }
                     }
                 }
