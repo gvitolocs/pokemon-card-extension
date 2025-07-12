@@ -2228,46 +2228,24 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     const imageUrl = result.image_url.toLowerCase();
                     const titleLower = originalTitle.toLowerCase();
                     
-                    // Estrai parole dall'espansione nel titolo
-                    let expansionWords = [];
+                    // Estrai TUTTE le parole rilevanti dal titolo
+                    const relevantWords = titleLower.split(/\s+/).filter(word => 
+                        word.length > 2 && 
+                        !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon'].includes(word) &&
+                        // Includi sia parole dell'espansione che parole descrittive
+                        ['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'holo', 'rare', 'ex', 'gx', 'v', 'vmax', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'promo', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'black', 'white', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'].includes(word)
+                    );
                     
-                    // Cerca espansioni specifiche nel titolo
-                    const expansionKeywords = [
-                        'vstar-universe', 'vstar universe', 'v star universe',
-                        'dragon-frontier', 'dragon frontier', 'ex dragon frontiers',
-                        'delta-species', 'delta species',
-                        'holo', 'rare', 'ex', 'gx', 'v', 'vmax'
-                    ];
+                    console.log(`🎯 [CardTrader] Parole rilevanti trovate nel titolo: [${relevantWords.join(', ')}]`);
                     
-                    for (const keyword of expansionKeywords) {
-                        if (titleLower.includes(keyword.replace('-', ' '))) {
-                            // Dividi l'espansione in parole singole
-                            expansionWords = keyword.replace('-', ' ').split(/\s+/);
-                            console.log(`🎯 [CardTrader] Espansione trovata nel titolo: "${keyword}" -> parole: [${expansionWords.join(', ')}]`);
-                            break;
-                        }
-                    }
-                    
-                    // Se non abbiamo trovato espansioni specifiche, cerca parole generiche
-                    if (expansionWords.length === 0) {
-                        // Estrai parole dal titolo che potrebbero essere espansioni
-                        const titleWords = titleLower.split(/\s+/).filter(word => 
-                            word.length > 2 && 
-                            !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon', 'mew', 'charizard', 'pikachu'].includes(word) &&
-                            ['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'holo', 'rare', 'ex', 'gx', 'v', 'vmax'].includes(word)
-                        );
-                        expansionWords = titleWords;
-                        console.log(`🎯 [CardTrader] Parole espansione generiche trovate: [${expansionWords.join(', ')}]`);
-                    }
-                    
-                    // Conta quante parole dell'espansione sono presenti nell'image_url
+                    // Conta quante parole rilevanti sono presenti nell'image_url
                     let matchedWords = 0;
-                    let totalWords = expansionWords.length;
+                    let totalWords = relevantWords.length;
                     
-                    expansionWords.forEach(word => {
+                    relevantWords.forEach(word => {
                         if (imageUrl.includes(word)) {
                             matchedWords++;
-                            console.log(`🎯 [CardTrader] PAROLA ESPANSIONE MATCHATA: "${word}" in image_url -> +1 match`);
+                            console.log(`🎯 [CardTrader] PAROLA RILEVANTE MATCHATA: "${word}" in image_url -> +1 match`);
                         }
                     });
                     
@@ -2277,20 +2255,27 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         let bonus = 0;
                         
                         if (matchPercentage >= 0.8) { // 80% o più delle parole
-                            bonus = 40000; // Bonus MASSIMO
-                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE ESPANSIONE MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ASSOLUTA)`);
+                            bonus = 50000; // Bonus MASSIMO
+                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ASSOLUTA)`);
                         } else if (matchPercentage >= 0.5) { // 50% o più delle parole
-                            bonus = 30000; // Bonus ALTO
-                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE ESPANSIONE MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ALTA)`);
+                            bonus = 35000; // Bonus ALTO
+                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ALTA)`);
                         } else { // Almeno una parola
-                            bonus = 20000; // Bonus MEDIO
-                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE ESPANSIONE MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ MEDIA)`);
+                            bonus = 25000; // Bonus MEDIO
+                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ MEDIA)`);
                         }
                         
                         nameScore += bonus;
                     }
                     
                     // BONUS SPECIFICO per espansioni nell'image_url (mantenuto per compatibilità)
+                    const expansionKeywords = [
+                        'vstar-universe', 'vstar universe', 'v star universe',
+                        'dragon-frontier', 'dragon frontier', 'ex dragon frontiers',
+                        'delta-species', 'delta species',
+                        'holo', 'rare', 'ex', 'gx', 'v', 'vmax'
+                    ];
+                    
                     for (const keyword of expansionKeywords) {
                         if (titleLower.includes(keyword.replace('-', ' ')) && imageUrl.includes(keyword)) {
                             nameScore += 25000; // Bonus per espansione nell'image_url
