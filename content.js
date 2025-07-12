@@ -2086,7 +2086,60 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             .not('name_en', 'ilike', '%trainer%')  // Escludi trainer (a meno che non sia specificamente richiesto)
             .not('name_en', 'ilike', '%stadium%')  // Escludi stadium (a meno che non sia specificamente richiesto)
             .not('name_en', 'ilike', '%item%')  // Escludi item (a meno che non sia specificamente richiesto)
-            .not('name_en', 'ilike', '%supporter%')  // Escludi supporter (a meno che non sia specificamente richiesto);
+                            .not('name_en', 'ilike', '%supporter%')  // Escludi supporter (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%coin%')  // Escludi coin
+                .not('name_en', 'ilike', '%pin%')  // Escludi pin
+                .not('name_en', 'ilike', '%mat%')  // Escludi playmat
+                .not('name_en', 'ilike', '%box%')  // Escludi box (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%tin%')  // Escludi tin
+                .not('name_en', 'ilike', '%collection%')  // Escludi collection (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%gift%')  // Escludi gift
+                .not('name_en', 'ilike', '%commemoration%')  // Escludi commemoration
+                .not('name_en', 'ilike', '%anniversary%')  // Escludi anniversary
+                .not('name_en', 'ilike', '%celebration%')  // Escludi celebration
+                .not('name_en', 'ilike', '%special%')  // Escludi special (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%limited%')  // Escludi limited
+                .not('name_en', 'ilike', '%exclusive%')  // Escludi exclusive
+                .not('name_en', 'ilike', '%premium%')  // Escludi premium (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%deluxe%')  // Escludi deluxe
+                .not('name_en', 'ilike', '%ultimate%')  // Escludi ultimate
+                .not('name_en', 'ilike', '%master%')  // Escludi master (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%champion%')  // Escludi champion (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%world%')  // Escludi world (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%tournament%')  // Escludi tournament
+                .not('name_en', 'ilike', '%league%')  // Escludi league (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%battle%')  // Escludi battle (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%theme%')  // Escludi theme
+                .not('name_en', 'ilike', '%starter%')  // Escludi starter (a meno che non sia specificamente richiesto)
+                .not('name_en', 'ilike', '%elite%')  // Escludi elite
+                .not('name_en', 'ilike', '%premium%')  // Escludi premium
+                .not('name_en', 'ilike', '%special%')  // Escludi special
+                .not('name_en', 'ilike', '%limited%')  // Escludi limited
+                .not('name_en', 'ilike', '%exclusive%')  // Escludi exclusive
+                .not('name_en', 'ilike', '%gift%')  // Escludi gift
+                .not('name_en', 'ilike', '%commemoration%')  // Escludi commemoration
+                .not('name_en', 'ilike', '%anniversary%')  // Escludi anniversary
+                .not('name_en', 'ilike', '%celebration%')  // Escludi celebration
+                .not('name_en', 'ilike', '%deluxe%')  // Escludi deluxe
+                .not('name_en', 'ilike', '%ultimate%')  // Escludi ultimate
+                .not('name_en', 'ilike', '%tournament%')  // Escludi tournament
+                .not('name_en', 'ilike', '%theme%')  // Escludi theme
+                .not('name_en', 'ilike', '%starter%')  // Escludi starter
+                .not('name_en', 'ilike', '%elite%')  // Escludi elite
+                .not('name_en', 'ilike', '%premium%')  // Escludi premium
+                .not('name_en', 'ilike', '%special%')  // Escludi special
+                .not('name_en', 'ilike', '%limited%')  // Escludi limited
+                .not('name_en', 'ilike', '%exclusive%')  // Escludi exclusive
+                .not('name_en', 'ilike', '%gift%')  // Escludi gift
+                .not('name_en', 'ilike', '%commemoration%')  // Escludi commemoration
+                .not('name_en', 'ilike', '%anniversary%')  // Escludi anniversary
+                .not('name_en', 'ilike', '%celebration%')  // Escludi celebration
+                .not('name_en', 'ilike', '%deluxe%')  // Escludi deluxe
+                .not('name_en', 'ilike', '%ultimate%')  // Escludi ultimate
+                .not('name_en', 'ilike', '%tournament%')  // Escludi tournament
+                .not('name_en', 'ilike', '%theme%')  // Escludi theme
+                .not('name_en', 'ilike', '%starter%')  // Escludi starter
+                .not('name_en', 'ilike', '%elite%')  // Escludi elite;
         
         if (!cardsError && cards && cards.length > 0) {
             console.log(`✅ [CardTrader] Trovate ${cards.length} carte base per ${titleInfo.pokemonName}`);
@@ -2133,6 +2186,64 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 // Escludi se il nome è troppo generico (solo il nome del Pokemon senza dettagli)
                 if (cardName === titleInfo.pokemonName.toLowerCase() && !imageUrl.includes(titleInfo.pokemonName.toLowerCase())) {
                     console.log(`🚫 [CardTrader] Escluso nome troppo generico: ${card.name_en}`);
+                    return false;
+                }
+                
+                // Controllo rigoroso per escludere Pokemon simili
+                if (titleInfo.pokemonName === 'mew' && cardName.includes('mewtwo')) {
+                    console.log(`🚫 [CardTrader] Escluso Mewtwo quando si cerca Mew: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'mewtwo' && cardName.includes('mew') && !cardName.includes('mewtwo')) {
+                    console.log(`🚫 [CardTrader] Escluso Mew quando si cerca Mewtwo: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'pichu' && (cardName.includes('pikachu') || cardName.includes('raichu'))) {
+                    console.log(`🚫 [CardTrader] Escluso Pikachu/Raichu quando si cerca Pichu: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'pikachu' && cardName.includes('pichu')) {
+                    console.log(`🚫 [CardTrader] Escluso Pichu quando si cerca Pikachu: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'raichu' && cardName.includes('pichu')) {
+                    console.log(`🚫 [CardTrader] Escluso Pichu quando si cerca Raichu: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'charmander' && (cardName.includes('charmeleon') || cardName.includes('charizard'))) {
+                    console.log(`🚫 [CardTrader] Escluso Charmeleon/Charizard quando si cerca Charmander: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'charmeleon' && (cardName.includes('charmander') || cardName.includes('charizard'))) {
+                    console.log(`🚫 [CardTrader] Escluso Charmander/Charizard quando si cerca Charmeleon: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'charizard' && (cardName.includes('charmander') || cardName.includes('charmeleon'))) {
+                    console.log(`🚫 [CardTrader] Escluso Charmander/Charmeleon quando si cerca Charizard: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'squirtle' && (cardName.includes('wartortle') || cardName.includes('blastoise'))) {
+                    console.log(`🚫 [CardTrader] Escluso Wartortle/Blastoise quando si cerca Squirtle: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'wartortle' && (cardName.includes('squirtle') || cardName.includes('blastoise'))) {
+                    console.log(`🚫 [CardTrader] Escluso Squirtle/Blastoise quando si cerca Wartortle: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'blastoise' && (cardName.includes('squirtle') || cardName.includes('wartortle'))) {
+                    console.log(`🚫 [CardTrader] Escluso Squirtle/Wartortle quando si cerca Blastoise: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'bulbasaur' && (cardName.includes('ivysaur') || cardName.includes('venusaur'))) {
+                    console.log(`🚫 [CardTrader] Escluso Ivysaur/Venusaur quando si cerca Bulbasaur: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'ivysaur' && (cardName.includes('bulbasaur') || cardName.includes('venusaur'))) {
+                    console.log(`🚫 [CardTrader] Escluso Bulbasaur/Venusaur quando si cerca Ivysaur: ${card.name_en}`);
+                    return false;
+                }
+                if (titleInfo.pokemonName === 'venusaur' && (cardName.includes('bulbasaur') || cardName.includes('ivysaur'))) {
+                    console.log(`🚫 [CardTrader] Escluso Bulbasaur/Ivysaur quando si cerca Venusaur: ${card.name_en}`);
                     return false;
                 }
                 
