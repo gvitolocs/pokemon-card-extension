@@ -1307,12 +1307,11 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         if (titleInfo.trainerName) {
             console.log(`🎯 [CardTrader] RICERCA PRIORITARIA per trainer: ${titleInfo.trainerName} ${titleInfo.pokemonName}`);
             
-            // Cerca tutte le carte del Pokemon con trainer name nell'URL
+            // Cerca tutte le carte del Pokemon con trainer name nel NOME della carta
             let trainerQuery = supabaseClient
                 .from('cards')
                 .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .or(`image_url.ilike.%${titleInfo.trainerName}%,image_url.ilike.%${titleInfo.trainerName}s%,image_url.ilike.%${titleInfo.trainerName}'s%`);
+                .ilike('name_en', `%${titleInfo.trainerName}%${titleInfo.pokemonName}%`);
             
             const { data: trainerResults, error: trainerError } = await trainerQuery;
             
@@ -2458,19 +2457,20 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
             reason += 'Numero collezionista non richiesto ';
         }
         
-        // PRIORITÀ 4: Validazione obbligatoria per trainer name
+        // PRIORITÀ 4: Validazione obbligatoria per trainer name (nel NOME della carta)
         if (titleInfo.trainerName) {
             const trainerNameLower = titleInfo.trainerName.toLowerCase();
+            const cardNameLower = name.toLowerCase();
             let trainerFound = false;
             
-            // Cerca match esatto
-            if (imageUrlLower.includes(trainerNameLower)) {
+            // Cerca match esatto nel nome della carta
+            if (cardNameLower.includes(trainerNameLower)) {
                 score += 500; // Bonus MASSIMO per trainer name presente
-                reason += `Trainer ${titleInfo.trainerName} nell\'URL CORRETTO `;
-                console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} trovato in: "${result.image_url}" -> +500 punti`);
+                reason += `Trainer ${titleInfo.trainerName} nel NOME CORRETTO `;
+                console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} trovato nel nome: "${name}" -> +500 punti`);
                 trainerFound = true;
             } else {
-                // Cerca varianti comuni
+                // Cerca varianti comuni nel nome della carta
                 const trainerVariants = [
                     trainerNameLower + 's', // erika -> erikas
                     trainerNameLower + '\'s', // erika -> erika's
@@ -2479,10 +2479,10 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
                 ];
                 
                 for (const variant of trainerVariants) {
-                    if (imageUrlLower.includes(variant)) {
+                    if (cardNameLower.includes(variant)) {
                         score += 400; // Bonus alto per variante trainer name
-                        reason += `Trainer ${titleInfo.trainerName} (variante ${variant}) nell\'URL CORRETTO `;
-                        console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} (variante ${variant}) trovato in: "${result.image_url}" -> +400 punti`);
+                        reason += `Trainer ${titleInfo.trainerName} (variante ${variant}) nel NOME CORRETTO `;
+                        console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} (variante ${variant}) trovato nel nome: "${name}" -> +400 punti`);
                         trainerFound = true;
                         break;
                     }
@@ -2491,8 +2491,8 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
             
             if (!trainerFound) {
                 score -= 800; // Penalità MASSIMA per trainer name mancante
-                reason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nell\'URL `;
-                console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
+                reason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nel NOME `;
+                console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato nel nome: "${name}" -> -800 punti`);
             }
         }
         
