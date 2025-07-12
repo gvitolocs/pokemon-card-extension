@@ -1230,7 +1230,7 @@ function extractTitleInfo(title) {
     
     // Cerca espansioni specifiche
     const expansions = [
-        'v star universe', 'vstar universe', 'dragon frontier', 'dragon frontiers',
+        'gym heroes', 'gym challenge', 'gym leaders', 'v star universe', 'vstar universe', 'dragon frontier', 'dragon frontiers',
         'delta species', 'secret wonders', 'next destinies', 'boundaries crossed',
         'plasma storm', 'plasma freeze', 'legendary treasures', 'flashfire',
         'furious fists', 'phantom forces', 'primal clash', 'roaring skies',
@@ -1646,6 +1646,22 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             }
             score += expansionScore;
             reason += expansionReason;
+            
+            // PRIORITÀ 1.5: Trainer Name (ALTA PRIORITÀ quando presente nel titolo)
+            if (titleInfo.trainerName && result.image_url) {
+                const imageUrlLower = result.image_url.toLowerCase();
+                const trainerNameLower = titleInfo.trainerName.toLowerCase();
+                
+                if (imageUrlLower.includes(trainerNameLower)) {
+                    score += 800; // Bonus molto alto per trainer name presente
+                    reason += `Trainer ${titleInfo.trainerName} nell\'URL CORRETTO `;
+                    console.log(`🎯 [CardTrader] MATCH TRAINER: "${titleInfo.trainerName}" in "${result.image_url}" -> +800 punti`);
+                } else {
+                    score -= 600; // Penalità severa se il trainer name non è nell'URL
+                    reason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nell\'URL `;
+                    console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato in: "${result.image_url}" -> -600 punti`);
+                }
+            }
             
             // PRIORITÀ 2: Nome del Pokemon (peso massimo)
             const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
