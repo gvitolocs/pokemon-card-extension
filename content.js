@@ -2702,9 +2702,89 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] MATCH PROMO TROVATO in "${cardName}" -> +5000 punti (solo se nel titolo)`);
             }
             
-            // RIMOSSO: Tutti i bonus generici per parole come "holo", "rare", "star", "universe", etc.
-            // RIMOSSO: Bonus per match nell'image_url che causavano confusione
-            // RIMOSSO: Bonus per parole rilevanti che non erano nel titolo
+            // BONUS per keyword nella parte finale dell'image_url (solo se presenti nel titolo)
+            if (result.image_url && originalTitle) {
+                // Estrai solo la parte finale dell'image_url (dopo l'ultimo slash)
+                const urlParts = result.image_url.split('/');
+                const imageUrlFinal = urlParts[urlParts.length - 1].toLowerCase();
+                
+                console.log(`🎯 [CardTrader] ImageUrlFinal: "${imageUrlFinal}"`);
+                
+                // Estrai parole dal titolo (escludendo Pokemon e numero collezione)
+                const titleWords = titleLower.split(/\s+/).filter(word => {
+                    // Escludi parole troppo corte
+                    if (word.length < 2) return false;
+                    
+                    // Escludi parole generiche
+                    if (['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon'].includes(word)) return false;
+                    
+                    // Escludi il nome del Pokemon
+                    if (word === titleInfo.pokemonName.toLowerCase()) return false;
+                    
+                    // Escludi il numero di collezione
+                    if (titleInfo.collectorNumber && word === titleInfo.collectorNumber.toString()) return false;
+                    
+                    return true;
+                });
+                
+                console.log(`🎯 [CardTrader] Parole estratte dal titolo: [${titleWords.join(', ')}]`);
+                
+                // Cerca match tra parole del titolo e image_url finale
+                let matchedWords = [];
+                
+                titleWords.forEach(word => {
+                    if (imageUrlFinal.includes(word) && !matchedWords.includes(word)) {
+                        let bonus = 0;
+                        
+                        // Bonus basato sull'importanza della parola - SOLO se presente nel titolo
+                        if (['vmax', 'vstar', 'sl', 'tg'].includes(word)) {
+                            bonus = 8000; // Bonus ALTO per parole importanti
+                        } else if (['ex', 'gx', 'v', 'shiny', 'promo'].includes(word)) {
+                            bonus = 6000; // Bonus MEDIO per parole medie
+                        } else if (['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'].includes(word)) {
+                            bonus = 5000; // Bonus MEDIO per parole di espansione
+                        } else if (['holo', 'rare'].includes(word)) {
+                            // CONTROLLO RIGOROSO: Parole generiche come "holo" e "rare" hanno bonus molto bassi
+                            // e solo se sono effettivamente rilevanti per l'espansione
+                            if (titleInfo.expansion && result.expansion_name_en) {
+                                const titleExpansion = titleInfo.expansion.toLowerCase();
+                                const cardExpansion = result.expansion_name_en.toLowerCase();
+                                
+                                // Se l'espansione matcha, allora "holo" e "rare" sono rilevanti
+                                if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
+                                    bonus = 2000; // Bonus MOLTO BASSO per parole generiche
+                                    console.log(`🎯 [CardTrader] PAROLA GENERICA "${word}" TROVATA ma espansione matcha -> +${bonus} punti`);
+                                } else {
+                                    console.log(`🚫 [CardTrader] Parola generica "${word}" trovata ma espansione non matcha, saltando`);
+                                    return; // Salta questa parola
+                                }
+                            } else {
+                                bonus = 1000; // Bonus MINIMO per parole generiche senza espansione
+                                console.log(`🎯 [CardTrader] PAROLA GENERICA "${word}" TROVATA senza espansione -> +${bonus} punti`);
+                            }
+                        } else {
+                            bonus = 3000; // Bonus BASE per altre parole
+                        }
+                        
+                        nameScore += bonus;
+                        matchedWords.push(word);
+                        console.log(`🎯 [CardTrader] PAROLA "${word}" TROVATA nel titolo E in imageUrlFinal -> +${bonus} punti`);
+                    } else {
+                        if (imageUrlFinal.includes(word)) {
+                            console.log(`⚠️ [CardTrader] Parola "${word}" già matchata, saltando`);
+                        } else {
+                            console.log(`❌ [CardTrader] Parola "${word}" NON trovata in imageUrlFinal`);
+                        }
+                    }
+                });
+                
+                // Bonus extra per match multipli nell'image_url
+                if (matchedWords.length >= 2) {
+                    const extraBonus = 5000; // Bonus per match multipli
+                    nameScore += extraBonus;
+                    console.log(`🎯 [CardTrader] ${matchedWords.length} PAROLE MATCHATE in imageUrlFinal -> +${extraBonus} punti (bonus multipli)`);
+                }
+            }
             
             return { result, nameScore };
         });
