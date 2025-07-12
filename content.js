@@ -800,6 +800,7 @@ function extractTitleInfo(title) {
     // Estrai espansione
     let expansion = null;
     const expansionPatterns = [
+        // Espansioni classiche
         /gym heroes/i,
         /gym challenge/i,
         /team rocket/i,
@@ -807,6 +808,35 @@ function extractTitleInfo(title) {
         /neo discovery/i,
         /neo revelation/i,
         /neo destiny/i,
+        /legendary collection/i,
+        /base set/i,
+        /jungle/i,
+        /fossil/i,
+        /base set 2/i,
+        /team rocket returns/i,
+        /fire red & leaf green/i,
+        /hidden legends/i,
+        /deoxys/i,
+        /emerald/i,
+        /unseen forces/i,
+        /delta species/i,
+        /holon phantoms/i,
+        /crystal guardians/i,
+        /dragon frontiers/i,
+        /power keepers/i,
+        /ex dragon/i,
+        /ex ruby & sapphire/i,
+        /ex sandstorm/i,
+        /ex team magma vs team aqua/i,
+        /ex unseen forces/i,
+        /ex dragon/i,
+        /ex dragon frontiers/i,
+        /ex power keepers/i,
+        /ex holon phantoms/i,
+        /ex crystal guardians/i,
+        /ex legend maker/i,
+        
+        // Espansioni moderne
         /terastal festival/i,
         /prismatic evolution/i,
         /scarlet & violet/i,
@@ -831,7 +861,207 @@ function extractTitleInfo(title) {
         /ex power keepers/i,
         /ex holon phantoms/i,
         /ex crystal guardians/i,
-        /ex legend maker/i
+        /ex legend maker/i,
+        
+        // Espansioni aggiuntive
+        /brilliant stars/i,
+        /astral radiance/i,
+        /lost origin/i,
+        /silver tempest/i,
+        /crown zenith/i,
+        /scarlet & violet base/i,
+        /paldea evolved/i,
+        /obsidian flames/i,
+        /151/i,
+        /paradox rift/i,
+        /paldean fates/i,
+        /temporal forces/i,
+        /twilight masquerade/i,
+        /ancient roar/i,
+        /future flash/i,
+        /shining fates/i,
+        /champions path/i,
+        /vivid voltage/i,
+        /darkness ablaze/i,
+        /rebel clash/i,
+        /sword & shield base/i,
+        /cosmic eclipse/i,
+        /hidden fates/i,
+        /unified minds/i,
+        /unbroken bonds/i,
+        /detective pikachu/i,
+        /team up/i,
+        /lost thunder/i,
+        /dragon majesty/i,
+        /celestial storm/i,
+        /forbidden light/i,
+        /ultra prism/i,
+        /crimson invasion/i,
+        /shining legends/i,
+        /burning shadows/i,
+        /guardians rising/i,
+        /sun & moon base/i,
+        /evolutions/i,
+        /steam siege/i,
+        /fates collide/i,
+        /generations/i,
+        /breakpoint/i,
+        /breakthrough/i,
+        /ancient origins/i,
+        /roaring skies/i,
+        /double crisis/i,
+        /primal clash/i,
+        /phantom forces/i,
+        /furious fists/i,
+        /flashfire/i,
+        /xy base/i,
+        /kalos starter set/i,
+        /legendary treasures/i,
+        /plasma blast/i,
+        /plasma freeze/i,
+        /plasma storm/i,
+        /boundaries crossed/i,
+        /dragons exalted/i,
+        /dark explorers/i,
+        /next destinies/i,
+        /noble victories/i,
+        /emerging powers/i,
+        /black & white base/i,
+        /call of legends/i,
+        /triumphant/i,
+        /undauted/i,
+        /unleashed/i,
+        /unseen forces/i,
+        /fire red & leaf green/i,
+        /team magma vs team aqua/i,
+        /hidden legends/i,
+        /deoxys/i,
+        /emerald/i,
+        /team rocket returns/i,
+        /dragon/i,
+        /sandstorm/i,
+        /ruby & sapphire/i,
+        /expedition/i,
+        /aquapolis/i,
+        /skyridge/i,
+        /legendary collection/i,
+        /neo destiny/i,
+        /neo revelation/i,
+        /neo discovery/i,
+        /neo genesis/i,
+        /gym challenge/i,
+        /gym heroes/i,
+        /team rocket/i,
+        /fossil/i,
+        /jungle/i,
+        /base set/i,
+        /base set 2/i,
+        /base set unlimited/i,
+        /shadowless/i,
+        /1st edition/i,
+        /unlimited/i,
+        /promo/i,
+        /black star promo/i,
+        /wizards black star promo/i,
+        /pop series/i,
+        /diamond & pearl promo/i,
+        /platinum promo/i,
+        /heartgold & soulsilver promo/i,
+        /black & white promo/i,
+        /xy promo/i,
+        /sun & moon promo/i,
+        /sword & shield promo/i,
+        /scarlet & violet promo/i,
+        /terastal festival promo/i,
+        /prismatic evolution promo/i,
+        /151 promo/i,
+        /paradox rift promo/i,
+        /paldean fates promo/i,
+        /temporal forces promo/i,
+        /twilight masquerade promo/i,
+        /ancient roar promo/i,
+        /future flash promo/i,
+        /shining fates promo/i,
+        /champions path promo/i,
+        /vivid voltage promo/i,
+        /darkness ablaze promo/i,
+        /rebel clash promo/i,
+        /sword & shield base promo/i,
+        /cosmic eclipse promo/i,
+        /hidden fates promo/i,
+        /unified minds promo/i,
+        /unbroken bonds promo/i,
+        /detective pikachu promo/i,
+        /team up promo/i,
+        /lost thunder promo/i,
+        /dragon majesty promo/i,
+        /celestial storm promo/i,
+        /forbidden light promo/i,
+        /ultra prism promo/i,
+        /crimson invasion promo/i,
+        /shining legends promo/i,
+        /burning shadows promo/i,
+        /guardians rising promo/i,
+        /sun & moon base promo/i,
+        /evolutions promo/i,
+        /steam siege promo/i,
+        /fates collide promo/i,
+        /generations promo/i,
+        /breakpoint promo/i,
+        /breakthrough promo/i,
+        /ancient origins promo/i,
+        /roaring skies promo/i,
+        /double crisis promo/i,
+        /primal clash promo/i,
+        /phantom forces promo/i,
+        /furious fists promo/i,
+        /flashfire promo/i,
+        /xy base promo/i,
+        /kalos starter set promo/i,
+        /legendary treasures promo/i,
+        /plasma blast promo/i,
+        /plasma freeze promo/i,
+        /plasma storm promo/i,
+        /boundaries crossed promo/i,
+        /dragons exalted promo/i,
+        /dark explorers promo/i,
+        /next destinies promo/i,
+        /noble victories promo/i,
+        /emerging powers promo/i,
+        /black & white base promo/i,
+        /call of legends promo/i,
+        /triumphant promo/i,
+        /undauted promo/i,
+        /unleashed promo/i,
+        /unseen forces promo/i,
+        /fire red & leaf green promo/i,
+        /team magma vs team aqua promo/i,
+        /hidden legends promo/i,
+        /deoxys promo/i,
+        /emerald promo/i,
+        /team rocket returns promo/i,
+        /dragon promo/i,
+        /sandstorm promo/i,
+        /ruby & sapphire promo/i,
+        /expedition promo/i,
+        /aquapolis promo/i,
+        /skyridge promo/i,
+        /legendary collection promo/i,
+        /neo destiny promo/i,
+        /neo revelation promo/i,
+        /neo discovery promo/i,
+        /neo genesis promo/i,
+        /gym challenge promo/i,
+        /gym heroes promo/i,
+        /team rocket promo/i,
+        /fossil promo/i,
+        /jungle promo/i,
+        /base set promo/i,
+        /base set 2 promo/i,
+        /base set unlimited promo/i,
+        /shadowless promo/i,
+        /1st edition promo/i,
+        /unlimited promo/i
     ];
     
     for (const pattern of expansionPatterns) {
@@ -881,25 +1111,19 @@ async function searchCardInDatabase(titleInfo) {
         
         let allResults = [];
         
-        // 1. Cerca nelle carte con il nome Pokemon
-        let cardsQuery = supabaseClient
+        // 1. Cerca nelle carte con il nome Pokemon (senza filtro numero)
+        const { data: cards, error: cardsError } = await supabaseClient
             .from('cards')
             .select('*')
-            .ilike('name_en', `%${titleInfo.pokemonName}%`);
-        
-        // Se abbiamo un numero collezionista, aggiungi il filtro
-        if (titleInfo.collectorNumber) {
-            cardsQuery = cardsQuery.eq('collector_number', titleInfo.collectorNumber);
-        }
-        
-        const { data: cards, error: cardsError } = await cardsQuery.limit(20);
+            .ilike('name_en', `%${titleInfo.pokemonName}%`)
+            .limit(20);
         
         if (!cardsError && cards && cards.length > 0) {
             console.log(`✅ [CardTrader] Trovate ${cards.length} carte con nome Pokemon`);
             allResults.push(...cards.map(card => ({ ...card, source: 'cards' })));
         }
         
-        // 2. Se abbiamo un numero collezionista, cerca nelle varianti
+        // 2. Se abbiamo un numero collezionista, cerca nelle varianti con priorità alta
         if (titleInfo.collectorNumber) {
             console.log(`🔍 [CardTrader] Cercando varianti con numero ${titleInfo.collectorNumber}`);
             
@@ -913,7 +1137,7 @@ async function searchCardInDatabase(titleInfo) {
                 const blueprintIds = pokemonCards.map(card => card.blueprint_id).filter(id => id);
                 console.log(`🔍 [CardTrader] Cercando varianti per ${blueprintIds.length} blueprint IDs`);
                 
-                // Poi cerca le varianti con il numero collezionista
+                // Poi cerca le varianti con il numero collezionista esatto
                 const { data: variants, error: variantsError } = await supabaseClient
                     .from('card_variants')
                     .select('*')
@@ -921,7 +1145,7 @@ async function searchCardInDatabase(titleInfo) {
                     .eq('collector_number', titleInfo.collectorNumber);
                 
                 if (!variantsError && variants && variants.length > 0) {
-                    console.log(`✅ [CardTrader] Trovate ${variants.length} varianti con numero collezionista`);
+                    console.log(`✅ [CardTrader] Trovate ${variants.length} varianti con numero collezionista esatto`);
                     variants.forEach(variant => {
                         const card = pokemonCards.find(c => c.blueprint_id === variant.blueprint_id);
                         if (card) {
@@ -932,16 +1156,70 @@ async function searchCardInDatabase(titleInfo) {
                                 expansion_name_en: card.expansion_name_en,
                                 expansion_name: card.expansion_name_en,
                                 expansion_code: card.expansion_code,
-                                source: 'card_variants'
+                                source: 'card_variants',
+                                exact_number_match: true
                             };
                             allResults.push(combinedVariant);
                         }
                     });
                 }
+                
+                // Se non abbiamo trovato match esatti, cerca anche varianti con numeri simili
+                if (variants.length === 0) {
+                    console.log(`🔍 [CardTrader] Nessun match esatto, cercando varianti con numeri simili`);
+                    const { data: similarVariants, error: similarError } = await supabaseClient
+                        .from('card_variants')
+                        .select('*')
+                        .in('blueprint_id', blueprintIds)
+                        .limit(50);
+                    
+                    if (!similarError && similarVariants && similarVariants.length > 0) {
+                        console.log(`✅ [CardTrader] Trovate ${similarVariants.length} varianti totali per confronto`);
+                        similarVariants.forEach(variant => {
+                            const card = pokemonCards.find(c => c.blueprint_id === variant.blueprint_id);
+                            if (card) {
+                                const combinedVariant = {
+                                    ...variant,
+                                    name_en: card.name_en,
+                                    pokemon_name: card.name_en,
+                                    expansion_name_en: card.expansion_name_en,
+                                    expansion_name: card.expansion_name_en,
+                                    expansion_code: card.expansion_code,
+                                    source: 'card_variants',
+                                    exact_number_match: false
+                                };
+                                allResults.push(combinedVariant);
+                            }
+                        });
+                    }
+                }
             }
         }
         
-        // 3. Sistema di punteggi migliorato
+        // 3. Se abbiamo un'espansione, cerca anche carte specifiche per quell'espansione
+        if (titleInfo.expansion) {
+            console.log(`🔍 [CardTrader] Cercando carte per espansione: ${titleInfo.expansion}`);
+            
+            const { data: expansionCards, error: expansionError } = await supabaseClient
+                .from('cards')
+                .select('*')
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .or(`expansion_name_en.ilike.%${titleInfo.expansion}%,expansion_code.ilike.%${titleInfo.expansion}%`)
+                .limit(10);
+            
+            if (!expansionError && expansionCards && expansionCards.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${expansionCards.length} carte per espansione specifica`);
+                expansionCards.forEach(card => {
+                    // Evita duplicati
+                    const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
+                    if (!existing) {
+                        allResults.push({ ...card, source: 'cards', expansion_match: true });
+                    }
+                });
+            }
+        }
+        
+        // 4. Sistema di punteggi migliorato
         const scoredResults = allResults.map(result => {
             let score = 0;
             
@@ -952,18 +1230,32 @@ async function searchCardInDatabase(titleInfo) {
                 console.log(`🎯 [CardTrader] Match nome: ${name} -> +1000 punti`);
             }
             
-            // Punteggio per numero collezionista (500 punti)
-            if (titleInfo.collectorNumber && result.collector_number === titleInfo.collectorNumber) {
-                score += 500;
-                console.log(`🎯 [CardTrader] Match numero: ${result.collector_number} -> +500 punti`);
+            // Punteggio per numero collezionista (500 punti per match esatto, 200 per match parziale)
+            if (titleInfo.collectorNumber && result.collector_number) {
+                if (result.collector_number === titleInfo.collectorNumber) {
+                    score += 500;
+                    console.log(`🎯 [CardTrader] Match numero esatto: ${result.collector_number} -> +500 punti`);
+                } else if (result.exact_number_match) {
+                    score += 500;
+                    console.log(`🎯 [CardTrader] Match numero esatto (variante): ${result.collector_number} -> +500 punti`);
+                } else if (result.collector_number.toString().includes(titleInfo.collectorNumber) || 
+                          titleInfo.collectorNumber.includes(result.collector_number.toString())) {
+                    score += 200;
+                    console.log(`🎯 [CardTrader] Match numero parziale: ${result.collector_number} -> +200 punti`);
+                }
             }
             
-            // Punteggio per espansione (200 punti)
+            // Punteggio per espansione (200 punti per match esatto, 100 per match parziale)
             if (titleInfo.expansion) {
                 const expansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
-                if (expansion.includes(titleInfo.expansion.toLowerCase())) {
+                const searchExpansion = titleInfo.expansion.toLowerCase();
+                
+                if (expansion.includes(searchExpansion) || searchExpansion.includes(expansion)) {
                     score += 200;
                     console.log(`🎯 [CardTrader] Match espansione: ${expansion} -> +200 punti`);
+                } else if (result.expansion_match) {
+                    score += 100;
+                    console.log(`🎯 [CardTrader] Match espansione parziale: ${expansion} -> +100 punti`);
                 }
             }
             
