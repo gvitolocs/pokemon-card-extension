@@ -1374,11 +1374,78 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                                     pokemon_name: card.name_en,
                                     expansion_name_en: card.expansion_name_en,
                                     expansion_code: card.expansion_code,
-                                    source: 'card_variants_number'
+                                    source: 'card_variants_number',
+                                    exact_number_match: true
                                 };
                                 allResults.push(combinedResult);
                             }
                         });
+                    }
+                }
+            }
+        }
+        
+        // 2.5. Ricerca DEDICATA per numero collezionista esatto (PRIORITÀ MASSIMA)
+        if (titleInfo.collectorNumber) {
+            console.log(`🔍 [CardTrader] Ricerca DEDICATA per numero esatto: ${titleInfo.collectorNumber}`);
+            
+            // Cerca TUTTE le varianti con quel numero specifico
+            const { data: allVariantsWithNumber, error: allVariantsError } = await supabaseClient
+                .from('card_variants')
+                .select('*')
+                .eq('collector_number', titleInfo.collectorNumber);
+            
+            if (!allVariantsError && allVariantsWithNumber && allVariantsWithNumber.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${allVariantsWithNumber.length} varianti TOTALI con numero ${titleInfo.collectorNumber}`);
+                
+                // Per ogni variante, cerca la carta corrispondente
+                for (const variant of allVariantsWithNumber) {
+                    const { data: cardData, error: cardError } = await supabaseClient
+                        .from('cards')
+                        .select('*')
+                        .eq('blueprint_id', variant.blueprint_id);
+                    
+                    if (!cardError && cardData && cardData.length > 0) {
+                        const card = cardData[0];
+                        
+                        // Verifica se la carta contiene il Pokemon richiesto
+                        const cardNameLower = card.name_en.toLowerCase();
+                        let pokemonMatch = false;
+                        
+                        if (titleInfo.pokemonName) {
+                            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                            if (cardNameLower.includes(pokemonNameLower)) {
+                                pokemonMatch = true;
+                            }
+                        }
+                        
+                        // Se è una carta GX, verifica che contenga GX
+                        let gxMatch = true;
+                        if (titleInfo.isGXCard) {
+                            gxMatch = cardNameLower.includes('gx');
+                        }
+                        
+                        // Se c'è un secondo Pokemon, verifica che lo contenga
+                        let secondPokemonMatch = true;
+                        if (titleInfo.secondPokemonName) {
+                            const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
+                            secondPokemonMatch = cardNameLower.includes(secondPokemonLower);
+                        }
+                        
+                        if (pokemonMatch && gxMatch && secondPokemonMatch) {
+                            const combinedResult = {
+                                ...variant,
+                                name_en: card.name_en,
+                                pokemon_name: card.name_en,
+                                expansion_name_en: card.expansion_name_en,
+                                expansion_code: card.expansion_code,
+                                source: 'exact_number_search',
+                                exact_number_match: true,
+                                priority: 'high'
+                            };
+                            allResults.push(combinedResult);
+                            console.log(`🎯 [CardTrader] Match PERFETTO trovato: ${card.name_en} con numero ${titleInfo.collectorNumber}`);
+                        }
                     }
                 }
             }
@@ -1513,16 +1580,16 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 reason += 'Nome Pokemon SBAGLIATO ';
             }
             
-            // PRIORITÀ 3: Numero collezionista (SOLO se presente nel titolo)
+            // PRIORITÀ 3: Numero collezionista (PRIORITÀ MASSIMA se presente nel titolo)
             if (titleInfo.collectorNumber) {
                 if (collectorNumber === titleInfo.collectorNumber) {
-                    score += 500; // Peso alto per numero perfetto
+                    score += 2000; // Peso MASSIMO per numero perfetto
                     reason += 'Numero collezionista PERFETTO ';
                 } else if (collectorNumber.includes(titleInfo.collectorNumber)) {
-                    score += 100; // Peso medio per numero parziale
+                    score += 200; // Peso medio per numero parziale
                     reason += 'Numero collezionista parziale ';
                 } else {
-                    score -= 500; // Penalità se il numero non corrisponde
+                    score -= 1000; // Penalità severa se il numero non corrisponde
                     reason += 'Numero collezionista SBAGLIATO ';
                 }
             } else {
@@ -1590,19 +1657,19 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
-            // PRIORITÀ 4.8: Match numero collezionista nell'URL (ALTA PRIORITÀ quando presente nel titolo)
+            // PRIORITÀ 4.8: Match numero collezionista nell'URL (PRIORITÀ MASSIMA quando presente nel titolo)
             if (titleInfo.collectorNumber && result.image_url) {
                 const imageUrlLower = result.image_url.toLowerCase();
                 const collectorNumberStr = titleInfo.collectorNumber.toString();
                 
                 if (imageUrlLower.includes(collectorNumberStr)) {
-                    score += 600; // Bonus molto alto per match numero
+                    score += 1000; // Bonus MASSIMO per match numero esatto
                     reason += `Numero ${collectorNumberStr} nell\'URL CORRETTO `;
-                    console.log(`🎯 [CardTrader] MATCH NUMERO ${collectorNumberStr}: "${result.image_url}" -> +600 punti`);
+                    console.log(`🎯 [CardTrader] MATCH NUMERO ${collectorNumberStr}: "${result.image_url}" -> +1000 punti`);
                 } else {
-                    score -= 500; // Penalità severa se il numero non è nell'URL
+                    score -= 800; // Penalità MASSIMA se il numero non è nell'URL
                     reason += `Numero ${collectorNumberStr} richiesto ma non nell\'URL `;
-                    console.log(`❌ [CardTrader] Numero ${collectorNumberStr} richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+                    console.log(`❌ [CardTrader] Numero ${collectorNumberStr} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
                 }
             }
             
@@ -1655,6 +1722,20 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             // Bonus per presenza di dati
             if (result.image_url) score += 5;
             if (result.blueprint_id || result.id) score += 5;
+            
+            // Bonus extra per match esatto del numero
+            if (result.exact_number_match) {
+                score += 500; // Bonus extra per match esatto
+                reason += 'Match esatto numero ';
+                console.log(`🎯 [CardTrader] BONUS MATCH ESATTO: +500 punti`);
+            }
+            
+            // Bonus per priorità alta
+            if (result.priority === 'high') {
+                score += 300; // Bonus per priorità alta
+                reason += 'Priorità alta ';
+                console.log(`🎯 [CardTrader] BONUS PRIORITÀ ALTA: +300 punti`);
+            }
             
             return { result, score, reason: reason.trim() };
         });
