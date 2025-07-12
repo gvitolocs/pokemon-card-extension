@@ -1230,7 +1230,8 @@ function extractTitleInfo(title) {
     
     // Cerca espansioni specifiche
     const expansions = [
-        'gym heroes', 'gym challenge', 'gym leaders', 'v star universe', 'vstar universe', 'dragon frontier', 'dragon frontiers',
+        'gym heroes', 'gym challenge', 'gym leaders', 'gym booster 1 leaders stadium', 'gym booster 1', 'leaders stadium',
+        'v star universe', 'vstar universe', 'dragon frontier', 'dragon frontiers',
         'delta species', 'secret wonders', 'next destinies', 'boundaries crossed',
         'plasma storm', 'plasma freeze', 'legendary treasures', 'flashfire',
         'furious fists', 'phantom forces', 'primal clash', 'roaring skies',
@@ -1251,6 +1252,15 @@ function extractTitleInfo(title) {
         if (titleLower.includes(exp.toLowerCase())) {
             expansion = exp;
             break;
+        }
+    }
+    
+    // Logica speciale per espansioni correlate
+    if (titleLower.includes('gym heroes') && !expansion) {
+        // Se trova "gym heroes" ma non ha trovato un'espansione specifica, cerca espansioni correlate
+        if (titleLower.includes('gym') && titleLower.includes('heroes')) {
+            expansion = 'gym heroes';
+            console.log(`🎯 [CardTrader] Espansione correlata trovata: Gym Heroes`);
         }
     }
     
@@ -1630,6 +1640,11 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 } else if (expansion.includes(titleInfo.expansion) || titleInfo.expansion.includes(expansion)) {
                     expansionScore = 60;
                     expansionReason = 'Espansione parziale ';
+                } else if (titleInfo.expansion === 'gym heroes' && expansion.includes('gym booster')) {
+                    // Bonus speciale per Gym Heroes che corrisponde a Gym Booster
+                    expansionScore = 80;
+                    expansionReason = 'Gym Heroes corrisponde a Gym Booster ';
+                    console.log(`🎯 [CardTrader] Match speciale Gym Heroes -> Gym Booster: +80 punti`);
                 } else {
                     if (similarity < 0.3) {
                         expansionScore = -200;
