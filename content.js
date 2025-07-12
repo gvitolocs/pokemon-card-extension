@@ -1221,7 +1221,7 @@ function extractTitleInfo(title) {
         }
     }
     
-    // Estrai codice di espansione (es: SL7, XY123, SAR, sv8a, SVP, SIT, etc.)
+    // Estrai codice di espansione (es: SL7, XY123, SAR, sv8a, SVP, SIT=Silver Tempest, etc.)
     let expansionCode = null;
     
     // Cerca pattern come "SAR sv8a" o "sv8a"
@@ -1240,7 +1240,11 @@ function extractTitleInfo(title) {
             const promoPattern = titleLower.match(/\b(svp|sl\d*|xy\d*|swsh\d*|sm\d*|sit)\b/i);
             if (promoPattern) {
                 expansionCode = promoPattern[1].toUpperCase();
-                console.log(`🎯 [CardTrader] Codice espansione Promo trovato: ${expansionCode}`);
+                if (expansionCode === 'SIT') {
+                    console.log(`🎯 [CardTrader] Codice espansione SIT trovato (Silver Tempest): ${expansionCode}`);
+                } else {
+                    console.log(`🎯 [CardTrader] Codice espansione Promo trovato: ${expansionCode}`);
+                }
             } else {
                 // Cerca pattern generico come SL7, XY123, SIT, etc.
                 const expansionCodeMatch = titleLower.match(/\b([a-z]{1,3}\d*[a-z]*)\b/i);
@@ -1347,6 +1351,7 @@ function extractTitleInfo(title) {
         /twilight masquerade/i,
         /ancient roar/i,
         /future flash/i,
+        /silver tempest/i,
         /sit/i,
         /shining fates/i,
         /champions path/i,
@@ -1453,6 +1458,7 @@ function extractTitleInfo(title) {
         /twilight masquerade promo/i,
         /ancient roar promo/i,
         /future flash promo/i,
+        /silver tempest promo/i,
         /sit promo/i,
         /shining fates promo/i,
         /champions path promo/i,
