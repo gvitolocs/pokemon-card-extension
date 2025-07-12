@@ -357,13 +357,19 @@ function extractTitleFromListing(listingElement) {
         for (const selector of titleSelectors) {
             const element = listingElement.querySelector(selector);
             if (element && element.textContent && element.textContent.trim()) {
-                return element.textContent.trim();
+                let title = element.textContent.trim();
+                // Rimuovi eventuali pulsanti CT dal titolo
+                title = title.replace(/\bCT\b/g, '').trim();
+                return title;
             }
         }
         
         // Fallback: usa il testo dell'elemento stesso
         if (listingElement.textContent && listingElement.textContent.trim()) {
-            return listingElement.textContent.trim();
+            let title = listingElement.textContent.trim();
+            // Rimuovi eventuali pulsanti CT dal titolo
+            title = title.replace(/\bCT\b/g, '').trim();
+            return title;
         }
         
     } else if (hostname.includes('ebay')) {
@@ -379,13 +385,19 @@ function extractTitleFromListing(listingElement) {
         for (const selector of titleSelectors) {
             const element = listingElement.querySelector(selector);
             if (element && element.textContent && element.textContent.trim()) {
-                return element.textContent.trim();
+                let title = element.textContent.trim();
+                // Rimuovi eventuali pulsanti CT dal titolo
+                title = title.replace(/\bCT\b/g, '').trim();
+                return title;
             }
         }
         
         // Fallback: usa il testo dell'elemento stesso
         if (listingElement.textContent && listingElement.textContent.trim()) {
-            return listingElement.textContent.trim();
+            let title = listingElement.textContent.trim();
+            // Rimuovi eventuali pulsanti CT dal titolo
+            title = title.replace(/\bCT\b/g, '').trim();
+            return title;
         }
     }
     
@@ -409,6 +421,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         button.innerHTML = 'CT';
         button.style.cssText = `
             margin-top: 8px;
+            margin-left: 8px;
             padding: 4px 8px;
             background: #007bff;
             color: white;
@@ -418,6 +431,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             cursor: pointer;
             font-weight: bold;
             min-width: 30px;
+            display: inline-block;
         `;
         
         // Apri direttamente il link CardTrader quando si clicca
@@ -463,13 +477,18 @@ function insertLinkContainer(listingElement, button) {
         for (const selector of insertAfterSelectors) {
             const element = listingElement.querySelector(selector);
             if (element && element.parentNode) {
-                element.parentNode.insertBefore(button, element.nextSibling);
-                return;
+                // Verifica che il pulsante non sia già presente
+                if (!element.parentNode.querySelector('.pokemon-linker-button')) {
+                    element.parentNode.insertBefore(button, element.nextSibling);
+                    return;
+                }
             }
         }
         
-        // Fallback: inserisci alla fine dell'elemento
-        listingElement.appendChild(button);
+        // Fallback: inserisci alla fine dell'elemento se non è già presente
+        if (!listingElement.querySelector('.pokemon-linker-button')) {
+            listingElement.appendChild(button);
+        }
         
     } else if (hostname.includes('ebay')) {
         // Per eBay, inserisci dopo il titolo
@@ -482,13 +501,18 @@ function insertLinkContainer(listingElement, button) {
         for (const selector of insertAfterSelectors) {
             const element = listingElement.querySelector(selector);
             if (element && element.parentNode) {
-                element.parentNode.insertBefore(button, element.nextSibling);
-                return;
+                // Verifica che il pulsante non sia già presente
+                if (!element.parentNode.querySelector('.pokemon-linker-button')) {
+                    element.parentNode.insertBefore(button, element.nextSibling);
+                    return;
+                }
             }
         }
         
-        // Fallback: inserisci alla fine dell'elemento
-        listingElement.appendChild(button);
+        // Fallback: inserisci alla fine dell'elemento se non è già presente
+        if (!listingElement.querySelector('.pokemon-linker-button')) {
+            listingElement.appendChild(button);
+        }
     }
 }
 
