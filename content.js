@@ -898,12 +898,21 @@ function extractTitleInfo(title) {
         }
     }
     
-    // Estrai codice di espansione (es: SL7, XY123, etc.)
+    // Estrai codice di espansione (es: SL7, XY123, SAR, sv8a, etc.)
     let expansionCode = null;
-    const expansionCodeMatch = titleLower.match(/\b([a-z]{1,3}\d+)\b/i);
-    if (expansionCodeMatch) {
-        expansionCode = expansionCodeMatch[1].toUpperCase();
-        console.log(`🎯 [CardTrader] Codice espansione trovato: ${expansionCode}`);
+    
+    // Cerca pattern come "SAR sv8a" o "sv8a"
+    const sarPattern = titleLower.match(/\b(sar\s+sv\d+[a-z]*)\b/i);
+    if (sarPattern) {
+        expansionCode = sarPattern[1].toUpperCase();
+        console.log(`🎯 [CardTrader] Codice espansione SAR trovato: ${expansionCode}`);
+    } else {
+        // Cerca pattern generico come SL7, XY123, etc.
+        const expansionCodeMatch = titleLower.match(/\b([a-z]{1,3}\d*[a-z]*)\b/i);
+        if (expansionCodeMatch) {
+            expansionCode = expansionCodeMatch[1].toUpperCase();
+            console.log(`🎯 [CardTrader] Codice espansione trovato: ${expansionCode}`);
+        }
     }
     
     // Estrai espansione
@@ -956,6 +965,10 @@ function extractTitleInfo(title) {
         /heartgold & soulsilver/i,
         /platinum/i,
         /diamond & pearl/i,
+        /sar/i,
+        /sv8a/i,
+        /sv\d+[a-z]*/i,
+        /sar\s+sv\d+[a-z]*/i,
         /ex delta species/i,
         /ex deoxys/i,
         /ex emerald/i,
@@ -1297,12 +1310,37 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             const expansionCode = titleInfo.expansionCode || '';
             
             // Cerca carte che hanno l'espansione nell'image_url
-            const { data: expansionCards, error: expansionError } = await supabaseClient
-                .from('cards')
-                .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .or(`image_url.ilike.%${expansionLower}%,image_url.ilike.%${expansionCode}%`)
-                .limit(20);
+            let expansionCards = [];
+            let expansionError = null;
+            
+            // Query separata per evitare errori OR
+            if (expansionLower) {
+                const { data: cards1, error: error1 } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .ilike('image_url', `%${expansionLower}%`)
+                    .limit(10);
+                
+                if (!error1 && cards1) {
+                    expansionCards.push(...cards1);
+                }
+                expansionError = error1;
+            }
+            
+            if (expansionCode) {
+                const { data: cards2, error: error2 } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .ilike('image_url', `%${expansionCode}%`)
+                    .limit(10);
+                
+                if (!error2 && cards2) {
+                    expansionCards.push(...cards2);
+                }
+                if (!expansionError) expansionError = error2;
+            }
             
             if (!expansionError && expansionCards && expansionCards.length > 0) {
                 console.log(`✅ [CardTrader] Trovate ${expansionCards.length} carte per espansione specifica`);
@@ -1328,12 +1366,37 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             }
             
             // Cerca anche nel nome dell'espansione e codice
-            const { data: expansionNameCards, error: expansionNameError } = await supabaseClient
-                .from('cards')
-                .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .or(`expansion_name_en.ilike.%${expansionLower}%,expansion_code.ilike.%${expansionCode}%`)
-                .limit(20);
+            let expansionNameCards = [];
+            let expansionNameError = null;
+            
+            // Query separata per evitare errori OR
+            if (expansionLower) {
+                const { data: cards1, error: error1 } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .ilike('expansion_name_en', `%${expansionLower}%`)
+                    .limit(10);
+                
+                if (!error1 && cards1) {
+                    expansionNameCards.push(...cards1);
+                }
+                expansionNameError = error1;
+            }
+            
+            if (expansionCode) {
+                const { data: cards2, error: error2 } = await supabaseClient
+                    .from('cards')
+                    .select('*')
+                    .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                    .ilike('expansion_code', `%${expansionCode}%`)
+                    .limit(10);
+                
+                if (!error2 && cards2) {
+                    expansionNameCards.push(...cards2);
+                }
+                if (!expansionNameError) expansionNameError = error2;
+            }
             
             if (!expansionNameError && expansionNameCards && expansionNameCards.length > 0) {
                 console.log(`✅ [CardTrader] Trovate ${expansionNameCards.length} carte per nome espansione`);
@@ -1360,7 +1423,6 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             .from('cards')
             .select('*')
             .ilike('name_en', `%${titleInfo.pokemonName}%`)
-            .ilike('image_url', `%${titleInfo.pokemonName}%`)
             .limit(10);
         
         if (!titleError && titleCards && titleCards.length > 0) {
@@ -1414,8 +1476,11 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 const searchExpansionCode = titleInfo.expansionCode || '';
                 // Match per codice di espansione (PRIORITÀ ASSOLUTA)
                 if (searchExpansionCode && expansionCode === searchExpansionCode) {
-                    score += 1500;
-                    console.log(`🎯 [CardTrader] Match codice espansione: ${expansionCode} -> +1500 punti (PRIORITÀ ASSOLUTA)`);
+                    score += 3000;
+                    console.log(`🎯 [CardTrader] Match codice espansione esatto: ${expansionCode} -> +3000 punti (PRIORITÀ ASSOLUTA)`);
+                } else if (searchExpansionCode && expansionCode.includes(searchExpansionCode) || searchExpansionCode.includes(expansionCode)) {
+                    score += 2000;
+                    console.log(`🎯 [CardTrader] Match codice espansione parziale: ${expansionCode} -> +2000 punti (PRIORITÀ ALTA)`);
                 } else if (expansion.includes(searchExpansion) || searchExpansion.includes(expansion)) {
                     score += 1000;
                     console.log(`🎯 [CardTrader] Match espansione: ${expansion} -> +1000 punti (PRIORITÀ ALTA)`);
@@ -1470,10 +1535,40 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         scoredResults.sort((a, b) => b.score - a.score);
         
         // Filtra solo risultati con punteggio > 0 e prendi i migliori
-        const filteredResults = scoredResults
+        let filteredResults = scoredResults
             .filter(item => item.score > 0)
             .map(item => item.result)
             .slice(0, 10);
+        
+        // Filtro finale: se abbiamo un'espansione, verifica che sia presente nel titolo originale
+        if (originalTitle && (titleInfo.expansion || titleInfo.expansionCode)) {
+            const originalTitleLower = originalTitle.toLowerCase();
+            const expansionToCheck = titleInfo.expansion ? titleInfo.expansion.toLowerCase() : '';
+            const expansionCodeToCheck = titleInfo.expansionCode ? titleInfo.expansionCode.toLowerCase() : '';
+            
+            filteredResults = filteredResults.filter(result => {
+                const resultExpansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
+                const resultExpansionCode = (result.expansion_code || '').toLowerCase();
+                
+                // Verifica se l'espansione o il codice sono presenti nel titolo originale
+                const expansionInTitle = expansionToCheck && originalTitleLower.includes(expansionToCheck);
+                const codeInTitle = expansionCodeToCheck && originalTitleLower.includes(expansionCodeToCheck);
+                
+                // Se l'espansione è nel titolo, deve matchare con il risultato
+                if (expansionInTitle && resultExpansion && !resultExpansion.includes(expansionToCheck) && !expansionToCheck.includes(resultExpansion)) {
+                    return false;
+                }
+                
+                // Se il codice è nel titolo, deve matchare con il risultato
+                if (codeInTitle && resultExpansionCode && resultExpansionCode !== expansionCodeToCheck) {
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            console.log(`🔍 [CardTrader] Filtro finale espansione: ${filteredResults.length} risultati rimasti`);
+        }
         
         console.log(`📊 [CardTrader] Risultati finali: ${filteredResults.length} carte con punteggio > 0`);
         
