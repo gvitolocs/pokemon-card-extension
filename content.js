@@ -468,9 +468,18 @@ function extractTitleFromListing(listingElement) {
         for (const selector of titleSelectors) {
             const element = listingElement.querySelector(selector) || (listingElement.matches(selector) ? listingElement : null);
             if (element && element.textContent && element.textContent.trim()) {
-                let title = element.textContent.trim();
+                let title = '';
+                // Se il titolo è in un h1 con uno span, prendi solo il testo principale (prima del primo span)
+                if (element.tagName === 'H1' && element.childNodes.length > 1 && element.childNodes[0].nodeType === Node.TEXT_NODE) {
+                    title = element.childNodes[0].textContent.trim();
+                    console.log(`🔍 [CardTrader] Cardmarket H1 con span - Titolo estratto: "${title}"`);
+                } else {
+                    title = element.textContent.trim();
+                    console.log(`🔍 [CardTrader] Cardmarket titolo normale - Titolo estratto: "${title}"`);
+                }
                 // Rimuovi eventuali pulsanti CT dal titolo
                 title = title.replace(/\bCT\b/g, '').trim();
+                console.log(`🔍 [CardTrader] Cardmarket titolo finale: "${title}"`);
                 return title;
             }
         }
@@ -478,6 +487,7 @@ function extractTitleFromListing(listingElement) {
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
             title = title.replace(/\bCT\b/g, '').trim();
+            console.log(`🔍 [CardTrader] Cardmarket fallback - Titolo: "${title}"`);
             return title;
         }
     }
