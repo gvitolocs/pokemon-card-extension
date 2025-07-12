@@ -2228,7 +2228,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     const imageUrl = result.image_url.toLowerCase();
                     const titleLower = originalTitle.toLowerCase();
                     
-                    // BONUS SPECIFICO per espansioni nell'image_url
+                    // Estrai parole dall'espansione nel titolo
+                    let expansionWords = [];
+                    
+                    // Cerca espansioni specifiche nel titolo
                     const expansionKeywords = [
                         'vstar-universe', 'vstar universe', 'v star universe',
                         'dragon-frontier', 'dragon frontier', 'ex dragon frontiers',
@@ -2236,6 +2239,58 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         'holo', 'rare', 'ex', 'gx', 'v', 'vmax'
                     ];
                     
+                    for (const keyword of expansionKeywords) {
+                        if (titleLower.includes(keyword.replace('-', ' '))) {
+                            // Dividi l'espansione in parole singole
+                            expansionWords = keyword.replace('-', ' ').split(/\s+/);
+                            console.log(`🎯 [CardTrader] Espansione trovata nel titolo: "${keyword}" -> parole: [${expansionWords.join(', ')}]`);
+                            break;
+                        }
+                    }
+                    
+                    // Se non abbiamo trovato espansioni specifiche, cerca parole generiche
+                    if (expansionWords.length === 0) {
+                        // Estrai parole dal titolo che potrebbero essere espansioni
+                        const titleWords = titleLower.split(/\s+/).filter(word => 
+                            word.length > 2 && 
+                            !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon', 'mew', 'charizard', 'pikachu'].includes(word) &&
+                            ['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'holo', 'rare', 'ex', 'gx', 'v', 'vmax'].includes(word)
+                        );
+                        expansionWords = titleWords;
+                        console.log(`🎯 [CardTrader] Parole espansione generiche trovate: [${expansionWords.join(', ')}]`);
+                    }
+                    
+                    // Conta quante parole dell'espansione sono presenti nell'image_url
+                    let matchedWords = 0;
+                    let totalWords = expansionWords.length;
+                    
+                    expansionWords.forEach(word => {
+                        if (imageUrl.includes(word)) {
+                            matchedWords++;
+                            console.log(`🎯 [CardTrader] PAROLA ESPANSIONE MATCHATA: "${word}" in image_url -> +1 match`);
+                        }
+                    });
+                    
+                    // Calcola bonus basato sul numero di parole matchate
+                    if (matchedWords > 0) {
+                        const matchPercentage = matchedWords / totalWords;
+                        let bonus = 0;
+                        
+                        if (matchPercentage >= 0.8) { // 80% o più delle parole
+                            bonus = 40000; // Bonus MASSIMO
+                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE ESPANSIONE MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ASSOLUTA)`);
+                        } else if (matchPercentage >= 0.5) { // 50% o più delle parole
+                            bonus = 30000; // Bonus ALTO
+                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE ESPANSIONE MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ALTA)`);
+                        } else { // Almeno una parola
+                            bonus = 20000; // Bonus MEDIO
+                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE ESPANSIONE MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ MEDIA)`);
+                        }
+                        
+                        nameScore += bonus;
+                    }
+                    
+                    // BONUS SPECIFICO per espansioni nell'image_url (mantenuto per compatibilità)
                     for (const keyword of expansionKeywords) {
                         if (titleLower.includes(keyword.replace('-', ' ')) && imageUrl.includes(keyword)) {
                             nameScore += 25000; // Bonus per espansione nell'image_url
