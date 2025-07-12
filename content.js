@@ -1291,7 +1291,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             return [];
         }
         
-        console.log('🔍 [CardTrader] Cercando con criteri:', titleInfo);
+        console.log('🔍 [CardTrader] Cercando con criteri:', JSON.stringify(titleInfo, null, 2));
         
         let allResults = [];
         
@@ -1615,6 +1615,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             let expansionReason = '';
             if (titleInfo.expansion && expansion) {
                 const similarity = calculateSimilarity(titleInfo.expansion, expansion);
+                console.log(`🔍 [CardTrader] Controllando espansione: "${titleInfo.expansion}" vs "${expansion}" (similarità: ${Math.round(similarity * 100)}%)`);
+                
                 if (similarity >= 0.8) {
                     expansionScore = 100;
                     expansionReason = `Espansione corretta (${Math.round(similarity * 100)}%) `;
@@ -1651,6 +1653,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             if (titleInfo.trainerName && result.image_url) {
                 const imageUrlLower = result.image_url.toLowerCase();
                 const trainerNameLower = titleInfo.trainerName.toLowerCase();
+                
+                console.log(`🔍 [CardTrader] Controllando trainer: "${trainerNameLower}" in URL: "${imageUrlLower}"`);
                 
                 if (imageUrlLower.includes(trainerNameLower)) {
                     score += 800; // Bonus molto alto per trainer name presente
