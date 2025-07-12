@@ -566,9 +566,10 @@ function patchEbayProductPage() {
     try {
         // Cerca il titolo del prodotto
         const titleSelectors = [
-            'h1[data-testid="x-item-title__mainTitle"]',
             'h1.x-item-title__mainTitle',
+            'h1[data-testid="x-item-title__mainTitle"]',
             'h1.x-item-title__titleText',
+            '[data-testid="x-item-title"] h1',
             'h1[class*="title"]',
             'h1'
         ];
@@ -602,60 +603,10 @@ function patchEbayProductPage() {
         // Cerca nel database
         searchCardInDatabase(titleInfo, title).then(results => {
             if (results && results.length > 0) {
-                // Crea un container per i link
-                const linkContainer = document.createElement('div');
-                linkContainer.className = 'pokemon-linker-product-links';
-                linkContainer.style.cssText = `
-                    margin: 16px 0;
-                    padding: 16px;
-                    background: #f8f9fa;
-                    border-radius: 8px;
-                    border: 1px solid #e9ecef;
-                    font-family: Arial, sans-serif;
-                `;
+                // Usa il pulsante CT come nelle liste
+                addCardTraderLinks(titleElement.parentNode, results, titleInfo);
                 
-                const titleElement = document.createElement('h3');
-                titleElement.style.cssText = 'margin: 0 0 12px 0; color: #495057; font-size: 16px;';
-                titleElement.textContent = '🔗 CardTrader Links:';
-                linkContainer.appendChild(titleElement);
-                
-                // Aggiungi i link (massimo 5)
-                const maxLinks = Math.min(results.length, 5);
-                for (let i = 0; i < maxLinks; i++) {
-                    const result = results[i];
-                    const linkElement = document.createElement('a');
-                    linkElement.href = generateCardTraderLink(result.blueprint_id);
-                    linkElement.target = '_blank';
-                    linkElement.style.cssText = `
-                        display: block;
-                        margin-bottom: 8px;
-                        color: #007bff;
-                        text-decoration: none;
-                        font-size: 14px;
-                        padding: 8px;
-                        background: white;
-                        border-radius: 4px;
-                        border: 1px solid #dee2e6;
-                    `;
-                    linkElement.textContent = `${result.name_en || result.pokemon_name} (${result.expansion_name_en || 'Unknown'})`;
-                    
-                    linkElement.addEventListener('mouseenter', () => {
-                        linkElement.style.backgroundColor = '#f8f9fa';
-                        linkElement.style.textDecoration = 'underline';
-                    });
-                    
-                    linkElement.addEventListener('mouseleave', () => {
-                        linkElement.style.backgroundColor = 'white';
-                        linkElement.style.textDecoration = 'none';
-                    });
-                    
-                    linkContainer.appendChild(linkElement);
-                }
-                
-                // Inserisci dopo il titolo
-                titleElement.parentNode.insertBefore(linkContainer, titleElement.nextSibling);
-                
-                console.log(`✅ [CardTrader] Aggiunti ${maxLinks} link CardTrader alla pagina prodotto`);
+                console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto eBay`);
             }
         });
         
