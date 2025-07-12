@@ -1226,16 +1226,15 @@ async function searchCardInDatabase(titleInfo) {
         if (titleInfo.expansion) {
             console.log(`🔍 [CardTrader] Cercando carte per espansione: ${titleInfo.expansion}`);
             
-            let expansionQuery = supabaseClient
+            const expansionLower = titleInfo.expansion.toLowerCase();
+            
+            // Cerca carte che hanno l'espansione nell'image_url
+            const { data: expansionCards, error: expansionError } = await supabaseClient
                 .from('cards')
                 .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`);
-            
-            // Cerca nell'image_url per l'espansione
-            const expansionLower = titleInfo.expansion.toLowerCase();
-            expansionQuery = expansionQuery.or(`image_url.ilike.%${expansionLower}%,expansion_name_en.ilike.%${expansionLower}%,expansion_code.ilike.%${expansionLower}%`);
-            
-            const { data: expansionCards, error: expansionError } = await expansionQuery.limit(20);
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .or(`image_url.ilike.%${expansionLower}%`)
+                .limit(20);
             
             if (!expansionError && expansionCards && expansionCards.length > 0) {
                 console.log(`✅ [CardTrader] Trovate ${expansionCards.length} carte per espansione specifica`);
@@ -1259,10 +1258,34 @@ async function searchCardInDatabase(titleInfo) {
                     }
                 });
             }
+            
+            // Cerca anche nel nome dell'espansione
+            const { data: expansionNameCards, error: expansionNameError } = await supabaseClient
+                .from('cards')
+                .select('*')
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .or(`expansion_name_en.ilike.%${expansionLower}%`)
+                .limit(20);
+            
+            if (!expansionNameError && expansionNameCards && expansionNameCards.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${expansionNameCards.length} carte per nome espansione`);
+                expansionNameCards.forEach(card => {
+                    // Evita duplicati
+                    const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
+                    if (!existing) {
+                        allResults.push({ 
+                            ...card, 
+                            source: 'cards', 
+                            expansion_match: true,
+                            expansion_name_match: true
+                        });
+                    }
+                });
+            }
         }
         
         // 4. Ricerca nel titolo completo nell'image_url
-        console.log(`🔍 [CardTrader] Ricerca nel titolo completo: ${title}`);
+        console.log(`🔍 [CardTrader] Ricerca nel titolo completo per: ${titleInfo.pokemonName}`);
         
         // Cerca carte che hanno informazioni del titolo nell'image_url
         const { data: titleCards, error: titleError } = await supabaseClient
@@ -1324,6 +1347,9 @@ async function searchCardInDatabase(titleInfo) {
                 } else if (result.expansion_url_match) {
                     score += 150;
                     console.log(`🎯 [CardTrader] Match espansione nell'URL: ${expansion} -> +150 punti`);
+                } else if (result.expansion_name_match) {
+                    score += 125;
+                    console.log(`🎯 [CardTrader] Match nome espansione: ${expansion} -> +125 punti`);
                 } else if (result.expansion_match) {
                     score += 100;
                     console.log(`🎯 [CardTrader] Match espansione parziale: ${expansion} -> +100 punti`);
