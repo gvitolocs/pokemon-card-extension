@@ -1890,11 +1890,91 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         const { data: cards, error: cardsError } = await supabaseClient
             .from('cards')
             .select('*')
-            .ilike('name_en', `%${titleInfo.pokemonName}%`);
+            .ilike('name_en', `%${titleInfo.pokemonName}%`)
+            .not('name_en', 'ilike', '%deck%')  // Escludi deck
+            .not('name_en', 'ilike', '%booster%')  // Escludi booster
+            .not('name_en', 'ilike', '%bundle%')  // Escludi bundle
+            .not('name_en', 'ilike', '%box%')  // Escludi box
+            .not('name_en', 'ilike', '%tin%')  // Escludi tin
+            .not('name_en', 'ilike', '%collection%')  // Escludi collection
+            .not('name_en', 'ilike', '%set%')  // Escludi set completi
+            .not('name_en', 'ilike', '%pack%')  // Escludi pack
+            .not('name_en', 'ilike', '%display%')  // Escludi display
+            .not('name_en', 'ilike', '%case%')  // Escludi case
+            .not('name_en', 'ilike', '%lot%')  // Escludi lot
+            .not('name_en', 'ilike', '%binder%')  // Escludi binder
+            .not('name_en', 'ilike', '%album%')  // Escludi album
+            .not('name_en', 'ilike', '%sleeve%')  // Escludi sleeve
+            .not('name_en', 'ilike', '%mat%')  // Escludi playmat
+            .not('name_en', 'ilike', '%dice%')  // Escludi dice
+            .not('name_en', 'ilike', '%coin%')  // Escludi coin
+            .not('name_en', 'ilike', '%token%')  // Escludi token
+            .not('name_en', 'ilike', '%energy%')  // Escludi energy (a meno che non sia specificamente richiesto)
+            .not('name_en', 'ilike', '%trainer%')  // Escludi trainer (a meno che non sia specificamente richiesto)
+            .not('name_en', 'ilike', '%stadium%')  // Escludi stadium (a meno che non sia specificamente richiesto)
+            .not('name_en', 'ilike', '%item%')  // Escludi item (a meno che non sia specificamente richiesto)
+            .not('name_en', 'ilike', '%supporter%')  // Escludi supporter (a meno che non sia specificamente richiesto);
         
         if (!cardsError && cards && cards.length > 0) {
-            console.log(`✅ [CardTrader] Trovate ${cards.length} carte con nome Pokemon`);
-            allResults.push(...cards.map(card => ({ ...card, source: 'cards' })));
+            console.log(`✅ [CardTrader] Trovate ${cards.length} carte base per ${titleInfo.pokemonName}`);
+            
+            // Filtra ulteriormente per escludere prodotti generici
+            const filteredCards = cards.filter(card => {
+                const cardName = (card.name_en || '').toLowerCase();
+                const imageUrl = (card.image_url || '').toLowerCase();
+                
+                // Escludi prodotti generici
+                const excludePatterns = [
+                    'pokemon-products',
+                    'preconstructed',
+                    'league-battle',
+                    'theme-deck',
+                    'starter-deck',
+                    'elite-trainer',
+                    'premium-collection',
+                    'special-collection',
+                    'holiday-collection',
+                    'anniversary-collection',
+                    'celebration-collection',
+                    'limited-edition',
+                    'exclusive-collection',
+                    'gift-set',
+                    'promo-set',
+                    'sample-pack',
+                    'demo-pack',
+                    'trial-pack',
+                    'intro-pack',
+                    'beginner-deck',
+                    'learning-deck',
+                    'practice-deck'
+                ];
+                
+                // Controlla se il nome o l'image_url contengono pattern da escludere
+                for (const pattern of excludePatterns) {
+                    if (cardName.includes(pattern) || imageUrl.includes(pattern)) {
+                        console.log(`🚫 [CardTrader] Escluso prodotto generico: ${card.name_en} (pattern: ${pattern})`);
+                        return false;
+                    }
+                }
+                
+                // Escludi se il nome è troppo generico (solo il nome del Pokemon senza dettagli)
+                if (cardName === titleInfo.pokemonName.toLowerCase() && !imageUrl.includes(titleInfo.pokemonName.toLowerCase())) {
+                    console.log(`🚫 [CardTrader] Escluso nome troppo generico: ${card.name_en}`);
+                    return false;
+                }
+                
+                return true;
+            });
+            
+            console.log(`✅ [CardTrader] Dopo filtri: ${filteredCards.length} carte valide per ${titleInfo.pokemonName}`);
+            
+            filteredCards.forEach(card => {
+                allResults.push({ 
+                    ...card, 
+                    source: 'cards_base',
+                    pokemon_match: true
+                });
+            });
         }
         
         // 1.1. Se abbiamo un allenatore, cerca carte specifiche dell'allenatore
