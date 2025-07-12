@@ -894,14 +894,19 @@ function extractTitleInfo(title) {
     
     // Cerca il Pokemon nel titolo con fuzzy search
     let pokemonName = null;
+    let secondPokemonName = null;
     const titleWords = titleLower.split(/\s+/);
     
     // Prima cerca match esatti
     for (const pokemon of pokemonNames) {
         if (titleLower.includes(pokemon.toLowerCase())) {
-            pokemonName = pokemon;
-            console.log(`🎯 [CardTrader] Match esatto trovato: "${pokemon}" in "${title}"`);
-            break;
+            if (!pokemonName) {
+                pokemonName = pokemon;
+                console.log(`🎯 [CardTrader] Match esatto trovato: "${pokemon}" in "${title}"`);
+            } else if (!secondPokemonName) {
+                secondPokemonName = pokemon;
+                console.log(`🎯 [CardTrader] Secondo Pokemon trovato: "${pokemon}" in "${title}"`);
+            }
         }
     }
     
@@ -998,9 +1003,10 @@ function extractTitleInfo(title) {
                     collectorNumber = `xy${xyMatch[1]}`;
                 } else {
                     // Cerca solo numeri isolati (ma non anni come 2016)
-                    const numberMatch = title.match(/\b(?!2016|2015|2014|2013|2012|2011|2010|2009|2008|2007|2006|2005|2004|2003|2002|2001|2000|1999)(\d{1,3})\b/);
+                    const numberMatch = title.match(/\b(?!2016|2015|2014|2013|2012|2011|2010|2009|2008|2007|2006|2005|2004|2003|2002|2001|2000|1999)(\d{1,4})\b/);
                     if (numberMatch) {
                         collectorNumber = numberMatch[1];
+                        console.log(`🔍 [CardTrader] Trovato numero collezionista: ${collectorNumber}`);
                     }
                 }
             }
@@ -1173,8 +1179,15 @@ function extractTitleInfo(title) {
         console.log(`🎯 [CardTrader] Carta V rilevata nel titolo`);
     }
     
+    // Verifica se è una carta GX
+    const isGXCard = /\bgx\b/i.test(title);
+    if (isGXCard) {
+        console.log(`🎯 [CardTrader] Carta GX rilevata nel titolo`);
+    }
+    
     return {
         pokemonName: pokemonName,
+        secondPokemonName: secondPokemonName,
         collectorNumber: collectorNumber,
         specialPattern: specialPattern,
         trainerName: trainerName,
@@ -1182,6 +1195,7 @@ function extractTitleInfo(title) {
         rarity: rarity,
         expansion: expansion,
         isVCard: isVCard,
+        isGXCard: isGXCard,
         originalTitle: title
     };
 }
@@ -1222,6 +1236,19 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         .not('name_en', 'ilike', '%leafeon%')
                         .not('name_en', 'ilike', '%glaceon%')
                         .not('name_en', 'ilike', '%sylveon%');
+        } else if (titleInfo.isGXCard) {
+            // Per carte GX, cerca carte che contengono il Pokemon e GX
+            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+            query = query.ilike('name_en', `%${pokemonNameLower}%`)
+                        .ilike('name_en', '%gx%');
+            console.log(`🔍 [CardTrader] Ricerca GX per: ${titleInfo.pokemonName}`);
+            
+            // Se c'è un secondo Pokemon, cerca carte che contengono entrambi
+            if (titleInfo.secondPokemonName) {
+                const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
+                query = query.ilike('name_en', `%${secondPokemonLower}%`);
+                console.log(`🔍 [CardTrader] Ricerca GX multi-Pokemon: ${titleInfo.pokemonName} & ${titleInfo.secondPokemonName}`);
+            }
         } else {
             // Ricerca fuzzy per altri Pokemon
             const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
@@ -1308,6 +1335,17 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                             .not('name_en', 'ilike', '%leafeon%')
                             .not('name_en', 'ilike', '%glaceon%')
                             .not('name_en', 'ilike', '%sylveon%');
+            } else if (titleInfo.isGXCard) {
+                // Per carte GX, cerca carte che contengono il Pokemon e GX
+                const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                pokemonQuery = pokemonQuery.ilike('name_en', `%${pokemonNameLower}%`)
+                            .ilike('name_en', '%gx%');
+                
+                // Se c'è un secondo Pokemon, cerca carte che contengono entrambi
+                if (titleInfo.secondPokemonName) {
+                    const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
+                    pokemonQuery = pokemonQuery.ilike('name_en', `%${secondPokemonLower}%`);
+                }
             } else {
                 pokemonQuery = pokemonQuery.ilike('name_en', `%${titleInfo.pokemonName}%`);
             }
@@ -1370,6 +1408,17 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                             .not('name_en', 'ilike', '%leafeon%')
                             .not('name_en', 'ilike', '%glaceon%')
                             .not('name_en', 'ilike', '%sylveon%');
+            } else if (titleInfo.isGXCard) {
+                // Per carte GX, cerca carte che contengono il Pokemon e GX
+                const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                expansionQuery = expansionQuery.ilike('name_en', `%${pokemonNameLower}%`)
+                            .ilike('name_en', '%gx%');
+                
+                // Se c'è un secondo Pokemon, cerca carte che contengono entrambi
+                if (titleInfo.secondPokemonName) {
+                    const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
+                    expansionQuery = expansionQuery.ilike('name_en', `%${secondPokemonLower}%`);
+                }
             } else {
                 expansionQuery = expansionQuery.ilike('name_en', `%${titleInfo.pokemonName}%`);
             }
@@ -1523,6 +1572,37 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     score -= 300; // Penalità severa se il titolo dice V ma l'URL no
                     reason += 'V richiesto ma non nell\'URL ';
                     console.log(`❌ [CardTrader] V richiesto ma non trovato in: "${result.image_url}" -> -300 punti`);
+                }
+            }
+            
+            // PRIORITÀ 4.7: Match GX nell'URL (ALTA PRIORITÀ quando il titolo contiene GX)
+            if (titleInfo.isGXCard && result.image_url) {
+                const imageUrlLower = result.image_url.toLowerCase();
+                
+                if (imageUrlLower.includes('gx')) {
+                    score += 500; // Bonus molto alto per match GX
+                    reason += 'GX nell\'URL CORRETTO ';
+                    console.log(`🎯 [CardTrader] MATCH GX: "${result.image_url}" -> +500 punti`);
+                } else {
+                    score -= 400; // Penalità severa se il titolo dice GX ma l'URL no
+                    reason += 'GX richiesto ma non nell\'URL ';
+                    console.log(`❌ [CardTrader] GX richiesto ma non trovato in: "${result.image_url}" -> -400 punti`);
+                }
+            }
+            
+            // PRIORITÀ 4.8: Match numero collezionista nell'URL (ALTA PRIORITÀ quando presente nel titolo)
+            if (titleInfo.collectorNumber && result.image_url) {
+                const imageUrlLower = result.image_url.toLowerCase();
+                const collectorNumberStr = titleInfo.collectorNumber.toString();
+                
+                if (imageUrlLower.includes(collectorNumberStr)) {
+                    score += 600; // Bonus molto alto per match numero
+                    reason += `Numero ${collectorNumberStr} nell\'URL CORRETTO `;
+                    console.log(`🎯 [CardTrader] MATCH NUMERO ${collectorNumberStr}: "${result.image_url}" -> +600 punti`);
+                } else {
+                    score -= 500; // Penalità severa se il numero non è nell'URL
+                    reason += `Numero ${collectorNumberStr} richiesto ma non nell\'URL `;
+                    console.log(`❌ [CardTrader] Numero ${collectorNumberStr} richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
                 }
             }
             
