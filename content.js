@@ -955,13 +955,100 @@ function extractTitleInfo(title) {
     const collectorNumberMatch = title.match(/(\d+)\/(\d+)/);
     const collectorNumber = collectorNumberMatch ? collectorNumberMatch[1] : null;
     
-    // Cerca allenatori specifici
+    // Lista completa di Trainer (tutti i trainer principali)
     const trainerNames = [
-        'erika', 'sabrina', 'blaine', 'giovanni', 'brock', 'misty',
-        'lt. surge', 'koga', 'bruno', 'agatha', 'lorelei', 'lance',
-        'red', 'blue', 'green', 'yellow', 'crystal', 'ruby', 'sapphire',
-        'emerald', 'diamond', 'pearl', 'platinum', 'black', 'white',
-        'x', 'y', 'sun', 'moon', 'sword', 'shield', 'scarlet', 'violet'
+        // Gym Leaders Kanto
+        'brock', 'misty', 'lt. surge', 'erika', 'koga', 'sabrina', 'blaine', 'giovanni',
+        
+        // Elite Four Kanto
+        'lorelei', 'bruno', 'agatha', 'lance',
+        
+        // Protagonisti e rivali
+        'red', 'blue', 'green', 'leaf', 'yellow', 'crystal', 'ethan', 'lyra', 'kris',
+        'brendan', 'may', 'ruby', 'sapphire', 'emerald', 'lucas', 'dawn', 'diamond', 'pearl', 'platinum',
+        'hilbert', 'hilda', 'nate', 'rosa', 'black', 'white', 'black 2', 'white 2',
+        'calem', 'serena', 'x', 'y', 'elio', 'selene', 'sun', 'moon', 'ultra sun', 'ultra moon',
+        'victor', 'gloria', 'sword', 'shield', 'florian', 'juliana', 'scarlet', 'violet',
+        
+        // Gym Leaders Johto
+        'falkner', 'bugsy', 'whitney', 'morty', 'chuck', 'jasmine', 'pryce', 'clair',
+        
+        // Elite Four Johto
+        'will', 'koga', 'bruno', 'karen',
+        
+        // Gym Leaders Hoenn
+        'roxanne', 'brawly', 'wattson', 'flannery', 'norman', 'winona', 'tate', 'liza', 'juan', 'wallace',
+        
+        // Elite Four Hoenn
+        'sidney', 'phoebe', 'glacia', 'drake',
+        
+        // Gym Leaders Sinnoh
+        'roark', 'gardenia', 'maylene', 'crasher wake', 'fantina', 'byron', 'candice', 'volkner',
+        
+        // Elite Four Sinnoh
+        'aaron', 'bertha', 'flint', 'lucian',
+        
+        // Gym Leaders Unova
+        'cilan', 'chili', 'cress', 'lenora', 'burgh', 'elesa', 'clay', 'skyla', 'brycen', 'drayden', 'iris',
+        
+        // Elite Four Unova
+        'shauntal', 'grimsley', 'caitlin', 'marshall',
+        
+        // Gym Leaders Kalos
+        'viola', 'grant', 'korrina', 'ramos', 'clemont', 'valerie', 'olympia', 'wulfric',
+        
+        // Elite Four Kalos
+        'malva', 'siebold', 'wikstrom', 'drasna',
+        
+        // Gym Leaders Alola
+        'hala', 'lana', 'kiawe', 'mallow', 'olivia', 'sophocles', 'acerola', 'nanu', 'hapu',
+        
+        // Elite Four Alola
+        'hala', 'molayne', 'olivia', 'akahata',
+        
+        // Gym Leaders Galar
+        'milo', 'nessa', 'kabu', 'bea', 'allister', 'opal', 'gordie', 'melony', 'piers', 'raihan',
+        
+        // Elite Four Galar
+        'leon', 'hop', 'bede', 'marnie',
+        
+        // Gym Leaders Paldea
+        'katy', 'brassius', 'iono', 'kofu', 'larry', 'ryme', 'tulip', 'grusha',
+        
+        // Elite Four Paldea
+        'rika', 'poppy', 'hassel', 'geeta',
+        
+        // Trainer importanti e speciali
+        'cynthia', 'steven', 'wallace', 'aaron', 'bertha', 'flint', 'lucian', 'shauntal', 'grimsley', 'caitlin', 'marshall',
+        'malva', 'siebold', 'wikstrom', 'drasna', 'molayne', 'akahata', 'leon', 'hop', 'bede', 'marnie',
+        'rika', 'poppy', 'hassel', 'geeta', 'nemona', 'penny', 'arven', 'clavell', 'jacq', 'miriam', 'saguaro',
+        
+        // Team Leaders
+        'giovanni', 'maxie', 'tabitha', 'courtney', 'matt', 'shelly', 'archie', 'cyrus', 'mars', 'jupiter', 'saturn',
+        'charon', 'ghetsis', 'n', 'colress', 'lysandre', 'xerosic', 'celosia', 'bryony', 'aliana', 'mabel',
+        'guzma', 'plumeria', 'gladion', 'lusamine', 'rose', 'oleana', 'peony', 'peonia', 'clavell', 'sada', 'turo',
+        
+        // Champion e personaggi speciali
+        'champion', 'professor oak', 'professor elm', 'professor birch', 'professor rowan', 'professor juniper',
+        'professor sycamore', 'professor kukui', 'professor burnet', 'professor magnolia', 'professor sada', 'professor turo',
+        'nurse joy', 'officer jenny', 'bill', 'mr. fuji', 'mr. pokemon', 'kurt', 'baoba', 'lanette', 'bebe', 'celio',
+        'buck', 'riley', 'cheryl', 'marley', 'mira', 'darach', 'caitlin', 'benga', 'ingo', 'emmet', 'lenora', 'hawes',
+        'fennel', 'amus', 'bianca', 'cedric juniper', 'fennel', 'amus', 'bianca', 'cedric juniper', 'colress', 'ghetsis',
+        'n', 'anthea', 'concordia', 'hugh', 'roxie', 'marlon', 'shauna', 'tierno', 'trevor', 'serena', 'calem',
+        'diantha', 'malva', 'siebold', 'wikstrom', 'drasna', 'drasna', 'drasna', 'drasna', 'drasna', 'drasna',
+        'drasna', 'drasna', 'drasna', 'drasna', 'drasna', 'drasna', 'drasna', 'drasna', 'drasna', 'drasna',
+        
+        // Trainer di carte speciali
+        'cynthia', 'steven', 'wallace', 'aaron', 'bertha', 'flint', 'lucian', 'shauntal', 'grimsley', 'caitlin', 'marshall',
+        'malva', 'siebold', 'wikstrom', 'drasna', 'molayne', 'akahata', 'leon', 'hop', 'bede', 'marnie',
+        'rika', 'poppy', 'hassel', 'geeta', 'nemona', 'penny', 'arven', 'clavell', 'jacq', 'miriam', 'saguaro',
+        
+        // Altri trainer importanti
+        'red', 'blue', 'green', 'leaf', 'yellow', 'crystal', 'ethan', 'lyra', 'kris',
+        'brendan', 'may', 'ruby', 'sapphire', 'emerald', 'lucas', 'dawn', 'diamond', 'pearl', 'platinum',
+        'hilbert', 'hilda', 'nate', 'rosa', 'black', 'white', 'black 2', 'white 2',
+        'calem', 'serena', 'x', 'y', 'elio', 'selene', 'sun', 'moon', 'ultra sun', 'ultra moon',
+        'victor', 'gloria', 'sword', 'shield', 'florian', 'juliana', 'scarlet', 'violet'
     ];
     
     let trainerName = null;
