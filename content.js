@@ -2692,7 +2692,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         console.log(`✅ [CardTrader] Espansione "${titleExpansion}" trovata nell'image_url, procedendo con bonus parole rilevanti`);
                         
                         // Estrai SOLO le parole rilevanti che sono effettivamente presenti nel titolo E nell'image_url
-                        const relevantKeywords = ['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'holo', 'rare', 'ex', 'gx', 'v', 'vmax', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'promo', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'black', 'white', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'];
+                        // RIMOSSE parole generiche come 'holo', 'rare', 'ex', 'gx' che causavano bonus non desiderati
+                        const relevantKeywords = ['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'promo', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'black', 'white', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'];
                         
                         const relevantWords = titleLower.split(/\s+/).filter(word => 
                             word.length > 2 && 
@@ -2764,22 +2765,10 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                             }
                         }
                         
-                        // BONUS per parole specifiche (solo se il Pokemon è presente)
-                        const specificKeywords = ['holo', 'rare', 'ex', 'gx', 'v', 'vmax'];
-                        for (const keyword of specificKeywords) {
-                            if (titleLower.includes(keyword) && imageUrl.includes(keyword)) {
-                                // CONTROLLO AGGIUNTIVO: Verifica che la parola sia effettivamente rilevante per questa carta
-                                const isRelevantKeyword = true; // Per ora sempre true, ma potrebbe essere migliorato
-                                
-                                if (isRelevantKeyword) {
-                                    nameScore += 8000; // Bonus ridotto per parole specifiche
-                                    console.log(`🎯 [CardTrader] PAROLA SPECIFICA IMAGE_URL TROVATA: "${keyword}" -> +8000 punti`);
-                                } else {
-                                    console.log(`🚫 [CardTrader] Parola "${keyword}" trovata ma non rilevante per questa carta`);
-                                }
-                                break; // Solo il primo match
-                            }
-                        }
+                        // RIMOSSO: BONUS per parole specifiche generiche
+                        // Questo controllo dava bonus per parole come 'holo', 'rare', 'ex', 'gx'
+                        // anche quando non erano nel titolo dell'inserzione
+                        // Ora il sistema si basa solo sui bonus specifici per il titolo
                     }
                 }
                 
