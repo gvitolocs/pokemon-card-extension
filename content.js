@@ -1908,6 +1908,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] MATCH TG TROVATO in "${cardName}" -> +4000 punti`);
             }
             
+            // BONUS MASSIMO per image_url che contiene TG (priorità assoluta per carte TG)
+            if (result.image_url && result.image_url.toLowerCase().includes('tg')) {
+                nameScore += 10000; // Bonus MASSIMO per image_url con TG
+                console.log(`🎯 [CardTrader] IMAGE_URL CON TG TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
+            }
+            
             if (result.image_url) {
                 const imageUrl = result.image_url.toLowerCase();
                 
