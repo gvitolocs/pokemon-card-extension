@@ -1255,138 +1255,229 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             return [];
         }
         
-        // 4. Sistema di punteggi BASATO SU MATCHING PAROLA PER PAROLA
-        console.log(`🔍 [CardTrader] Applicando sistema di punteggi parola per parola`);
+        // 4. Sistema di punteggi SOPHISTICATO (come nel test file)
+        console.log(`🔍 [CardTrader] Applicando sistema di punteggi sofisticato`);
         
-        // Estrai TUTTE le parole dal titolo originale (escludendo Pokemon name e collector number)
-        const titleWords = extractAllWordsFromTitle(originalTitle, titleInfo);
-        console.log(`📝 [CardTrader] Parole estratte dal titolo:`, titleWords);
-        
-        const finalResults = allResults.map(result => {
+        const scoredResults = allResults.map(result => {
+            // Gestisci i nomi delle colonne per entrambe le tabelle
+            const name = result.source === 'cards' 
+                ? (result.name_en || result.name || '').toLowerCase()
+                : (result.pokemon_name || result.name || '').toLowerCase();
+            const expansion = (result.expansion_name_en || result.expansion_name || result.expansion_code || '').toLowerCase();
+            const collectorNumber = result.collector_number ? result.collector_number.toString() : '';
+            
+            // Estrai la rarità dall'URL dell'immagine se disponibile
+            const imageRarity = extractRarityFromImageUrl(result.image_url);
+            
             let score = 0;
+            let reason = '';
             
-            // PRIORITÀ 1: Match Pokemon (BASE)
-            const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
+            // PRIORITÀ 1: Espansione (fattore più importante)
+            let expansionScore = 0;
+            let expansionReason = '';
+            if (titleInfo.expansion && expansion) {
+                const similarity = calculateSimilarity(titleInfo.expansion, expansion);
+                if (similarity >= 0.8) {
+                    expansionScore = 100;
+                    expansionReason = `Espansione corretta (${Math.round(similarity * 100)}%) `;
+                    if (similarity >= 0.95) {
+                        expansionScore += 50;
+                        expansionReason += 'Espansione quasi esatta ';
+                    } else if (similarity >= 0.9) {
+                        expansionScore += 25;
+                        expansionReason += 'Espansione molto simile ';
+                    }
+                } else if (expansion.includes(titleInfo.expansion) || titleInfo.expansion.includes(expansion)) {
+                    expansionScore = 60;
+                    expansionReason = 'Espansione parziale ';
+                } else {
+                    if (similarity < 0.3) {
+                        expansionScore = -200;
+                        expansionReason = `Espansione completamente diversa (${Math.round(similarity * 100)}%) `;
+                    } else if (similarity < 0.5) {
+                        expansionScore = -100;
+                        expansionReason = `Espansione molto diversa (${Math.round(similarity * 100)}%) `;
+                    } else if (similarity < 0.7) {
+                        expansionScore = -50;
+                        expansionReason = `Espansione diversa (${Math.round(similarity * 100)}%) `;
+                    }
+                }
+            } else if (titleInfo.expansion) {
+                expansionScore = -20;
+                expansionReason = 'Espansione mancante nel database ';
+            }
+            score += expansionScore;
+            reason += expansionReason;
+            
+            // PRIORITÀ 2: Nome del Pokemon (peso massimo)
             const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+            const resultNameLower = name.toLowerCase();
             
-            if (cardName.includes(pokemonNameLower)) {
-                score += 10000; // Base score per match Pokemon
-                console.log(`🎯 [CardTrader] MATCH POKEMON: "${pokemonNameLower}" in "${cardName}" -> +10000 punti`);
+            if (resultNameLower.includes(pokemonNameLower) || pokemonNameLower.includes(resultNameLower)) {
+                score += 1000; // Peso massimo per il nome Pokemon
+                reason += 'Nome Pokemon PERFETTO ';
+            } else {
+                score -= 2000; // Penalità severa se il nome non corrisponde
+                reason += 'Nome Pokemon SBAGLIATO ';
             }
             
-            // PRIORITÀ 2: Match Tipo Carta (ALTA PRIORITÀ - FILTRO CRITICO)
-            if (titleInfo.cardType && cardName) {
-                const titleCardType = titleInfo.cardType.toLowerCase();
-                const cardNameLower = cardName.toLowerCase();
-                
-                // Controlla se il tipo di carta nel titolo corrisponde al nome della carta
-                if (titleCardType === 'gx' && cardNameLower.includes('gx')) {
-                    score += 30000; // Bonus alto per match tipo esatto
-                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: GX -> +30000 punti`);
-                } else if (titleCardType === 'v' && cardNameLower.includes('v') && !cardNameLower.includes('vmax') && !cardNameLower.includes('vstar')) {
-                    score += 30000;
-                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: V -> +30000 punti`);
-                } else if (titleCardType === 'vmax' && cardNameLower.includes('vmax')) {
-                    score += 30000;
-                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: VMAX -> +30000 punti`);
-                } else if (titleCardType === 'vstar' && cardNameLower.includes('vstar')) {
-                    score += 30000;
-                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: VSTAR -> +30000 punti`);
-                } else if (titleCardType === 'ex' && cardNameLower.includes('ex')) {
-                    score += 30000;
-                    console.log(`🎯 [CardTrader] TIPO CARTA ESATTO: EX -> +30000 punti`);
-                } else if (titleCardType && !cardNameLower.includes(titleCardType)) {
-                    // PENALIZZA SE IL TIPO NON CORRISPONDE
-                    score -= 50000; // Penalità massima per tipo sbagliato
-                    console.log(`❌ [CardTrader] TIPO CARTA SBAGLIATO: "${titleCardType}" non in "${cardName}" -> -50000 punti`);
+            // PRIORITÀ 3: Numero collezionista
+            if (titleInfo.collectorNumber && collectorNumber === titleInfo.collectorNumber) {
+                score += 500; // Peso alto per numero perfetto
+                reason += 'Numero collezionista PERFETTO ';
+            } else if (titleInfo.collectorNumber && collectorNumber.includes(titleInfo.collectorNumber)) {
+                score += 100; // Peso medio per numero parziale
+                reason += 'Numero collezionista parziale ';
+            } else if (titleInfo.collectorNumber) {
+                score -= 500; // Penalità se il numero non corrisponde
+                reason += 'Numero collezionista SBAGLIATO ';
+            }
+            
+            // PRIORITÀ 4: Rarità
+            let rarityScore = 0;
+            let rarityReason = '';
+            
+            // Controlla la rarità dal titolo vs rarità dal database
+            if (titleInfo.rarity && result.rarity) {
+                const raritySimilarity = calculateSimilarity(titleInfo.rarity.toLowerCase(), result.rarity.toLowerCase());
+                if (raritySimilarity >= 0.8) {
+                    rarityScore += 100; // Peso alto per rarità corretta
+                    rarityReason += 'Rarità titolo corretta ';
+                } else if (raritySimilarity >= 0.5) {
+                    rarityScore += 25; // Peso medio per rarità simile
+                    rarityReason += 'Rarità titolo simile ';
                 }
             }
             
-            // PRIORITÀ 3: Match Numero Collezione (ALTA PRIORITÀ)
-            if (titleInfo.collectorNumber && result.collector_number) {
-                const titleNumber = titleInfo.collectorNumber.toString();
-                const cardNumber = result.collector_number.toString();
-                
-                if (titleNumber === cardNumber) {
-                    score += 50000; // PRIORITÀ MASSIMA per numero esatto
-                    console.log(`🎯 [CardTrader] NUMERO COLLEZIONE ESATTO: ${titleNumber} = ${cardNumber} -> +50000 punti`);
+            // Controlla la rarità dal titolo vs rarità dall'URL dell'immagine
+            if (titleInfo.rarity && imageRarity) {
+                const imageRaritySimilarity = calculateSimilarity(titleInfo.rarity.toLowerCase(), imageRarity.toLowerCase());
+                if (imageRaritySimilarity >= 0.8) {
+                    rarityScore += 150; // Peso molto alto per rarità URL corretta
+                    rarityReason += 'Rarità URL corretta ';
+                } else if (imageRaritySimilarity >= 0.5) {
+                    rarityScore += 50; // Peso alto per rarità URL simile
+                    rarityReason += 'Rarità URL simile ';
                 }
             }
             
-            // PRIORITÀ 4: Match Espansione (solo se abbiamo già un match Pokemon)
-            if (score >= 10000 && titleInfo.expansion && result.expansion_name_en) {
-                const titleExpansion = titleInfo.expansion.toLowerCase();
-                const cardExpansion = result.expansion_name_en.toLowerCase();
-                
-                if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
-                    score += 20000; // Bonus per espansione specifica
-                    console.log(`🎯 [CardTrader] ESPANSIONE SPECIFICA: "${titleExpansion}" in "${cardExpansion}" -> +20000 punti`);
+            // Controlla la rarità dal database vs rarità dall'URL dell'immagine
+            if (result.rarity && imageRarity) {
+                const dbImageRaritySimilarity = calculateSimilarity(result.rarity.toLowerCase(), imageRarity.toLowerCase());
+                if (dbImageRaritySimilarity >= 0.8) {
+                    rarityScore += 50; // Peso medio per coerenza database-URL
+                    rarityReason += 'Rarità DB-URL coerente ';
                 }
             }
             
-            // PRIORITÀ 5: MATCHING PAROLA PER PAROLA CON IMAGE_URL
-            if (result.image_url && titleWords.length > 0) {
-                const imageUrlScore = calculateImageUrlWordMatch(result.image_url, titleWords);
-                score += imageUrlScore;
-                if (imageUrlScore > 0) {
-                    console.log(`🎯 [CardTrader] MATCH IMAGE_URL: ${imageUrlScore} punti per "${result.image_url}"`);
-                }
+            score += rarityScore;
+            reason += rarityReason;
+            
+            // PRIORITÀ 5: Match ex
+            if (originalTitle.toLowerCase().includes(' ex ') && name.includes(' ex')) {
+                score += 50;
+                reason += 'Match ex ';
             }
             
-            // PRIORITÀ 1.5: Se il titolo contiene '&' o ' and ', il nome della carta deve contenerlo
-            const titleHasAnd = originalTitle.includes('&') || originalTitle.toLowerCase().includes(' and ');
-            if (titleHasAnd) {
-                const cardNameHasAnd = cardName.includes('&') || cardName.toLowerCase().includes(' and ');
-                if (!cardNameHasAnd) {
-                    score -= 50000;
-                    console.log(`❌ [CardTrader] Il titolo contiene '&' o 'and' ma la carta no: penalità -50000 punti`);
-                } else {
-                    score += 1000;
-                    console.log(`🎯 [CardTrader] Match '&' o 'and' sia nel titolo che nel nome carta: +1000 punti`);
-                }
-            }
+            // Bonus per presenza di dati
+            if (result.image_url) score += 5;
+            if (result.blueprint_id || result.id) score += 5;
             
-            // PRIORITÀ 0: Se il titolo contiene un numero collezionista, solo le carte con lo stesso collector_number sono valide
-            if (titleInfo.collectorNumber) {
-                const titleNumber = titleInfo.collectorNumber.toString().replace(/\s+/g, '').toLowerCase();
-                const cardNumber = (result.collector_number || '').replace(/\s+/g, '').toLowerCase();
-                if (titleNumber !== cardNumber) {
-                    score -= 100000;
-                    console.log(`❌ [CardTrader] Collector number richiesto "${titleNumber}" ma la carta ha "${cardNumber}": penalità -100000 punti`);
-                } else {
-                    score += 50000;
-                    console.log(`🎯 [CardTrader] Collector number esatto: ${titleNumber} = ${cardNumber} -> +50000 punti`);
-                }
-            }
-            
-            return { result, score };
+            return { result, score, reason: reason.trim() };
         });
         
-        // Riordina per punteggio
+        // Deduplica i risultati per blueprint_id + collector_number
+        const uniqueMap = new Map();
+        scoredResults.forEach(item => {
+            const key = (item.result.blueprint_id || item.result.id || '') + '|' + (item.result.collector_number || '');
+            if (!uniqueMap.has(key) || uniqueMap.get(key).score < item.score) {
+                uniqueMap.set(key, item);
+            }
+        });
+        
+        const finalResults = Array.from(uniqueMap.values());
         finalResults.sort((a, b) => b.score - a.score);
         
-        // Debug: mostra tutti i risultati con punteggi
-        console.log('📊 [CardTrader] Tutti i risultati ordinati per punteggio:');
-        finalResults.forEach((item, index) => {
-            console.log(`${index + 1}. ${item.result.name_en || item.result.pokemon_name} - Punteggio: ${item.score} - Blueprint: ${item.result.blueprint_id}`);
+        // Filtra risultati con punteggi troppo bassi, ma sii più permissivo
+        const goodResults = finalResults.filter(item => item.score > -100);
+        
+        console.log(`✅ [CardTrader] Risultati finali: ${goodResults.length} carte con punteggi validi`);
+        
+        // Log dei primi 3 risultati per debug
+        goodResults.slice(0, 3).forEach((item, index) => {
+            console.log(`🏆 [CardTrader] Risultato ${index + 1}: ${item.result.name_en || item.result.pokemon_name} - Punteggio: ${item.score} - Motivo: ${item.reason}`);
         });
         
-        // Ritorna i migliori risultati
-        const goodResults = finalResults.filter(item => item.score > 0);
+        return goodResults.map(item => item.result);
         
-        if (goodResults.length > 0) {
-            console.log(`✅ [CardTrader] Trovati ${goodResults.length} risultati con punteggio > 0`);
-            return goodResults.map(item => item.result).slice(0, 5);
-        }
-        
-        // Se nessun match, mostra tutti i risultati
-        console.log(`⚠️ [CardTrader] Nessun match trovato, mostrando tutti i risultati`);
-        return allResults.slice(0, 5);
-            
     } catch (error) {
-        console.error('❌ [CardTrader] Errore nella ricerca database:', error);
+        console.error('❌ [CardTrader] Errore nella ricerca:', error);
         return [];
     }
+}
+
+// Estrai la rarità dall'URL dell'immagine
+function extractRarityFromImageUrl(imageUrl) {
+    if (!imageUrl) return null;
+    
+    // Cerca pattern comuni di rarità negli URL
+    const rarityPatterns = [
+        /rarity=(\w+)/i,
+        /-(\w+)-rare-/i,
+        /-(\w+)-uncommon-/i,
+        /-(\w+)-common-/i,
+        /-(\w+)-secret-/i,
+        /-(\w+)-ultra-/i,
+        /-(\w+)-holo-/i,
+        /-(\w+)-reverse-/i
+    ];
+    
+    for (const pattern of rarityPatterns) {
+        const match = imageUrl.match(pattern);
+        if (match) {
+            return match[1].toLowerCase();
+        }
+    }
+    
+    return null;
+}
+
+// Calcola la similarità tra due stringhe (algoritmo di Levenshtein semplificato)
+function calculateSimilarity(str1, str2) {
+    if (!str1 || !str2) return 0;
+    
+    const s1 = str1.toLowerCase();
+    const s2 = str2.toLowerCase();
+    
+    // Se sono identiche, similarità massima
+    if (s1 === s2) return 1;
+    
+    // Se una contiene l'altra, alta similarità
+    if (s1.includes(s2) || s2.includes(s1)) return 0.9;
+    
+    // Calcola similarità basata su caratteri comuni
+    const len1 = s1.length;
+    const len2 = s2.length;
+    const maxLen = Math.max(len1, len2);
+    
+    if (maxLen === 0) return 1;
+    
+    let commonChars = 0;
+    let i = 0, j = 0;
+    
+    while (i < len1 && j < len2) {
+        if (s1[i] === s2[j]) {
+            commonChars++;
+            i++;
+            j++;
+        } else if (s1[i] < s2[j]) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+    
+    return commonChars / maxLen;
 }
 
 // Funzione per estrarre TUTTE le parole dal titolo (escludendo Pokemon name e collector number)
