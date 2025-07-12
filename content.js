@@ -1465,7 +1465,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         const filteredResults = scoredResults
             .filter(item => item.score > 0)
             .map(item => item.result)
-            .slice(0, 5);
+            .slice(0, 10);
         
         console.log(`📊 [CardTrader] Risultati finali: ${filteredResults.length} carte con punteggio > 0`);
         
