@@ -1922,6 +1922,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     console.log(`❌ [CardTrader] Shiny richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
                 }
                 
+                if (titleLower.includes('holo') && !imageUrlLower.includes('holo')) {
+                    validationScore -= 500; // Penalità MASSIMA per Holo mancante
+                    validationReason += 'Holo richiesto ma mancante nell\'URL ';
+                    console.log(`❌ [CardTrader] Holo richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+                }
+                
                 // Bonus se Masterball/Pokeball/Shiny sono presenti nell'URL quando richiesti
                 if (titleLower.includes('masterball') && imageUrlLower.includes('masterball')) {
                     validationScore += 300; // Bonus alto per Masterball presente
@@ -1939,6 +1945,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     validationScore += 300; // Bonus alto per Shiny presente
                     validationReason += 'Shiny nell\'URL CORRETTO ';
                     console.log(`🎯 [CardTrader] Shiny trovato in: "${result.image_url}" -> +300 punti`);
+                }
+                
+                if (titleLower.includes('holo') && imageUrlLower.includes('holo')) {
+                    validationScore += 300; // Bonus alto per Holo presente
+                    validationReason += 'Holo nell\'URL CORRETTO ';
+                    console.log(`🎯 [CardTrader] Holo trovato in: "${result.image_url}" -> +300 punti`);
                 }
                 
                 score += validationScore;
