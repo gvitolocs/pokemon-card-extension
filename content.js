@@ -1042,6 +1042,21 @@ function extractTitleInfo(title) {
         }
     }
     
+    // Cerca rarità specifiche
+    const rarities = [
+        'promo', 'secret rare', 'ultra rare', 'rare holo', 'rare', 'uncommon', 'common',
+        'holo rare', 'reverse holo', 'cosmos holo', 'starlight holo', 'cracked ice holo',
+        'sheen holo', 'non-holo', 'special illustration rare', 'rainbow rare', 'gold rare'
+    ];
+    
+    let rarity = null;
+    for (const rar of rarities) {
+        if (titleLower.includes(rar.toLowerCase())) {
+            rarity = rar;
+            break;
+        }
+    }
+    
     // Cerca espansioni specifiche
     const expansions = [
         'v star universe', 'vstar universe', 'dragon frontier', 'dragon frontiers',
@@ -1073,6 +1088,7 @@ function extractTitleInfo(title) {
         collectorNumber: collectorNumber,
         trainerName: trainerName,
         cardType: cardType,
+        rarity: rarity,
         expansion: expansion,
         originalTitle: title
     };
@@ -1321,19 +1337,38 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 reason += 'Nome Pokemon SBAGLIATO ';
             }
             
-            // PRIORITÀ 3: Numero collezionista
-            if (titleInfo.collectorNumber && collectorNumber === titleInfo.collectorNumber) {
-                score += 500; // Peso alto per numero perfetto
-                reason += 'Numero collezionista PERFETTO ';
-            } else if (titleInfo.collectorNumber && collectorNumber.includes(titleInfo.collectorNumber)) {
-                score += 100; // Peso medio per numero parziale
-                reason += 'Numero collezionista parziale ';
-            } else if (titleInfo.collectorNumber) {
-                score -= 500; // Penalità se il numero non corrisponde
-                reason += 'Numero collezionista SBAGLIATO ';
+            // PRIORITÀ 3: Numero collezionista (SOLO se presente nel titolo)
+            if (titleInfo.collectorNumber) {
+                if (collectorNumber === titleInfo.collectorNumber) {
+                    score += 500; // Peso alto per numero perfetto
+                    reason += 'Numero collezionista PERFETTO ';
+                } else if (collectorNumber.includes(titleInfo.collectorNumber)) {
+                    score += 100; // Peso medio per numero parziale
+                    reason += 'Numero collezionista parziale ';
+                } else {
+                    score -= 500; // Penalità se il numero non corrisponde
+                    reason += 'Numero collezionista SBAGLIATO ';
+                }
+            } else {
+                // Se non c'è numero nel titolo, punteggio 0 per numero (neutro)
+                reason += 'Numero collezionista non richiesto ';
             }
             
-            // PRIORITÀ 4: Rarità
+            // PRIORITÀ 4: Match PROMO nell'URL (ALTA PRIORITÀ quando il titolo contiene "promo")
+            if ((originalTitle.toLowerCase().includes('promo') || titleInfo.rarity === 'promo') && result.image_url) {
+                const imageUrlLower = result.image_url.toLowerCase();
+                if (imageUrlLower.includes('promo')) {
+                    score += 800; // Bonus molto alto per match promo
+                    reason += 'PROMO nell\'URL CORRETTO ';
+                    console.log(`🎯 [CardTrader] MATCH PROMO: "${result.image_url}" -> +800 punti`);
+                } else {
+                    score -= 300; // Penalità se il titolo dice promo ma l'URL no
+                    reason += 'PROMO richiesto ma non nell\'URL ';
+                    console.log(`❌ [CardTrader] PROMO richiesto ma non trovato in: "${result.image_url}" -> -300 punti`);
+                }
+            }
+            
+            // PRIORITÀ 5: Rarità
             let rarityScore = 0;
             let rarityReason = '';
             
@@ -1373,7 +1408,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             score += rarityScore;
             reason += rarityReason;
             
-            // PRIORITÀ 5: Match ex
+            // PRIORITÀ 6: Match ex
             if (originalTitle.toLowerCase().includes(' ex ') && name.includes(' ex')) {
                 score += 50;
                 reason += 'Match ex ';
