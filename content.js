@@ -1664,9 +1664,14 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             score += expansionScore;
             reason += expansionReason;
             
-            // PRIORITÀ 1.5: Trainer Name (gestito nella validazione obbligatoria)
+            // PRIORITÀ 1.5: Trainer Name (PRIORITÀ MASSIMA se presente nel titolo)
             if (titleInfo.trainerName) {
                 console.log(`🔍 [CardTrader] Trainer rilevato: "${titleInfo.trainerName}" - sarà validato nell'URL`);
+                // Se c'è un trainer name, dai priorità massima a questo rispetto all'espansione
+                if (expansionScore > 0) {
+                    expansionScore = Math.floor(expansionScore * 0.5); // Riduci il peso dell'espansione
+                    expansionReason = expansionReason.replace('Espansione corretta', 'Espansione corretta (peso ridotto per trainer)');
+                }
             }
             
             // PRIORITÀ 2: Nome del Pokemon (peso massimo)
@@ -1956,16 +1961,50 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
                 
                 // Validazione OBBLIGATORIA per Trainer Name
-                if (titleInfo.trainerName && !imageUrlLower.includes(titleInfo.trainerName.toLowerCase())) {
-                    validationScore -= 800; // Penalità MASSIMA per trainer name mancante
-                    validationReason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nell\'URL `;
-                    console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
-                }
+
                 
-                if (titleInfo.trainerName && imageUrlLower.includes(titleInfo.trainerName.toLowerCase())) {
-                    validationScore += 500; // Bonus MASSIMO per trainer name presente
-                    validationReason += `Trainer ${titleInfo.trainerName} nell\'URL CORRETTO `;
-                    console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} trovato in: "${result.image_url}" -> +500 punti`);
+                if (titleInfo.trainerName) {
+                    const trainerNameLower = titleInfo.trainerName.toLowerCase();
+                    let trainerFound = false;
+                    
+                    // Cerca match esatto
+                    if (imageUrlLower.includes(trainerNameLower)) {
+                        validationScore += 500; // Bonus MASSIMO per trainer name presente
+                        validationReason += `Trainer ${titleInfo.trainerName} nell\'URL CORRETTO `;
+                        console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} trovato in: "${result.image_url}" -> +500 punti`);
+                        trainerFound = true;
+                    } else {
+                        // Cerca varianti comuni (possessive forms, plurals, etc.)
+                        const trainerVariants = [
+                            trainerNameLower + 's', // erika -> erikas
+                            trainerNameLower + '\'s', // erika -> erika's
+                            trainerNameLower.replace('lt. ', 'lt'), // lt. surge -> ltsurge
+                            trainerNameLower.replace('mr. ', 'mr'), // mr. mime -> mrmime
+                        ];
+                        
+                        for (const variant of trainerVariants) {
+                            if (imageUrlLower.includes(variant)) {
+                                validationScore += 400; // Bonus alto per variante trainer name
+                                validationReason += `Trainer ${titleInfo.trainerName} (variante ${variant}) nell\'URL CORRETTO `;
+                                console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} (variante ${variant}) trovato in: "${result.image_url}" -> +400 punti`);
+                                trainerFound = true;
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!trainerFound) {
+                        validationScore -= 800; // Penalità MASSIMA per trainer name mancante
+                        validationReason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nell\'URL `;
+                        console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
+                        
+                        // Debug: mostra tutti i trainer names trovati nell'URL per aiutare a identificare il formato corretto
+                        const trainerPatterns = ['erika', 'erikas', 'brock', 'misty', 'lt. surge', 'koga', 'sabrina', 'blaine', 'giovanni'];
+                        const foundTrainers = trainerPatterns.filter(trainer => imageUrlLower.includes(trainer));
+                        if (foundTrainers.length > 0) {
+                            console.log(`🔍 [CardTrader] Trainer names trovati nell'URL: ${foundTrainers.join(', ')}`);
+                        }
+                    }
                 }
                 
                 score += validationScore;
