@@ -1190,11 +1190,112 @@ function extractTitleInfo(title) {
         // Cerca il Pokemon con variazioni di maiuscole/minuscole
         const pokemonLower = pokemon.toLowerCase();
         
-        // Match diretto
-        if (titleLower.includes(pokemonLower)) {
-            pokemonName = pokemon.toLowerCase();
-            console.log('✅ [CardTrader] Pokemon trovato (match diretto):', pokemonName);
-            break;
+        // Controllo speciale per Pokemon con nomi simili
+        if (pokemonLower === 'mew') {
+            // Per "mew", deve contenere "mew" ma NON "mewtwo"
+            if (titleLower.includes('mew') && !titleLower.includes('mewtwo')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Mew esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'mewtwo') {
+            // Per "mewtwo", deve contenere "mewtwo"
+            if (titleLower.includes('mewtwo')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Mewtwo esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'pichu') {
+            // Per "pichu", deve contenere "pichu" ma NON "pikachu" o "raichu"
+            if (titleLower.includes('pichu') && !titleLower.includes('pikachu') && !titleLower.includes('raichu')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Pichu esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'pikachu') {
+            // Per "pikachu", deve contenere "pikachu" ma NON "pichu"
+            if (titleLower.includes('pikachu') && !titleLower.includes('pichu')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Pikachu esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'raichu') {
+            // Per "raichu", deve contenere "raichu" ma NON "pichu"
+            if (titleLower.includes('raichu') && !titleLower.includes('pichu')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Raichu esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'charmander') {
+            // Per "charmander", deve contenere "charmander" ma NON "charmeleon" o "charizard"
+            if (titleLower.includes('charmander') && !titleLower.includes('charmeleon') && !titleLower.includes('charizard')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Charmander esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'charmeleon') {
+            // Per "charmeleon", deve contenere "charmeleon" ma NON "charmander" o "charizard"
+            if (titleLower.includes('charmeleon') && !titleLower.includes('charmander') && !titleLower.includes('charizard')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Charmeleon esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'charizard') {
+            // Per "charizard", deve contenere "charizard" ma NON "charmander" o "charmeleon"
+            if (titleLower.includes('charizard') && !titleLower.includes('charmander') && !titleLower.includes('charmeleon')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Charizard esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'squirtle') {
+            // Per "squirtle", deve contenere "squirtle" ma NON "wartortle" o "blastoise"
+            if (titleLower.includes('squirtle') && !titleLower.includes('wartortle') && !titleLower.includes('blastoise')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Squirtle esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'wartortle') {
+            // Per "wartortle", deve contenere "wartortle" ma NON "squirtle" o "blastoise"
+            if (titleLower.includes('wartortle') && !titleLower.includes('squirtle') && !titleLower.includes('blastoise')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Wartortle esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'blastoise') {
+            // Per "blastoise", deve contenere "blastoise" ma NON "squirtle" o "wartortle"
+            if (titleLower.includes('blastoise') && !titleLower.includes('squirtle') && !titleLower.includes('wartortle')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Blastoise esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'bulbasaur') {
+            // Per "bulbasaur", deve contenere "bulbasaur" ma NON "ivysaur" o "venusaur"
+            if (titleLower.includes('bulbasaur') && !titleLower.includes('ivysaur') && !titleLower.includes('venusaur')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Bulbasaur esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'ivysaur') {
+            // Per "ivysaur", deve contenere "ivysaur" ma NON "bulbasaur" o "venusaur"
+            if (titleLower.includes('ivysaur') && !titleLower.includes('bulbasaur') && !titleLower.includes('venusaur')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Ivysaur esatto):', pokemonName);
+                break;
+            }
+        } else if (pokemonLower === 'venusaur') {
+            // Per "venusaur", deve contenere "venusaur" ma NON "bulbasaur" o "ivysaur"
+            if (titleLower.includes('venusaur') && !titleLower.includes('bulbasaur') && !titleLower.includes('ivysaur')) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (Venusaur esatto):', pokemonName);
+                break;
+            }
+        } else {
+            // Per altri Pokemon, controllo normale
+            if (titleLower.includes(pokemonLower)) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (match diretto):', pokemonName);
+                break;
+            }
         }
         
 
@@ -1887,10 +1988,82 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         let allResults = [];
         
         // 1. Cerca nelle carte con il nome Pokemon (senza filtro numero) - NO LIMIT
-        const { data: cards, error: cardsError } = await supabaseClient
+        let query = supabaseClient
             .from('cards')
-            .select('*')
-            .ilike('name_en', `%${titleInfo.pokemonName}%`)
+            .select('*');
+        
+        // Controllo speciale per Pokemon con nomi simili
+        if (titleInfo.pokemonName === 'mew') {
+            // Per "mew", cerca "mew" ma escludi "mewtwo"
+            query = query.ilike('name_en', '%mew%')
+                        .not('name_en', 'ilike', '%mewtwo%');
+        } else if (titleInfo.pokemonName === 'mewtwo') {
+            // Per "mewtwo", cerca solo "mewtwo"
+            query = query.ilike('name_en', '%mewtwo%');
+        } else if (titleInfo.pokemonName === 'pichu') {
+            // Per "pichu", cerca "pichu" ma escludi "pikachu" e "raichu"
+            query = query.ilike('name_en', '%pichu%')
+                        .not('name_en', 'ilike', '%pikachu%')
+                        .not('name_en', 'ilike', '%raichu%');
+        } else if (titleInfo.pokemonName === 'pikachu') {
+            // Per "pikachu", cerca "pikachu" ma escludi "pichu"
+            query = query.ilike('name_en', '%pikachu%')
+                        .not('name_en', 'ilike', '%pichu%');
+        } else if (titleInfo.pokemonName === 'raichu') {
+            // Per "raichu", cerca "raichu" ma escludi "pichu"
+            query = query.ilike('name_en', '%raichu%')
+                        .not('name_en', 'ilike', '%pichu%');
+        } else if (titleInfo.pokemonName === 'charmander') {
+            // Per "charmander", cerca "charmander" ma escludi "charmeleon" e "charizard"
+            query = query.ilike('name_en', '%charmander%')
+                        .not('name_en', 'ilike', '%charmeleon%')
+                        .not('name_en', 'ilike', '%charizard%');
+        } else if (titleInfo.pokemonName === 'charmeleon') {
+            // Per "charmeleon", cerca "charmeleon" ma escludi "charmander" e "charizard"
+            query = query.ilike('name_en', '%charmeleon%')
+                        .not('name_en', 'ilike', '%charmander%')
+                        .not('name_en', 'ilike', '%charizard%');
+        } else if (titleInfo.pokemonName === 'charizard') {
+            // Per "charizard", cerca "charizard" ma escludi "charmander" e "charmeleon"
+            query = query.ilike('name_en', '%charizard%')
+                        .not('name_en', 'ilike', '%charmander%')
+                        .not('name_en', 'ilike', '%charmeleon%');
+        } else if (titleInfo.pokemonName === 'squirtle') {
+            // Per "squirtle", cerca "squirtle" ma escludi "wartortle" e "blastoise"
+            query = query.ilike('name_en', '%squirtle%')
+                        .not('name_en', 'ilike', '%wartortle%')
+                        .not('name_en', 'ilike', '%blastoise%');
+        } else if (titleInfo.pokemonName === 'wartortle') {
+            // Per "wartortle", cerca "wartortle" ma escludi "squirtle" e "blastoise"
+            query = query.ilike('name_en', '%wartortle%')
+                        .not('name_en', 'ilike', '%squirtle%')
+                        .not('name_en', 'ilike', '%blastoise%');
+        } else if (titleInfo.pokemonName === 'blastoise') {
+            // Per "blastoise", cerca "blastoise" ma escludi "squirtle" e "wartortle"
+            query = query.ilike('name_en', '%blastoise%')
+                        .not('name_en', 'ilike', '%squirtle%')
+                        .not('name_en', 'ilike', '%wartortle%');
+        } else if (titleInfo.pokemonName === 'bulbasaur') {
+            // Per "bulbasaur", cerca "bulbasaur" ma escludi "ivysaur" e "venusaur"
+            query = query.ilike('name_en', '%bulbasaur%')
+                        .not('name_en', 'ilike', '%ivysaur%')
+                        .not('name_en', 'ilike', '%venusaur%');
+        } else if (titleInfo.pokemonName === 'ivysaur') {
+            // Per "ivysaur", cerca "ivysaur" ma escludi "bulbasaur" e "venusaur"
+            query = query.ilike('name_en', '%ivysaur%')
+                        .not('name_en', 'ilike', '%bulbasaur%')
+                        .not('name_en', 'ilike', '%venusaur%');
+        } else if (titleInfo.pokemonName === 'venusaur') {
+            // Per "venusaur", cerca "venusaur" ma escludi "bulbasaur" e "ivysaur"
+            query = query.ilike('name_en', '%venusaur%')
+                        .not('name_en', 'ilike', '%bulbasaur%')
+                        .not('name_en', 'ilike', '%ivysaur%');
+        } else {
+            // Per altri Pokemon, controllo normale
+            query = query.ilike('name_en', `%${titleInfo.pokemonName}%`);
+        }
+        
+        const { data: cards, error: cardsError } = await query
             .not('name_en', 'ilike', '%deck%')  // Escludi deck
             .not('name_en', 'ilike', '%booster%')  // Escludi booster
             .not('name_en', 'ilike', '%bundle%')  // Escludi bundle
@@ -1993,8 +2166,59 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 // Filtra solo le carte che contengono sia l'allenatore che il Pokemon
                 const filteredTrainerCards = trainerCards.filter(card => {
                     const cardName = (card.name_en || '').toLowerCase();
-                    return cardName.includes(titleInfo.trainerName.toLowerCase()) && 
-                           cardName.includes(titleInfo.pokemonName.toLowerCase());
+                    const trainerNameLower = titleInfo.trainerName.toLowerCase();
+                    const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                    
+                                    // Controllo speciale per Pokemon con nomi simili
+                let pokemonMatch = false;
+                if (pokemonNameLower === 'mew') {
+                    // Per "mew", deve contenere "mew" ma NON "mewtwo"
+                    pokemonMatch = cardName.includes('mew') && !cardName.includes('mewtwo');
+                } else if (pokemonNameLower === 'mewtwo') {
+                    // Per "mewtwo", deve contenere "mewtwo"
+                    pokemonMatch = cardName.includes('mewtwo');
+                } else if (pokemonNameLower === 'pichu') {
+                    // Per "pichu", deve contenere "pichu" ma NON "pikachu" o "raichu"
+                    pokemonMatch = cardName.includes('pichu') && !cardName.includes('pikachu') && !cardName.includes('raichu');
+                } else if (pokemonNameLower === 'pikachu') {
+                    // Per "pikachu", deve contenere "pikachu" ma NON "pichu"
+                    pokemonMatch = cardName.includes('pikachu') && !cardName.includes('pichu');
+                } else if (pokemonNameLower === 'raichu') {
+                    // Per "raichu", deve contenere "raichu" ma NON "pichu"
+                    pokemonMatch = cardName.includes('raichu') && !cardName.includes('pichu');
+                } else if (pokemonNameLower === 'charmander') {
+                    // Per "charmander", deve contenere "charmander" ma NON "charmeleon" o "charizard"
+                    pokemonMatch = cardName.includes('charmander') && !cardName.includes('charmeleon') && !cardName.includes('charizard');
+                } else if (pokemonNameLower === 'charmeleon') {
+                    // Per "charmeleon", deve contenere "charmeleon" ma NON "charmander" o "charizard"
+                    pokemonMatch = cardName.includes('charmeleon') && !cardName.includes('charmander') && !cardName.includes('charizard');
+                } else if (pokemonNameLower === 'charizard') {
+                    // Per "charizard", deve contenere "charizard" ma NON "charmander" o "charmeleon"
+                    pokemonMatch = cardName.includes('charizard') && !cardName.includes('charmander') && !cardName.includes('charmeleon');
+                } else if (pokemonNameLower === 'squirtle') {
+                    // Per "squirtle", deve contenere "squirtle" ma NON "wartortle" o "blastoise"
+                    pokemonMatch = cardName.includes('squirtle') && !cardName.includes('wartortle') && !cardName.includes('blastoise');
+                } else if (pokemonNameLower === 'wartortle') {
+                    // Per "wartortle", deve contenere "wartortle" ma NON "squirtle" o "blastoise"
+                    pokemonMatch = cardName.includes('wartortle') && !cardName.includes('squirtle') && !cardName.includes('blastoise');
+                } else if (pokemonNameLower === 'blastoise') {
+                    // Per "blastoise", deve contenere "blastoise" ma NON "squirtle" o "wartortle"
+                    pokemonMatch = cardName.includes('blastoise') && !cardName.includes('squirtle') && !cardName.includes('wartortle');
+                } else if (pokemonNameLower === 'bulbasaur') {
+                    // Per "bulbasaur", deve contenere "bulbasaur" ma NON "ivysaur" o "venusaur"
+                    pokemonMatch = cardName.includes('bulbasaur') && !cardName.includes('ivysaur') && !cardName.includes('venusaur');
+                } else if (pokemonNameLower === 'ivysaur') {
+                    // Per "ivysaur", deve contenere "ivysaur" ma NON "bulbasaur" o "venusaur"
+                    pokemonMatch = cardName.includes('ivysaur') && !cardName.includes('bulbasaur') && !cardName.includes('venusaur');
+                } else if (pokemonNameLower === 'venusaur') {
+                    // Per "venusaur", deve contenere "venusaur" ma NON "bulbasaur" o "ivysaur"
+                    pokemonMatch = cardName.includes('venusaur') && !cardName.includes('bulbasaur') && !cardName.includes('ivysaur');
+                } else {
+                    // Per altri Pokemon, controllo normale
+                    pokemonMatch = cardName.includes(pokemonNameLower);
+                }
+                    
+                    return cardName.includes(trainerNameLower) && pokemonMatch;
                 });
                 
                 if (filteredTrainerCards.length > 0) {
@@ -2038,10 +2262,67 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             console.log(`🔍 [CardTrader] Cercando varianti con numero collezionista: ${titleInfo.collectorNumber}`);
             
             // Prima trova le carte del Pokemon
-            const { data: pokemonCards, error: pokemonCardsError } = await supabaseClient
+            let pokemonQuery = supabaseClient
                 .from('cards')
-                .select('blueprint_id, name_en, expansion_name_en, expansion_code')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`);
+                .select('blueprint_id, name_en, expansion_name_en, expansion_code');
+            
+            // Controllo speciale per Pokemon con nomi simili
+            if (titleInfo.pokemonName === 'mew') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%mew%')
+                                         .not('name_en', 'ilike', '%mewtwo%');
+            } else if (titleInfo.pokemonName === 'mewtwo') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%mewtwo%');
+            } else if (titleInfo.pokemonName === 'pichu') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%pichu%')
+                                         .not('name_en', 'ilike', '%pikachu%')
+                                         .not('name_en', 'ilike', '%raichu%');
+            } else if (titleInfo.pokemonName === 'pikachu') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%pikachu%')
+                                         .not('name_en', 'ilike', '%pichu%');
+            } else if (titleInfo.pokemonName === 'raichu') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%raichu%')
+                                         .not('name_en', 'ilike', '%pichu%');
+            } else if (titleInfo.pokemonName === 'charmander') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%charmander%')
+                                         .not('name_en', 'ilike', '%charmeleon%')
+                                         .not('name_en', 'ilike', '%charizard%');
+            } else if (titleInfo.pokemonName === 'charmeleon') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%charmeleon%')
+                                         .not('name_en', 'ilike', '%charmander%')
+                                         .not('name_en', 'ilike', '%charizard%');
+            } else if (titleInfo.pokemonName === 'charizard') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%charizard%')
+                                         .not('name_en', 'ilike', '%charmander%')
+                                         .not('name_en', 'ilike', '%charmeleon%');
+            } else if (titleInfo.pokemonName === 'squirtle') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%squirtle%')
+                                         .not('name_en', 'ilike', '%wartortle%')
+                                         .not('name_en', 'ilike', '%blastoise%');
+            } else if (titleInfo.pokemonName === 'wartortle') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%wartortle%')
+                                         .not('name_en', 'ilike', '%squirtle%')
+                                         .not('name_en', 'ilike', '%blastoise%');
+            } else if (titleInfo.pokemonName === 'blastoise') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%blastoise%')
+                                         .not('name_en', 'ilike', '%squirtle%')
+                                         .not('name_en', 'ilike', '%wartortle%');
+            } else if (titleInfo.pokemonName === 'bulbasaur') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%bulbasaur%')
+                                         .not('name_en', 'ilike', '%ivysaur%')
+                                         .not('name_en', 'ilike', '%venusaur%');
+            } else if (titleInfo.pokemonName === 'ivysaur') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%ivysaur%')
+                                         .not('name_en', 'ilike', '%bulbasaur%')
+                                         .not('name_en', 'ilike', '%venusaur%');
+            } else if (titleInfo.pokemonName === 'venusaur') {
+                pokemonQuery = pokemonQuery.ilike('name_en', '%venusaur%')
+                                         .not('name_en', 'ilike', '%bulbasaur%')
+                                         .not('name_en', 'ilike', '%ivysaur%');
+            } else {
+                pokemonQuery = pokemonQuery.ilike('name_en', `%${titleInfo.pokemonName}%`);
+            }
+            
+            const { data: pokemonCards, error: pokemonCardsError } = await pokemonQuery;
             
             if (!pokemonCardsError && pokemonCards && pokemonCards.length > 0) {
                 const blueprintIds = pokemonCards.map(card => card.blueprint_id).filter(id => id);

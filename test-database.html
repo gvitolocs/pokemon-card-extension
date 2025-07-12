@@ -175,6 +175,15 @@
         </div>
     </div>
 
+    <!-- Test Pokemon Simili -->
+    <div class="container">
+        <div class="test-section">
+            <div class="test-title">🔍 Test Pokemon con Nomi Simili</div>
+            <button class="test-button" onclick="findSimilarPokemon()">Trova Pokemon Simili</button>
+            <div id="similar-pokemon-result" class="result"></div>
+        </div>
+    </div>
+
     <!-- Scripts -->
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <script src="standalone-config.js"></script>
@@ -183,12 +192,9 @@
         let testSupabaseClient = null;
         let testResults = [];
 
-        // Funzione per estrarre informazioni dal titolo (versione semplificata per test)
-        function extractTitleInfo(title) {
+        // Funzione per estrarre informazioni dal titolo (versione dinamica)
+        async function extractTitleInfo(title) {
             const titleLower = title.toLowerCase();
-            
-            // Lista semplificata dei Pokemon per il test
-            const pokemonList = ['mew', 'charizard', 'pikachu', 'dragonair', 'ancient'];
             
             let pokemonName = null;
             let trainerName = null;
@@ -196,23 +202,98 @@
             let collectorNumber = null;
             let expansionCode = null;
             
-            // Cerca Pokemon
-            for (const pokemon of pokemonList) {
-                if (titleLower.includes(pokemon)) {
-                    pokemonName = pokemon;
-                    break;
+            // Cerca trainer name dinamicamente (pattern: "X's Y")
+            const trainerMatch = titleLower.match(/(\w+)'s\s+(\w+)/);
+            if (trainerMatch) {
+                trainerName = trainerMatch[1];
+                // Il secondo gruppo potrebbe essere un Pokemon
+                const potentialPokemon = trainerMatch[2];
+                
+                // Verifica se è un Pokemon nel database
+                if (testSupabaseClient) {
+                    try {
+                        const { data: pokemonCheck } = await testSupabaseClient
+                            .from('cards')
+                            .select('name_en')
+                            .ilike('name_en', `%${potentialPokemon}%`)
+                            .limit(1);
+                        
+                        if (pokemonCheck && pokemonCheck.length > 0) {
+                            pokemonName = potentialPokemon;
+                        }
+                    } catch (error) {
+                        console.log('Errore verifica Pokemon:', error);
+                    }
                 }
             }
             
-            // Cerca espansione
-            if (titleLower.includes('v star universe')) {
-                expansion = 'v star universe';
-            } else if (titleLower.includes('dragon frontiers')) {
-                expansion = 'dragon frontiers';
-            } else if (titleLower.includes('darkness ablaze')) {
-                expansion = 'darkness ablaze';
-            } else if (titleLower.includes('gym heroes')) {
-                expansion = 'gym heroes';
+            // Cerca Pokemon dinamicamente nel database
+            if (!pokemonName && testSupabaseClient) {
+                try {
+                    // Estrai tutte le parole dal titolo che potrebbero essere Pokemon
+                    const words = titleLower.split(/\s+/).filter(word => 
+                        word.length > 2 && 
+                        !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon', 'battle', 'partners', 'universe', 'star', 'v', 'ex', 'gx', 'vmax', 'vstar'].includes(word)
+                    );
+                    
+                    // Cerca ogni parola nel database con controllo per mew/mewtwo
+                    for (const word of words) {
+                        let query = testSupabaseClient
+                            .from('cards')
+                            .select('name_en')
+                            .ilike('name_en', `%${word}%`);
+                        
+                        // Controllo speciale per mew/mewtwo
+                        if (word === 'mew') {
+                            // Per "mew", escludi "mewtwo" cercando solo "mew" esatto
+                            query = query.not('name_en', 'ilike', '%mewtwo%');
+                        } else if (word === 'mewtwo') {
+                            // Per "mewtwo", cerca solo "mewtwo" esatto
+                            query = query.ilike('name_en', '%mewtwo%');
+                        }
+                        
+                        const { data: pokemonCheck } = await query.limit(1);
+                        
+                        if (pokemonCheck && pokemonCheck.length > 0) {
+                            pokemonName = word;
+                            break;
+                        }
+                    }
+                } catch (error) {
+                    console.log('Errore ricerca Pokemon dinamica:', error);
+                }
+            }
+            
+            // Cerca espansione dinamicamente nel database
+            if (testSupabaseClient) {
+                try {
+                    // Estrai tutte le parole dal titolo che potrebbero essere espansioni
+                    const expansionWords = titleLower.split(/\s+/).filter(word => 
+                        word.length > 2 && 
+                        !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon'].includes(word)
+                    );
+                    
+                    // Cerca ogni combinazione di parole nel database
+                    for (let i = 0; i < expansionWords.length - 1; i++) {
+                        for (let j = i + 2; j <= expansionWords.length; j++) {
+                            const potentialExpansion = expansionWords.slice(i, j).join(' ');
+                            
+                            const { data: expansionCheck } = await testSupabaseClient
+                                .from('cards')
+                                .select('expansion_name_en')
+                                .ilike('expansion_name_en', `%${potentialExpansion}%`)
+                                .limit(1);
+                            
+                            if (expansionCheck && expansionCheck.length > 0) {
+                                expansion = potentialExpansion;
+                                break;
+                            }
+                        }
+                        if (expansion) break;
+                    }
+                } catch (error) {
+                    console.log('Errore ricerca espansione dinamica:', error);
+                }
             }
             
             // Cerca numero collezionista
@@ -221,11 +302,26 @@
                 collectorNumber = numberMatch[1];
             }
             
-            // Cerca codice espansione
-            if (titleLower.includes('sv')) {
-                expansionCode = 'SV';
-            } else if (titleLower.includes('swsh')) {
-                expansionCode = 'SWSH';
+            // Cerca codice espansione dinamicamente
+            if (testSupabaseClient) {
+                try {
+                    const { data: expansionCodes } = await testSupabaseClient
+                        .from('cards')
+                        .select('expansion_code')
+                        .not('expansion_code', 'is', null)
+                        .limit(100);
+                    
+                    if (expansionCodes) {
+                        for (const code of expansionCodes) {
+                            if (code.expansion_code && titleLower.includes(code.expansion_code.toLowerCase())) {
+                                expansionCode = code.expansion_code;
+                                break;
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.log('Errore ricerca codice espansione:', error);
+                }
             }
             
             return {
@@ -291,7 +387,7 @@
         }
 
         // Test estrazione titolo
-        function testTitleExtraction() {
+        async function testTitleExtraction() {
             const title = document.getElementById('title-input').value;
             const resultDiv = document.getElementById('title-result');
             
@@ -301,10 +397,41 @@
                 return;
             }
             
+            if (!testSupabaseClient) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Supabase non inizializzato. Esegui prima il test di connessione.';
+                return;
+            }
+            
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Estraendo informazioni...';
+            
             try {
-                const titleInfo = extractTitleInfo(title);
+                const titleInfo = await extractTitleInfo(title);
+                
+                // Estrai le keyword dal titolo per mostrarle
+                const titleWords = title.toLowerCase().split(/\s+/).filter(word => 
+                    word.length > 2 && 
+                    !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon', 'tcg'].includes(word) &&
+                    word !== titleInfo.pokemonName &&
+                    word !== titleInfo.pokemonName + 's'
+                );
+                
+                // Aggiungi anche le parole dell'espansione se presente
+                if (titleInfo.expansion) {
+                    const expansionWords = titleInfo.expansion.toLowerCase().split(/\s+/);
+                    expansionWords.forEach(word => {
+                        if (word.length > 2 && !titleWords.includes(word)) {
+                            titleWords.push(word);
+                        }
+                    });
+                }
+                
                 resultDiv.className = 'result success';
-                resultDiv.textContent = '✅ Informazioni estratte:\n\n' + JSON.stringify(titleInfo, null, 2);
+                resultDiv.textContent = '✅ Informazioni estratte:\n\n' + 
+                    JSON.stringify(titleInfo, null, 2) + 
+                    '\n\n🔍 Keywords estratte dal titolo:\n' + 
+                    JSON.stringify(titleWords, null, 2);
             } catch (error) {
                 resultDiv.className = 'result error';
                 resultDiv.textContent = '❌ Errore nell\'estrazione: ' + error.message;
@@ -320,21 +447,31 @@
                 
                 console.log('🔍 Test: Cercando con criteri:', titleInfo);
                 
-                // Cerca carte con il nome Pokemon - query migliorata
+                // Cerca carte con il nome Pokemon - JOIN con card_variants per ottenere image_url
                 let query = testSupabaseClient
                     .from('cards')
-                    .select('*')
+                    .select(`
+                        *,
+                        card_variants!inner(
+                            image_url,
+                            collector_number,
+                            language
+                        )
+                    `)
                     .ilike('name_en', `%${titleInfo.pokemonName}%`);
                 
-                // Se abbiamo un'espansione specifica, filtra per essa
-                if (titleInfo.expansion) {
-                    query = query.ilike('expansion_name_en', `%${titleInfo.expansion}%`);
-                }
+                // RIMOSSO: Non filtrare per espansione nella query principale
+                // Lasciamo che il sistema di punteggi gestisca la priorità
                 
-                const { data: cards, error: cardsError } = await query.limit(50);
+                const { data: cards, error: cardsError } = await query;
                 
                 if (cardsError) {
                     throw cardsError;
+                }
+                
+                console.log(`🔍 Carte trovate nel database: ${cards ? cards.length : 0}`);
+                if (cards && cards.length > 0) {
+                    console.log('🔍 Prime 5 carte trovate:', cards.slice(0, 5).map(c => `${c.name_en} (${c.expansion_name_en})`));
                 }
                 
                 // Se non abbiamo risultati diretti, prova a cercare nelle varianti
@@ -344,8 +481,7 @@
                     const { data: variants, error: variantsError } = await testSupabaseClient
                         .from('card_variants')
                         .select('*, cards(*)')
-                        .ilike('cards.name_en', `%${titleInfo.pokemonName}%`)
-                        .limit(30);
+                        .ilike('cards.name_en', `%${titleInfo.pokemonName}%`);
                     
                     if (variantsError) {
                         throw variantsError;
@@ -433,51 +569,144 @@
                             result.score > 0
                         );
                         
-                        return validVariants.slice(0, 5);
+                        // Rimuovi duplicati basati su blueprint univoco (collector_number + expansion)
+                        const uniqueVariants = [];
+                        const seenBlueprints = new Set();
+                        
+                        validVariants.forEach(variant => {
+                            const blueprint = `${variant.collector_number}-${variant.expansion_name_en}`;
+                            if (!seenBlueprints.has(blueprint)) {
+                                seenBlueprints.add(blueprint);
+                                uniqueVariants.push(variant);
+                            }
+                        });
+                        
+                        console.log(`🔍 Varianti uniche trovate: ${uniqueVariants.length} (da ${validVariants.length} totali)`);
+                        return uniqueVariants;
                     }
                     
                     return [];
                 }
                 
-                // Sistema di punteggi migliorato con keywords dal titolo
+                                // Sistema di punteggi migliorato con keywords dal titolo - AGGIORNATO per card_variants
                 const scoredResults = cards.map(card => {
                     let score = 0;
                     let scoreDetails = [];
                     
-                    // Estrai parole chiave dal titolo originale
+                    // Estrai parole chiave dal titolo originale - MIGLIORATO per trattare parole separate
                     const titleWords = originalTitle.toLowerCase().split(/\s+/).filter(word => 
                         word.length > 2 && 
-                        !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon'].includes(word) &&
-                        word !== titleInfo.pokemonName
+                        !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon', 'tcg'].includes(word) &&
+                        word !== titleInfo.pokemonName &&
+                        word !== titleInfo.pokemonName + 's' // Escludi anche il plurale
                     );
+                    
+                    // Aggiungi anche le parole dell'espansione se presente
+                    if (titleInfo.expansion) {
+                        const expansionWords = titleInfo.expansion.toLowerCase().split(/\s+/);
+                        expansionWords.forEach(word => {
+                            if (word.length > 2 && !titleWords.includes(word)) {
+                                titleWords.push(word);
+                            }
+                        });
+                    }
                     
                     console.log('🔍 Keywords estratte dal titolo:', titleWords);
                     
-                    // Bonus base per match Pokemon
-                    if (card.name_en && card.name_en.toLowerCase().includes(titleInfo.pokemonName)) {
-                        score += 10000;
-                        scoreDetails.push('Pokemon match: +10000');
+                    // Debug: mostra anche l'image_url per le prime carte
+                    if (cards && cards.length > 0) {
+                        console.log('🔍 Image URLs delle prime 5 carte:');
+                        cards.slice(0, 5).forEach(card => {
+                            const hasImageUrl = card.card_variants && card.card_variants.length > 0 ? 'SÌ' : 'NO';
+                            const imageUrl = card.card_variants && card.card_variants.length > 0 ? card.card_variants[0].image_url : 'N/A';
+                            console.log(`  ${card.name_en} (${card.expansion_name_en}): ${hasImageUrl} - ${imageUrl}`);
+                        });
+                        
+                        // Conta quante carte hanno image_url
+                        const cardsWithImageUrl = cards.filter(card => card.card_variants && card.card_variants.length > 0).length;
+                        console.log(`🔍 Carte con image_url: ${cardsWithImageUrl}/${cards.length}`);
+                        
+                        // Cerca specificamente carte di Mew da V Star Universe
+                        const mewVStarUniverse = cards.filter(card => 
+                            card.name_en && 
+                            card.name_en.toLowerCase().includes('mew') && 
+                            card.expansion_name_en && 
+                            card.expansion_name_en.toLowerCase().includes('vstar universe')
+                        );
+                        console.log(`🔍 Carte Mew da V Star Universe trovate: ${mewVStarUniverse.length}`);
+                        if (mewVStarUniverse.length > 0) {
+                            mewVStarUniverse.forEach(card => {
+                                const imageUrl = card.card_variants && card.card_variants.length > 0 ? card.card_variants[0].image_url : 'NO IMAGE';
+                                console.log(`  🎯 Mew V Star Universe: ${card.name_en} - ${imageUrl}`);
+                            });
+                        }
                     }
                     
-                    // Bonus per espansione specifica
+                    // Bonus base per match Pokemon con controllo mew/mewtwo
+                    if (card.name_en && titleInfo.pokemonName) {
+                        const cardNameLower = card.name_en.toLowerCase();
+                        const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+                        
+                        let isMatch = false;
+                        
+                        // Controllo speciale per mew/mewtwo
+                        if (pokemonNameLower === 'mew') {
+                            // Per "mew", deve contenere "mew" ma NON "mewtwo"
+                            isMatch = cardNameLower.includes('mew') && !cardNameLower.includes('mewtwo');
+                        } else if (pokemonNameLower === 'mewtwo') {
+                            // Per "mewtwo", deve contenere "mewtwo"
+                            isMatch = cardNameLower.includes('mewtwo');
+                        } else {
+                            // Per altri Pokemon, controllo normale
+                            isMatch = cardNameLower.includes(pokemonNameLower);
+                        }
+                        
+                        if (isMatch) {
+                            score += 10000;
+                            scoreDetails.push('Pokemon match: +10000');
+                        }
+                    }
+                    
+                    // Bonus per espansione specifica - MIGLIORATO per gestire varianti di scrittura
                     if (titleInfo.expansion && card.expansion_name_en) {
                         const titleExpansion = titleInfo.expansion.toLowerCase();
                         const cardExpansion = card.expansion_name_en.toLowerCase();
                         
-                        // Match esatto per V Star Universe
-                        if (titleExpansion.includes('v star universe') && cardExpansion.includes('v star universe')) {
+                        console.log(`🔍 Confronto espansione: "${titleExpansion}" vs "${cardExpansion}"`);
+                        
+                        // Match esatto per V Star Universe (gestisce varianti di scrittura)
+                        if ((titleExpansion.includes('v star universe') || titleExpansion.includes('vstar universe')) && 
+                            (cardExpansion.includes('v star universe') || cardExpansion.includes('vstar universe'))) {
                             score += 50000;
                             scoreDetails.push('V Star Universe exact: +50000');
+                            console.log('🎯 Match V Star Universe trovato!');
                         }
                         // Match esatto per altre espansioni
                         else if (cardExpansion.includes(titleExpansion) || titleExpansion.includes(cardExpansion)) {
                             score += 40000;
                             scoreDetails.push('Expansion match: +40000');
                         }
-                        // Penalizzazione per espansione sbagliata
+                        // Match parziale per parole dell'espansione
                         else {
-                            score -= 30000;
-                            scoreDetails.push('Wrong expansion: -30000');
+                            const titleExpansionWords = titleExpansion.split(/\s+/);
+                            const cardExpansionWords = cardExpansion.split(/\s+/);
+                            
+                            let expansionMatchCount = 0;
+                            titleExpansionWords.forEach(word => {
+                                if (cardExpansionWords.some(cardWord => cardWord.includes(word) || word.includes(cardWord))) {
+                                    expansionMatchCount++;
+                                }
+                            });
+                            
+                            if (expansionMatchCount > 0) {
+                                const expansionBonus = expansionMatchCount * 15000;
+                                score += expansionBonus;
+                                scoreDetails.push(`Partial expansion match (${expansionMatchCount} words): +${expansionBonus}`);
+                                console.log(`🎯 Match parziale espansione: ${expansionMatchCount} parole -> +${expansionBonus}`);
+                            } else {
+                                score -= 10000; // Penalizzazione ridotta
+                                scoreDetails.push('Wrong expansion: -10000');
+                            }
                         }
                     }
                     
@@ -493,47 +722,56 @@
                         }
                     }
                     
-                    // BONUS per parole del titolo trovate nell'image_url finale
-                    if (card.image_url) {
-                        const imageUrlParts = card.image_url.split('/');
-                        const imageUrlFinal = imageUrlParts[imageUrlParts.length - 1].toLowerCase();
-                        
-                        console.log('🔍 ImageUrlFinal per', card.name_en, ':', imageUrlFinal);
-                        
-                        // Conta quante parole del titolo sono presenti nell'image_url finale
-                        let matchedWords = 0;
-                        let totalWords = titleWords.length;
-                        
-                        titleWords.forEach(word => {
-                            if (imageUrlFinal.includes(word)) {
-                                matchedWords++;
-                                let bonus = 0;
-                                
-                                // Bonus basato sull'importanza della parola
-                                if (['vmax', 'vstar', 'sl', 'tg'].includes(word)) {
-                                    bonus = 8000; // Bonus ALTO per parole importanti
-                                } else if (['ex', 'gx', 'v', 'shiny', 'promo'].includes(word)) {
-                                    bonus = 6000; // Bonus MEDIO per parole medie
-                                } else if (['star', 'universe', 'frontier', 'dragon', 'delta', 'species'].includes(word)) {
-                                    bonus = 5000; // Bonus MEDIO per parole di espansione
-                                } else if (['holo', 'rare'].includes(word)) {
-                                    bonus = 2000; // Bonus BASSO per parole generiche
+                    // BONUS per parole del titolo trovate nell'image_url finale - AGGIORNATO per card_variants
+                    if (card.card_variants && card.card_variants.length > 0) {
+                        // Prendi la prima variante (di solito quella inglese)
+                        const variant = card.card_variants[0];
+                        if (variant.image_url) {
+                            const imageUrlParts = variant.image_url.split('/');
+                            const imageUrlFinal = imageUrlParts[imageUrlParts.length - 1].toLowerCase();
+                            
+                            console.log(`🔍 ImageUrlFinal per ${card.name_en}:`, imageUrlFinal);
+                            
+                            // Debug: mostra tutte le keyword che stiamo cercando
+                            console.log(`🔍 Cercando keywords in image_url:`, titleWords);
+                            
+                            // Conta quante parole del titolo sono presenti nell'image_url finale
+                            let matchedWords = 0;
+                            let totalWords = titleWords.length;
+                            
+                            titleWords.forEach(word => {
+                                if (imageUrlFinal.includes(word)) {
+                                    matchedWords++;
+                                    let bonus = 0;
+                                    
+                                    // Bonus basato sull'importanza della parola
+                                    if (['vmax', 'vstar', 'sl', 'tg'].includes(word)) {
+                                        bonus = 8000; // Bonus ALTO per parole importanti
+                                    } else if (['ex', 'gx', 'v', 'shiny', 'promo'].includes(word)) {
+                                        bonus = 6000; // Bonus MEDIO per parole medie
+                                    } else if (['star', 'universe', 'frontier', 'dragon', 'delta', 'species'].includes(word)) {
+                                        bonus = 5000; // Bonus MEDIO per parole di espansione
+                                    } else if (['holo', 'rare'].includes(word)) {
+                                        bonus = 2000; // Bonus BASSO per parole generiche
+                                    } else {
+                                        bonus = 3000; // Bonus BASE per altre parole
+                                    }
+                                    
+                                    score += bonus;
+                                    scoreDetails.push(`Keyword "${word}" in image_url: +${bonus}`);
+                                    console.log(`🎯 Keyword "${word}" trovata in image_url -> +${bonus} punti`);
                                 } else {
-                                    bonus = 3000; // Bonus BASE per altre parole
+                                    console.log(`❌ Keyword "${word}" NON trovata in image_url: "${imageUrlFinal}"`);
                                 }
-                                
-                                score += bonus;
-                                scoreDetails.push(`Keyword "${word}" in image_url: +${bonus}`);
-                                console.log(`🎯 Keyword "${word}" trovata in image_url -> +${bonus} punti`);
-                            }
-                        });
-                        
-                        // Bonus extra per match multipli
-                        if (matchedWords > 0) {
-                            const matchPercentage = matchedWords / totalWords;
-                            if (matchPercentage >= 0.5) {
-                                score += 10000; // Bonus per match multipli
-                                scoreDetails.push(`Multiple keywords (${matchedWords}/${totalWords}): +10000`);
+                            });
+                            
+                            // Bonus extra per match multipli
+                            if (matchedWords > 0) {
+                                const matchPercentage = matchedWords / totalWords;
+                                if (matchPercentage >= 0.5) {
+                                    score += 10000; // Bonus per match multipli
+                                    scoreDetails.push(`Multiple keywords (${matchedWords}/${totalWords}): +10000`);
+                                }
                             }
                         }
                     }
@@ -556,12 +794,11 @@
                 if (validResults.length === 0) {
                     console.log('🔍 Nessun risultato valido con punteggio positivo, cercando senza filtri...');
                     
-                    // Ricerca più ampia senza filtri di espansione
+                    // Ricerca più ampia senza filtri di espansione - RIMOSSO LIMITE
                     const { data: fallbackCards, error: fallbackError } = await testSupabaseClient
                         .from('cards')
                         .select('*')
-                        .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                        .limit(20);
+                        .ilike('name_en', `%${titleInfo.pokemonName}%`);
                     
                     if (!fallbackError && fallbackCards && fallbackCards.length > 0) {
                         const fallbackResults = fallbackCards.map(card => ({
@@ -570,11 +807,37 @@
                             scoreDetails: ['Fallback search: +1000']
                         }));
                         
-                        return fallbackResults.slice(0, 5);
+                        // Rimuovi duplicati basati su blueprint univoco per fallback
+                        const uniqueFallbackResults = [];
+                        const seenFallbackBlueprints = new Set();
+                        
+                        fallbackResults.forEach(result => {
+                            const blueprint = `${result.collector_number}-${result.expansion_name_en}`;
+                            if (!seenFallbackBlueprints.has(blueprint)) {
+                                seenFallbackBlueprints.add(blueprint);
+                                uniqueFallbackResults.push(result);
+                            }
+                        });
+                        
+                        console.log(`🔍 Fallback unici trovati: ${uniqueFallbackResults.length} (da ${fallbackResults.length} totali)`);
+                        return uniqueFallbackResults;
                     }
                 }
                 
-                return validResults.slice(0, 5);
+                // Rimuovi duplicati basati su blueprint univoco per risultati principali
+                const uniqueResults = [];
+                const seenBlueprints = new Set();
+                
+                validResults.forEach(result => {
+                    const blueprint = `${result.collector_number}-${result.expansion_name_en}`;
+                    if (!seenBlueprints.has(blueprint)) {
+                        seenBlueprints.add(blueprint);
+                        uniqueResults.push(result);
+                    }
+                });
+                
+                console.log(`🔍 Risultati unici trovati: ${uniqueResults.length} (da ${validResults.length} totali)`);
+                return uniqueResults;
                 
             } catch (error) {
                 console.error('❌ Errore nella ricerca database:', error);
@@ -603,20 +866,60 @@
             resultDiv.textContent = 'Ricercando...';
             
             try {
-                const { data: cards, error } = await testSupabaseClient
+                // Prima testiamo la struttura della tabella
+                const { data: sampleCard, error: sampleError } = await testSupabaseClient
                     .from('cards')
                     .select('*')
-                    .ilike('name_en', `%${searchTerm}%`)
-                    .limit(10);
+                    .limit(1);
+                
+                if (sampleError) {
+                    throw sampleError;
+                }
+                
+                if (sampleCard && sampleCard.length > 0) {
+                    console.log('🔍 Struttura tabella cards:', Object.keys(sampleCard[0]));
+                    console.log('🔍 Esempio carta:', sampleCard[0]);
+                }
+                
+                const { data: cards, error } = await testSupabaseClient
+                    .from('cards')
+                    .select(`
+                        *,
+                        card_variants(
+                            image_url,
+                            collector_number,
+                            language
+                        )
+                    `)
+                    .ilike('name_en', `%${searchTerm}%`);
                 
                 if (error) {
                     throw error;
                 }
                 
                 resultDiv.className = 'result success';
-                resultDiv.innerHTML = `✅ Trovate ${cards.length} carte per "${searchTerm}":\n\n` + 
+                
+                // Conta quante carte hanno image_url
+                const cardsWithImageUrl = cards.filter(card => card.card_variants && card.card_variants.length > 0).length;
+                const cardsWithImageUrlPercent = ((cardsWithImageUrl / cards.length) * 100).toFixed(1);
+                
+                // Cerca specificamente carte di Mew da V Star Universe
+                const mewVStarUniverse = cards.filter(card => 
+                    card.name_en && 
+                    card.name_en.toLowerCase().includes('mew') && 
+                    card.expansion_name_en && 
+                    card.expansion_name_en.toLowerCase().includes('vstar universe')
+                );
+                
+                resultDiv.innerHTML = `✅ Trovate ${cards.length} carte per "${searchTerm}":\n\n` +
+                    `📊 Statistiche image_url:\n` +
+                    `- Carte con image_url: ${cardsWithImageUrl}/${cards.length} (${cardsWithImageUrlPercent}%)\n\n` +
+                    `🎯 Carte Mew da V Star Universe: ${mewVStarUniverse.length}\n` +
+                    (mewVStarUniverse.length > 0 ? mewVStarUniverse.map(card => 
+                        `  📄 ${card.name_en} - ${card.card_variants && card.card_variants.length > 0 ? '✅' : '❌'}`
+                    ).join('\n') + '\n\n' : '') +
                     cards.map(card => 
-                        `📄 ${card.name_en} (${card.expansion_name_en || 'N/A'})`
+                        `📄 ${card.name_en} (${card.expansion_name_en || 'N/A'})${card.card_variants && card.card_variants.length > 0 ? ' ✅' : ' ❌'}`
                     ).join('\n');
             } catch (error) {
                 resultDiv.className = 'result error';
@@ -645,12 +948,32 @@
             resultDiv.textContent = 'Eseguendo matching completo...';
             
             try {
-                const titleInfo = extractTitleInfo(title);
+                const titleInfo = await extractTitleInfo(title);
+                
+                // Estrai le keyword dal titolo per mostrarle
+                const titleWords = title.toLowerCase().split(/\s+/).filter(word => 
+                    word.length > 2 && 
+                    !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon', 'tcg'].includes(word) &&
+                    word !== titleInfo.pokemonName &&
+                    word !== titleInfo.pokemonName + 's'
+                );
+                
+                // Aggiungi anche le parole dell'espansione se presente
+                if (titleInfo.expansion) {
+                    const expansionWords = titleInfo.expansion.toLowerCase().split(/\s+/);
+                    expansionWords.forEach(word => {
+                        if (word.length > 2 && !titleWords.includes(word)) {
+                            titleWords.push(word);
+                        }
+                    });
+                }
+                
                 const results = await searchCardInDatabase(titleInfo, title);
                 
                 resultDiv.className = 'result success';
                 resultDiv.innerHTML = `✅ Matching completato per "${title}":\n\n` +
                     `📊 Informazioni estratte:\n${JSON.stringify(titleInfo, null, 2)}\n\n` +
+                    `🔍 Keywords estratte dal titolo: [${titleWords.join(', ')}]\n\n` +
                     `🎯 Risultati trovati: ${results.length}\n\n` +
                     results.slice(0, 5).map((result, index) => 
                         `<div class="card-result">
@@ -692,7 +1015,7 @@
             for (const title of testTitles) {
                 const titleStart = performance.now();
                 try {
-                    const titleInfo = extractTitleInfo(title);
+                    const titleInfo = await extractTitleInfo(title);
                     const searchResults = await searchCardInDatabase(titleInfo, title);
                     const titleEnd = performance.now();
                     
@@ -732,6 +1055,141 @@
                 ).join('\n');
         }
 
+        // Trova Pokemon con nomi simili
+        async function findSimilarPokemon() {
+            const resultDiv = document.getElementById('similar-pokemon-result');
+            resultDiv.className = 'result info';
+            resultDiv.textContent = 'Cercando Pokemon con nomi simili...';
+            
+            if (!testSupabaseClient) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Supabase non inizializzato. Esegui prima il test di connessione.';
+                return;
+            }
+            
+            try {
+                // Ottieni tutti i nomi Pokemon dal database
+                const { data: allPokemon, error } = await testSupabaseClient
+                    .from('cards')
+                    .select('name_en')
+                    .not('name_en', 'is', null);
+                
+                if (error) {
+                    throw error;
+                }
+                
+                // Estrai nomi unici
+                const uniqueNames = [...new Set(allPokemon.map(p => p.name_en))];
+                
+                // Trova coppie di Pokemon con nomi simili
+                const similarPairs = [];
+                const processedPairs = new Set();
+                
+                for (let i = 0; i < uniqueNames.length; i++) {
+                    for (let j = i + 1; j < uniqueNames.length; j++) {
+                        const name1 = uniqueNames[i].toLowerCase();
+                        const name2 = uniqueNames[j].toLowerCase();
+                        
+                        // Evita di processare la stessa coppia due volte
+                        const pairKey = [name1, name2].sort().join('|');
+                        if (processedPairs.has(pairKey)) continue;
+                        processedPairs.add(pairKey);
+                        
+                        // Criteri per identificare nomi simili
+                        let similarity = 0;
+                        let reason = '';
+                        
+                        // 1. Uno è contenuto nell'altro (es: mew in mewtwo)
+                        if (name1.includes(name2) || name2.includes(name1)) {
+                            similarity = 100;
+                            reason = 'contenuto';
+                        }
+                        // 2. Differiscono per una lettera (es: pikachu vs pikachu)
+                        else if (Math.abs(name1.length - name2.length) <= 1) {
+                            const longer = name1.length > name2.length ? name1 : name2;
+                            const shorter = name1.length > name2.length ? name2 : name1;
+                            
+                            let differences = 0;
+                            for (let k = 0; k < shorter.length; k++) {
+                                if (longer[k] !== shorter[k]) differences++;
+                            }
+                            differences += Math.abs(longer.length - shorter.length);
+                            
+                            if (differences <= 2) {
+                                similarity = 80;
+                                reason = 'simile';
+                            }
+                        }
+                        // 3. Hanno la stessa radice (es: charizard, charmeleon, charmander)
+                        else if (name1.length > 4 && name2.length > 4) {
+                            const commonPrefix = getCommonPrefix(name1, name2);
+                            if (commonPrefix.length >= Math.min(name1.length, name2.length) * 0.6) {
+                                similarity = 60;
+                                reason = 'radice comune';
+                            }
+                        }
+                        
+                        if (similarity > 0) {
+                            similarPairs.push({
+                                name1: uniqueNames[i],
+                                name2: uniqueNames[j],
+                                similarity,
+                                reason
+                            });
+                        }
+                    }
+                }
+                
+                // Ordina per similarità
+                similarPairs.sort((a, b) => b.similarity - a.similarity);
+                
+                // Raggruppa per tipo di similarità
+                const grouped = {
+                    contenuto: similarPairs.filter(p => p.reason === 'contenuto'),
+                    simile: similarPairs.filter(p => p.reason === 'simile'),
+                    radice: similarPairs.filter(p => p.reason === 'radice comune')
+                };
+                
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `🔍 Pokemon con Nomi Simili Trovati:\n\n` +
+                    `📊 Statistiche:\n` +
+                    `- Pokemon totali nel database: ${uniqueNames.length}\n` +
+                    `- Coppie simili trovate: ${similarPairs.length}\n\n` +
+                    `🎯 Per Contenuto (${grouped.contenuto.length}):\n` +
+                    grouped.contenuto.slice(0, 10).map(p => 
+                        `  ⚠️ "${p.name1}" vs "${p.name2}" (${p.similarity}%)`
+                    ).join('\n') + '\n\n' +
+                    `🎯 Simili (${grouped.simile.length}):\n` +
+                    grouped.simile.slice(0, 10).map(p => 
+                        `  ⚠️ "${p.name1}" vs "${p.name2}" (${p.similarity}%)`
+                    ).join('\n') + '\n\n' +
+                    `🎯 Con Radice Comune (${grouped.radice.length}):\n` +
+                    grouped.radice.slice(0, 10).map(p => 
+                        `  ⚠️ "${p.name1}" vs "${p.name2}" (${p.similarity}%)`
+                    ).join('\n');
+                
+            } catch (error) {
+                resultDiv.className = 'result error';
+                resultDiv.textContent = '❌ Errore nella ricerca: ' + error.message;
+            }
+        }
+        
+        // Funzione helper per trovare il prefisso comune
+        function getCommonPrefix(str1, str2) {
+            let prefix = '';
+            const minLength = Math.min(str1.length, str2.length);
+            
+            for (let i = 0; i < minLength; i++) {
+                if (str1[i] === str2[i]) {
+                    prefix += str1[i];
+                } else {
+                    break;
+                }
+            }
+            
+            return prefix;
+        }
+
         // Inizializza quando la pagina è caricata
         document.addEventListener('DOMContentLoaded', function() {
             console.log('🧪 Test Database inizializzato');
@@ -745,6 +1203,7 @@
         window.testDatabaseSearch = testDatabaseSearch;
         window.testCompleteMatching = testCompleteMatching;
         window.testPerformance = testPerformance;
+        window.findSimilarPokemon = findSimilarPokemon;
     </script>
 </body>
 </html> 
