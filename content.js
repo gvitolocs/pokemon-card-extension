@@ -1329,6 +1329,19 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
             }
             
+            // PRIORITÀ 0: Se il titolo contiene un numero collezionista, solo le carte con lo stesso collector_number sono valide
+            if (titleInfo.collectorNumber) {
+                const titleNumber = titleInfo.collectorNumber.toString().replace(/\s+/g, '').toLowerCase();
+                const cardNumber = (result.collector_number || '').replace(/\s+/g, '').toLowerCase();
+                if (titleNumber !== cardNumber) {
+                    score -= 100000;
+                    console.log(`❌ [CardTrader] Collector number richiesto "${titleNumber}" ma la carta ha "${cardNumber}": penalità -100000 punti`);
+                } else {
+                    score += 50000;
+                    console.log(`🎯 [CardTrader] Collector number esatto: ${titleNumber} = ${cardNumber} -> +50000 punti`);
+                }
+            }
+            
             return { result, score };
         });
         
