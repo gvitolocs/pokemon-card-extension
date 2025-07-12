@@ -128,17 +128,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const score = calculateScore(result, titleInfo);
             const scoreClass = score >= 1500 ? 'score-perfect' : score >= 1000 ? 'score-good' : 'score-low';
             const scoreText = score >= 1500 ? 'Perfetto' : score >= 1000 ? 'Buono' : 'Basso';
-            
+            let extra = '';
+            if (result.collector_number) extra += ` (#${result.collector_number})`;
+            if (result.expansion_code) extra += ` [${result.expansion_code}]`;
             html += `
                 <div class="result-item">
                     <a href="${generateCardTraderLink(result.blueprint_id)}" target="_blank" class="result-link">
-                        #${index + 1} ${result.name_en || result.pokemon_name || 'N/A'}
+                        #${index + 1} ${result.name_en || result.pokemon_name || 'N/A'}${extra}
                         <span class="score-badge ${scoreClass}">${scoreText}</span>
                     </a>
                     <div class="card-info">
-                        ${result.expansion_name_en || result.expansion_name || 'N/A'} • 
-                        ${result.collector_number || 'N/A'} • 
-                        ${result.image_url ? '🖼️' : '❌'}
+                        ${result.expansion_name_en || result.expansion_name || 'N/A'}
+                        ${result.collector_number ? '• #' + result.collector_number : ''}
+                        ${result.expansion_code ? '• [' + result.expansion_code + ']' : ''}
+                        • ${result.image_url ? '🖼️' : '❌'}
                     </div>
                 </div>
             `;
