@@ -1021,25 +1021,75 @@ function extractTitleInfo(title) {
             if (standardMatch) {
                 collectorNumber = standardMatch[1];
             } else {
-                            // Cerca pattern come "SV67", "sv67", "SV 67"
-            const svMatch = title.match(/(?:sv|sv\s+)(\d+)/i);
-            if (svMatch) {
-                collectorNumber = `sv${svMatch[1]}`;
-                console.log(`🔍 [CardTrader] Trovato pattern SV: ${collectorNumber} da ${svMatch[0]}`);
-            } else {
-                // Cerca pattern come "XY 156", "xy156", "XY156"
-                const xyMatch = title.match(/(?:xy|xy\s+)(\d+)/i);
-                if (xyMatch) {
-                    collectorNumber = `xy${xyMatch[1]}`;
+                // Cerca pattern come "SV67", "sv67", "SV 67" (Scarlet & Violet)
+                const svMatch = title.match(/(?:sv|sv\s+)(\d+)/i);
+                if (svMatch) {
+                    collectorNumber = `sv${svMatch[1]}`;
+                    console.log(`🔍 [CardTrader] Trovato pattern SV: ${collectorNumber} da ${svMatch[0]}`);
                 } else {
-                    // Cerca solo numeri isolati (ma non anni come 2016)
-                    const numberMatch = title.match(/\b(?!2016|2015|2014|2013|2012|2011|2010|2009|2008|2007|2006|2005|2004|2003|2002|2001|2000|1999)(\d{1,4})\b/);
-                    if (numberMatch) {
-                        collectorNumber = numberMatch[1];
-                        console.log(`🔍 [CardTrader] Trovato numero collezionista: ${collectorNumber}`);
+                    // Cerca pattern come "XY 156", "xy156", "XY156" (XY Series)
+                    const xyMatch = title.match(/(?:xy|xy\s+)(\d+)/i);
+                    if (xyMatch) {
+                        collectorNumber = `xy${xyMatch[1]}`;
+                        console.log(`🔍 [CardTrader] Trovato pattern XY: ${collectorNumber} da ${xyMatch[0]}`);
+                    } else {
+                        // Cerca pattern come "DP 156", "dp156", "DP156" (Diamond & Pearl)
+                        const dpMatch = title.match(/(?:dp|dp\s+)(\d+)/i);
+                        if (dpMatch) {
+                            collectorNumber = `dp${dpMatch[1]}`;
+                            console.log(`🔍 [CardTrader] Trovato pattern DP: ${collectorNumber} da ${dpMatch[0]}`);
+                        } else {
+                            // Cerca pattern come "BW 156", "bw156", "BW156" (Black & White)
+                            const bwMatch = title.match(/(?:bw|bw\s+)(\d+)/i);
+                            if (bwMatch) {
+                                collectorNumber = `bw${bwMatch[1]}`;
+                                console.log(`🔍 [CardTrader] Trovato pattern BW: ${collectorNumber} da ${bwMatch[0]}`);
+                            } else {
+                                // Cerca pattern come "SM 156", "sm156", "SM156" (Sun & Moon)
+                                const smMatch = title.match(/(?:sm|sm\s+)(\d+)/i);
+                                if (smMatch) {
+                                    collectorNumber = `sm${smMatch[1]}`;
+                                    console.log(`🔍 [CardTrader] Trovato pattern SM: ${collectorNumber} da ${smMatch[0]}`);
+                                } else {
+                                    // Cerca pattern come "SS 156", "ss156", "SS156" (Sword & Shield)
+                                    const ssMatch = title.match(/(?:ss|ss\s+)(\d+)/i);
+                                    if (ssMatch) {
+                                        collectorNumber = `ss${ssMatch[1]}`;
+                                        console.log(`🔍 [CardTrader] Trovato pattern SS: ${collectorNumber} da ${ssMatch[0]}`);
+                                    } else {
+                                        // Cerca pattern come "PR 156", "pr156", "PR156" (Promo)
+                                        const prMatch = title.match(/(?:pr|pr\s+)(\d+)/i);
+                                        if (prMatch) {
+                                            collectorNumber = `pr${prMatch[1]}`;
+                                            console.log(`🔍 [CardTrader] Trovato pattern PR: ${collectorNumber} da ${prMatch[0]}`);
+                                        } else {
+                                            // Cerca pattern come "BS 156", "bs156", "BS156" (Black Star Promo)
+                                            const bsMatch = title.match(/(?:bs|bs\s+)(\d+)/i);
+                                            if (bsMatch) {
+                                                collectorNumber = `bs${bsMatch[1]}`;
+                                                console.log(`🔍 [CardTrader] Trovato pattern BS: ${collectorNumber} da ${bsMatch[0]}`);
+                                            } else {
+                                                // Cerca pattern come "H 156", "h156", "H156" (Holo)
+                                                const hMatch = title.match(/(?:h|h\s+)(\d+)/i);
+                                                if (hMatch) {
+                                                    collectorNumber = `h${hMatch[1]}`;
+                                                    console.log(`🔍 [CardTrader] Trovato pattern H: ${collectorNumber} da ${hMatch[0]}`);
+                                                } else {
+                                                    // Cerca solo numeri isolati (ma non anni come 2016)
+                                                    const numberMatch = title.match(/\b(?!2016|2015|2014|2013|2012|2011|2010|2009|2008|2007|2006|2005|2004|2003|2002|2001|2000|1999)(\d{1,4})\b/);
+                                                    if (numberMatch) {
+                                                        collectorNumber = numberMatch[1];
+                                                        console.log(`🔍 [CardTrader] Trovato numero collezionista: ${collectorNumber}`);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
-            }
             }
         }
     }
@@ -1709,6 +1759,55 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         numberFound = true;
                         matchType = imageUrlLower.includes(collectorNumberStr) ? 'XY completo' : 'Solo numero';
                     }
+                } else if (collectorNumberStr.startsWith('dp')) {
+                    // Per pattern DP, cerca sia "dp156" che solo "156"
+                    const dpNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(dpNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'DP completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('bw')) {
+                    // Per pattern BW, cerca sia "bw156" che solo "156"
+                    const bwNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(bwNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'BW completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('sm')) {
+                    // Per pattern SM, cerca sia "sm156" che solo "156"
+                    const smNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(smNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'SM completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('ss')) {
+                    // Per pattern SS, cerca sia "ss156" che solo "156"
+                    const ssNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(ssNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'SS completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('pr')) {
+                    // Per pattern PR, cerca sia "pr156" che solo "156"
+                    const prNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(prNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'PR completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('bs')) {
+                    // Per pattern BS, cerca sia "bs156" che solo "156"
+                    const bsNumber = collectorNumberStr.substring(2);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(bsNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'BS completo' : 'Solo numero';
+                    }
+                } else if (collectorNumberStr.startsWith('h')) {
+                    // Per pattern H, cerca sia "h156" che solo "156"
+                    const hNumber = collectorNumberStr.substring(1);
+                    if (imageUrlLower.includes(collectorNumberStr) || imageUrlLower.includes(hNumber)) {
+                        numberFound = true;
+                        matchType = imageUrlLower.includes(collectorNumberStr) ? 'H completo' : 'Solo numero';
+                    }
                 } else if (collectorNumberStr.startsWith('tg') || collectorNumberStr.startsWith('sl')) {
                     // Per pattern TG/SL, cerca sia "tg16" che solo "16"
                     const tgSlNumber = collectorNumberStr.substring(2);
@@ -1730,7 +1829,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     console.log(`🎯 [CardTrader] MATCH NUMERO ${collectorNumberStr}: "${result.image_url}" -> +1000 punti (${matchType})`);
                     
                     // Bonus extra se il numero è isolato (non parte di altri numeri)
-                    const numberPattern = new RegExp(`\\b${collectorNumberStr.replace(/^(sv|xy|tg|sl)/, '')}\\b`);
+                    const numberPattern = new RegExp(`\\b${collectorNumberStr.replace(/^(sv|xy|dp|bw|sm|ss|pr|bs|h|tg|sl)/, '')}\\b`);
                     if (numberPattern.test(imageUrlLower)) {
                         score += 200; // Bonus per numero isolato
                         reason += `Numero ${collectorNumberStr} isolato nell\'URL `;
