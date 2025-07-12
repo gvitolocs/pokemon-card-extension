@@ -1649,22 +1649,9 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             score += expansionScore;
             reason += expansionReason;
             
-            // PRIORITÀ 1.5: Trainer Name (ALTA PRIORITÀ quando presente nel titolo)
-            if (titleInfo.trainerName && result.image_url) {
-                const imageUrlLower = result.image_url.toLowerCase();
-                const trainerNameLower = titleInfo.trainerName.toLowerCase();
-                
-                console.log(`🔍 [CardTrader] Controllando trainer: "${trainerNameLower}" in URL: "${imageUrlLower}"`);
-                
-                if (imageUrlLower.includes(trainerNameLower)) {
-                    score += 800; // Bonus molto alto per trainer name presente
-                    reason += `Trainer ${titleInfo.trainerName} nell\'URL CORRETTO `;
-                    console.log(`🎯 [CardTrader] MATCH TRAINER: "${titleInfo.trainerName}" in "${result.image_url}" -> +800 punti`);
-                } else {
-                    score -= 600; // Penalità severa se il trainer name non è nell'URL
-                    reason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nell\'URL `;
-                    console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato in: "${result.image_url}" -> -600 punti`);
-                }
+            // PRIORITÀ 1.5: Trainer Name (gestito nella validazione obbligatoria)
+            if (titleInfo.trainerName) {
+                console.log(`🔍 [CardTrader] Trainer rilevato: "${titleInfo.trainerName}" - sarà validato nell'URL`);
             }
             
             // PRIORITÀ 2: Nome del Pokemon (peso massimo)
@@ -1951,6 +1938,19 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     validationScore += 300; // Bonus alto per Holo presente
                     validationReason += 'Holo nell\'URL CORRETTO ';
                     console.log(`🎯 [CardTrader] Holo trovato in: "${result.image_url}" -> +300 punti`);
+                }
+                
+                // Validazione OBBLIGATORIA per Trainer Name
+                if (titleInfo.trainerName && !imageUrlLower.includes(titleInfo.trainerName.toLowerCase())) {
+                    validationScore -= 800; // Penalità MASSIMA per trainer name mancante
+                    validationReason += `Trainer ${titleInfo.trainerName} richiesto ma mancante nell\'URL `;
+                    console.log(`❌ [CardTrader] Trainer ${titleInfo.trainerName} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
+                }
+                
+                if (titleInfo.trainerName && imageUrlLower.includes(titleInfo.trainerName.toLowerCase())) {
+                    validationScore += 500; // Bonus MASSIMO per trainer name presente
+                    validationReason += `Trainer ${titleInfo.trainerName} nell\'URL CORRETTO `;
+                    console.log(`🎯 [CardTrader] Trainer ${titleInfo.trainerName} trovato in: "${result.image_url}" -> +500 punti`);
                 }
                 
                 score += validationScore;
