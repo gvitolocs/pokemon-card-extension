@@ -2303,8 +2303,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     }
                 }
                 
-                // BONUS per espansioni nell'image_url (solo se abbiamo già un buon match)
-                if (result.image_url && originalTitle) {
+                // BONUS per espansioni nell'image_url (solo se abbiamo già un buon match E l'espansione è specifica)
+                if (result.image_url && originalTitle && titleInfo.expansion) {
                     const imageUrl = result.image_url.toLowerCase();
                     const titleLower = originalTitle.toLowerCase();
                     
@@ -2318,35 +2318,48 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     
                     console.log(`🎯 [CardTrader] Parole rilevanti trovate nel titolo: [${relevantWords.join(', ')}]`);
                     
-                    // Conta quante parole rilevanti sono presenti nell'image_url
-                    let matchedWords = 0;
-                    let totalWords = relevantWords.length;
+                    // CONTROLLO RIGOROSO: Verifica che l'espansione sia effettivamente presente nell'image_url
+                    const titleExpansion = titleInfo.expansion.toLowerCase();
+                    const hasExpansionInImageUrl = imageUrl.includes(titleExpansion.replace(/\s+/g, '-')) || 
+                                                  imageUrl.includes(titleExpansion.replace(/\s+/g, '_')) ||
+                                                  imageUrl.includes(titleExpansion);
                     
-                    relevantWords.forEach(word => {
-                        if (imageUrl.includes(word)) {
-                            matchedWords++;
-                            console.log(`🎯 [CardTrader] PAROLA RILEVANTE MATCHATA: "${word}" in image_url -> +1 match`);
-                        }
-                    });
-                    
-                    // Calcola bonus basato sul numero di parole matchate
-                    if (matchedWords > 0) {
-                        const matchPercentage = matchedWords / totalWords;
-                        let bonus = 0;
+                    if (!hasExpansionInImageUrl) {
+                        console.log(`🚫 [CardTrader] Espansione "${titleExpansion}" NON trovata nell'image_url, saltando bonus parole rilevanti`);
+                    } else {
+                        console.log(`✅ [CardTrader] Espansione "${titleExpansion}" trovata nell'image_url, procedendo con bonus parole rilevanti`);
                         
-                        if (matchPercentage >= 0.8) { // 80% o più delle parole
-                            bonus = 50000; // Bonus MASSIMO
-                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ASSOLUTA)`);
-                        } else if (matchPercentage >= 0.5) { // 50% o più delle parole
-                            bonus = 35000; // Bonus ALTO
-                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ALTA)`);
-                        } else { // Almeno una parola
-                            bonus = 25000; // Bonus MEDIO
-                            console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ MEDIA)`);
-                        }
+                        // Conta quante parole rilevanti sono presenti nell'image_url
+                        let matchedWords = 0;
+                        let totalWords = relevantWords.length;
                         
-                        nameScore += bonus;
+                        relevantWords.forEach(word => {
+                            if (imageUrl.includes(word)) {
+                                matchedWords++;
+                                console.log(`🎯 [CardTrader] PAROLA RILEVANTE MATCHATA: "${word}" in image_url -> +1 match`);
+                            }
+                        });
+                        
+                        // Calcola bonus basato sul numero di parole matchate
+                        if (matchedWords > 0) {
+                            const matchPercentage = matchedWords / totalWords;
+                            let bonus = 0;
+                            
+                            if (matchPercentage >= 0.8) { // 80% o più delle parole
+                                bonus = 50000; // Bonus MASSIMO
+                                console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ASSOLUTA)`);
+                            } else if (matchPercentage >= 0.5) { // 50% o più delle parole
+                                bonus = 35000; // Bonus ALTO
+                                console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ ALTA)`);
+                            } else { // Almeno una parola
+                                bonus = 25000; // Bonus MEDIO
+                                console.log(`🎯 [CardTrader] ${matchedWords}/${totalWords} PAROLE RILEVANTI MATCHATE (${(matchPercentage*100).toFixed(0)}%) -> +${bonus} punti (PRIORITÀ MEDIA)`);
+                            }
+                            
+                            nameScore += bonus;
+                        }
                     }
+                }
                     
                     // BONUS SPECIFICO per espansioni nell'image_url (mantenuto per compatibilità)
                     const expansionKeywords = [
