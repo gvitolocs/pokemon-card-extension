@@ -724,9 +724,9 @@ function patchVintedProductPage() {
 function extractTitleInfo(title) {
     const titleLower = title.toLowerCase();
     
-    // Lista completa di Pokemon (tutti i Pokemon principali)
+    // Lista completa di tutti i Pokemon (Generazioni 1-9)
     const pokemonNames = [
-        // Generazione 1 (Kanto)
+        // Generazione 1 (Kanto) - 151 Pokemon
         'bulbasaur', 'ivysaur', 'venusaur', 'charmander', 'charmeleon', 'charizard',
         'squirtle', 'wartortle', 'blastoise', 'caterpie', 'metapod', 'butterfree',
         'weedle', 'kakuna', 'beedrill', 'pidgey', 'pidgeotto', 'pidgeot',
@@ -743,22 +743,23 @@ function extractTitleInfo(title) {
         'farfetch\'d', 'doduo', 'dodrio', 'seel', 'dewgong', 'grimer', 'muk',
         'shellder', 'cloyster', 'gastly', 'haunter', 'gengar', 'drowzee', 'hypno',
         'krabby', 'kingler', 'voltorb', 'electrode', 'exeggcute', 'exeggutor',
-        'cubone', 'marowak', 'hitmonlee', 'hitmonchan', 'lickitung', 'koffing', 'weezing',
-        'rhyhorn', 'rhydon', 'chansey', 'tangela', 'kangaskhan', 'horsea', 'seadra',
-        'goldeen', 'seaking', 'staryu', 'starmie', 'mr. mime', 'scyther', 'jynx',
-        'electabuzz', 'magmar', 'pinsir', 'tauros', 'magikarp', 'gyarados',
-        'lapras', 'ditto', 'vaporeon', 'jolteon', 'flareon', 'omanyte', 'omastar',
-        'kabuto', 'kabutops', 'aerodactyl', 'snorlax', 'articuno', 'zapdos', 'moltres',
-        'dratini', 'dragonair', 'dragonite', 'mewtwo', 'mew',
+        'cubone', 'marowak', 'tyrogue', 'hitmonlee', 'hitmonchan', 'hitmontop', 'lickitung',
+        'koffing', 'weezing', 'rhyhorn', 'rhydon', 'chansey', 'tangela',
+        'kangaskhan', 'horsea', 'seadra', 'goldeen', 'seaking', 'staryu', 'starmie',
+        'mime jr.', 'mr. mime', 'scyther', 'smoochum', 'jynx', 'elekid', 'electabuzz',
+        'magby', 'magmar', 'pinsir', 'tauros', 'magikarp', 'gyarados',
+        'lapras', 'ditto', 'vaporeon', 'jolteon', 'flareon', 'espeon', 'umbreon', 'leafeon', 'glaceon', 'sylveon',
+        'omanyte', 'omastar', 'kabuto', 'kabutops', 'aerodactyl', 'munchlax', 'snorlax',
+        'articuno', 'zapdos', 'moltres', 'dratini', 'dragonair', 'dragonite',
+        'mewtwo', 'mew',
         
-        // Generazione 2 (Johto)
+        // Generazione 2 (Johto) - 100 Pokemon
         'chikorita', 'bayleef', 'meganium', 'cyndaquil', 'quilava', 'typhlosion',
         'totodile', 'croconaw', 'feraligatr', 'sentret', 'furret', 'hoothoot', 'noctowl',
-        'ledyba', 'ledian', 'spinarak', 'ariados', 'crobat', 'chinchou', 'lanturn',
-        'pichu', 'cleffa', 'igglybuff', 'togepi', 'togetic', 'natu', 'xatu',
-        'mareep', 'flaaffy', 'ampharos', 'bellossom', 'marill', 'azumarill',
-        'sudowoodo', 'politoed', 'hoppip', 'skiploom', 'jumpluff', 'aipom',
-        'sunkern', 'sunflora', 'yanma', 'wooper', 'quagsire', 'espeon', 'umbreon',
+        'ledyba', 'ledian', 'spinarak', 'ariados', 'chinchou', 'lanturn',
+        'togepi', 'togetic', 'togekiss', 'natu', 'xatu', 'mareep', 'flaaffy', 'ampharos',
+        'azurill', 'marill', 'azumarill', 'sudowoodo', 'hoppip', 'skiploom', 'jumpluff',
+        'aipom', 'sunkern', 'sunflora', 'yanma', 'wooper', 'quagsire',
         'murkrow', 'slowking', 'misdreavus', 'unown', 'wobbuffet', 'girafarig',
         'pineco', 'forretress', 'dunsparce', 'gligar', 'steelix', 'snubbull', 'granbull',
         'qwilfish', 'scizor', 'shuckle', 'heracross', 'sneasel', 'teddiursa', 'ursaring',
@@ -768,46 +769,45 @@ function extractTitleInfo(title) {
         'smoochum', 'elekid', 'magby', 'miltank', 'blissey', 'raikou', 'entei', 'suicune',
         'larvitar', 'pupitar', 'tyranitar', 'lugia', 'ho-oh', 'celebi',
         
-        // Generazione 3 (Hoenn)
+        // Generazione 3 (Hoenn) - 135 Pokemon
         'treecko', 'grovyle', 'sceptile', 'torchic', 'combusken', 'blaziken',
         'mudkip', 'marshtomp', 'swampert', 'poochyena', 'mightyena', 'zigzagoon', 'linoone',
         'wurmple', 'silcoon', 'beautifly', 'cascoon', 'dustox', 'lotad', 'lombre', 'ludicolo',
         'seedot', 'nuzleaf', 'shiftry', 'taillow', 'swellow', 'wingull', 'pelipper',
-        'ralts', 'kirlia', 'gardevoir', 'surskit', 'masquerain', 'shroomish', 'breloom',
+        'ralts', 'kirlia', 'gardevoir', 'gallade', 'surskit', 'masquerain', 'shroomish', 'breloom',
         'slakoth', 'vigoroth', 'slaking', 'nincada', 'ninjask', 'shedinja',
-        'whismur', 'loudred', 'exploud', 'makuhita', 'hariyama', 'azurill', 'nosepass',
+        'whismur', 'loudred', 'exploud', 'makuhita', 'hariyama', 'azurill', 'nosepass', 'probopass',
         'skitty', 'delcatty', 'sableye', 'mawile', 'aron', 'lairon', 'aggron',
-        'meditite', 'medicham', 'electrike', 'manectric', 'plusle', 'minun',
-        'volbeat', 'illumise', 'roselia', 'gulpin', 'swalot', 'carvanha', 'sharpedo',
-        'wailmer', 'wailord', 'numel', 'camerupt', 'torkoal', 'spoink', 'grumpig',
-        'spinda', 'trapinch', 'vibrava', 'flygon', 'cacnea', 'cacturne', 'swablu', 'altaria',
-        'zangoose', 'seviper', 'lunatone', 'solrock', 'barboach', 'whiscash', 'corphish', 'crawdaunt',
-        'baltoy', 'claydol', 'lileep', 'cradily', 'anorith', 'armaldo', 'feebas', 'milotic',
-        'castform', 'kecleon', 'shuppet', 'banette', 'duskull', 'dusclops', 'tropius',
-        'chimecho', 'absol', 'wynaut', 'snorunt', 'glalie', 'spheal', 'sealeo', 'walrein',
-        'clamperl', 'huntail', 'gorebyss', 'relicanth', 'luvdisc', 'bagon', 'shelgon', 'salamence',
-        'beldum', 'metang', 'metagross', 'regirock', 'regice', 'registeel', 'latias', 'latios',
-        'kyogre', 'groudon', 'rayquaza', 'jirachi', 'deoxys',
+        'meditite', 'medicham', 'electrike', 'manectric', 'plusle', 'minun', 'volbeat', 'illumise',
+        'roselia', 'gulpin', 'swalot', 'carvanha', 'sharpedo', 'wailmer', 'wailord',
+        'numel', 'camerupt', 'torkoal', 'spoink', 'grumpig', 'spinda', 'trapinch', 'vibrava', 'flygon',
+        'cacnea', 'cacturne', 'swablu', 'altaria', 'zangoose', 'seviper', 'lunatone', 'solrock',
+        'barboach', 'whiscash', 'corphish', 'crawdaunt', 'baltoy', 'claydol', 'lileep', 'cradily',
+        'anorith', 'armaldo', 'feebas', 'milotic', 'castform', 'kecleon', 'shuppet', 'banette',
+        'duskull', 'dusclops', 'dusknoir', 'tropius', 'chimecho', 'absol', 'wynaut', 'wobbuffet',
+        'snorunt', 'glalie', 'froslass', 'spheal', 'sealeo', 'walrein', 'clamperl', 'huntail', 'gorebyss',
+        'relicanth', 'luvdisc', 'bagon', 'shelgon', 'salamence', 'beldum', 'metang', 'metagross',
+        'regirock', 'regice', 'registeel', 'latias', 'latios', 'kyogre', 'groudon', 'rayquaza',
+        'jirachi', 'deoxys',
         
-        // Generazione 4 (Sinnoh)
+        // Generazione 4 (Sinnoh) - 107 Pokemon
         'turtwig', 'grotle', 'torterra', 'chimchar', 'monferno', 'infernape',
-        'piplup', 'prinplup', 'empoleon', 'starly', 'staravia', 'staraptor',
-        'bidoof', 'bibarel', 'kricketot', 'kricketune', 'shinx', 'luxio', 'luxray',
-        'budew', 'roserade', 'cranidos', 'rampardos', 'shieldon', 'bastiodon',
-        'burmy', 'wormadam', 'mothim', 'combee', 'vespiquen', 'pachirisu',
-        'buizel', 'floatzel', 'cherubi', 'cherrim', 'shellos', 'gastrodon',
-        'ambipom', 'drifloon', 'drifblim', 'buneary', 'lopunny', 'mismagius', 'honchkrow',
-        'glameow', 'purugly', 'chingling', 'stunky', 'skuntank', 'bronzor', 'bronzong',
-        'bonsly', 'mime jr.', 'happiny', 'chatot', 'spiritomb', 'gible', 'gabite', 'garchomp',
-        'munchlax', 'riolu', 'lucario', 'hippopotas', 'hippowdon', 'skorupi', 'drapion',
-        'croagunk', 'toxicroak', 'carnivine', 'finneon', 'lumineon', 'mantyke', 'snover', 'abomasnow',
-        'weavile', 'magnezone', 'lickilicky', 'rhyperior', 'tangrowth', 'electivire', 'magmortar',
-        'togekiss', 'yanmega', 'leafeon', 'glaceon', 'gliscor', 'mamoswine', 'porygon-z',
-        'gallade', 'probopass', 'dusknoir', 'froslass', 'rotom', 'uxie', 'mesprit', 'azelf',
-        'dialga', 'palkia', 'heatran', 'regigigas', 'giratina', 'cresselia', 'phione', 'manaphy',
-        'darkrai', 'shaymin', 'arceus',
+        'piplup', 'prinplup', 'empoleon', 'starly', 'staravia', 'staraptor', 'bidoof', 'bibarel',
+        'kricketot', 'kricketune', 'shinx', 'luxio', 'luxray', 'budew', 'roserade',
+        'cranidos', 'rampardos', 'shieldon', 'bastiodon', 'burmy', 'wormadam', 'mothim',
+        'combee', 'vespiquen', 'pachirisu', 'buizel', 'floatzel', 'cherubi', 'cherrim',
+        'shellos', 'gastrodon', 'ambipom', 'drifloon', 'drifblim', 'buneary', 'lopunny',
+        'mismagius', 'honchkrow', 'glameow', 'purugly', 'chingling', 'stunky', 'skuntank',
+        'bronzor', 'bronzong', 'bonsly', 'mime jr.', 'happiny', 'chatot', 'spiritomb',
+        'gible', 'gabite', 'garchomp', 'munchlax', 'riolu', 'lucario', 'hippopotas', 'hippowdon',
+        'skorupi', 'drapion', 'croagunk', 'toxicroak', 'carnivine', 'finneon', 'lumineon',
+        'mantyke', 'snover', 'abomasnow', 'weavile', 'magnezone', 'lickilicky', 'rhyperior',
+        'tangrowth', 'electivire', 'magmortar', 'togekiss', 'yanmega', 'leafeon', 'glaceon',
+        'gliscor', 'mamoswine', 'porygon-z', 'gallade', 'probopass', 'dusknoir', 'froslass',
+        'rotom', 'uxie', 'mesprit', 'azelf', 'dialga', 'palkia', 'heatran', 'regigigas',
+        'giratina', 'cresselia', 'phione', 'manaphy', 'darkrai', 'shaymin', 'arceus',
         
-        // Generazione 5 (Unova)
+        // Generazione 5 (Unova) - 156 Pokemon
         'victini', 'snivy', 'servine', 'serperior', 'tepig', 'pignite', 'emboar',
         'oshawott', 'dewott', 'samurott', 'patrat', 'watchog', 'lillipup', 'herdier', 'stoutland',
         'purrloin', 'liepard', 'pansage', 'simisage', 'pansear', 'simisear', 'panpour', 'simipour',
@@ -825,12 +825,12 @@ function extractTitleInfo(title) {
         'klink', 'klang', 'klinklang', 'tynamo', 'eelektrik', 'eelektross', 'elgyem', 'beheeyem',
         'litwick', 'lampent', 'chandelure', 'axew', 'fraxure', 'haxorus', 'cubchoo', 'beartic',
         'cryogonal', 'shelmet', 'accelgor', 'stunfisk', 'mienfoo', 'mienshao', 'druddigon',
-        'golett', 'golurk', 'pawniard', 'bisharp', 'bouffalant', 'rufflet', 'braviary',
+        'golett', 'golurk', 'pawniard', 'bisharp', 'kingambit', 'bouffalant', 'rufflet', 'braviary',
         'vullaby', 'mandibuzz', 'heatmor', 'durant', 'deino', 'zweilous', 'hydreigon',
         'larvesta', 'volcarona', 'cobalion', 'terrakion', 'virizion', 'tornadus', 'thundurus', 'reshiram',
         'zekrom', 'landorus', 'kyurem', 'keldeo', 'meloetta', 'genesect',
         
-        // Generazione 6 (Kalos)
+        // Generazione 6 (Kalos) - 72 Pokemon
         'chespin', 'quilladin', 'chesnaught', 'fennekin', 'braixen', 'delphox',
         'froakie', 'frogadier', 'greninja', 'bunnelby', 'diggersby', 'fletchling', 'fletchinder', 'talonflame',
         'scatterbug', 'spewpa', 'vivillon', 'litleo', 'pyroar', 'flabébé', 'floette', 'florges',
@@ -842,15 +842,14 @@ function extractTitleInfo(title) {
         'klefki', 'phantump', 'trevenant', 'pumpkaboo', 'gourgeist', 'bergmite', 'avalugg',
         'noibat', 'noivern', 'xerneas', 'yveltal', 'zygarde', 'diancie', 'hoopa', 'volcanion',
         
-        // Generazione 7 (Alola)
+        // Generazione 7 (Alola) - 88 Pokemon
         'rowlet', 'dartrix', 'decidueye', 'litten', 'torracat', 'incineroar',
-        'popplio', 'brionne', 'primarina', 'pikipek', 'trumbeak', 'toucannon',
-        'yungoos', 'gumshoos', 'grubbin', 'charjabug', 'vikavolt', 'crabrawler', 'crabominable',
-        'oricorio', 'cutiefly', 'ribombee', 'rockruff', 'lycanroc', 'wishiwashi',
-        'mareanie', 'toxapex', 'mudbray', 'mudsdale', 'dewpider', 'araquanid',
-        'fomantis', 'lurantis', 'morelull', 'shiinotic', 'salandit', 'salazzle',
-        'stufful', 'bewear', 'bounsweet', 'steenee', 'tsareena', 'comfey', 'oranguru',
-        'passimian', 'wimpod', 'golisopod', 'sandygast', 'palossand', 'pyukumuku',
+        'popplio', 'brionne', 'primarina', 'pikipek', 'trumbeak', 'toucannon', 'yungoos', 'gumshoos',
+        'grubbin', 'charjabug', 'vikavolt', 'crabrawler', 'crabominable', 'oricorio',
+        'cutiefly', 'ribombee', 'rockruff', 'lycanroc', 'wishiwashi', 'mareanie', 'toxapex',
+        'mudbray', 'mudsdale', 'dewpider', 'araquanid', 'fomantis', 'lurantis', 'morelull', 'shiinotic',
+        'salandit', 'salazzle', 'stufful', 'bewear', 'bounsweet', 'steenee', 'tsareena',
+        'comfey', 'oranguru', 'passimian', 'wimpod', 'golisopod', 'sandygast', 'palossand', 'pyukumuku',
         'type: null', 'silvally', 'minior', 'komala', 'turtonator', 'togedemaru',
         'mimikyu', 'bruxish', 'drampa', 'dhelmise', 'jangmo-o', 'hakamo-o', 'kommo-o',
         'tapu koko', 'tapu lele', 'tapu bulu', 'tapu fini', 'cosmog', 'cosmoem', 'solgaleo', 'lunala',
@@ -858,7 +857,7 @@ function extractTitleInfo(title) {
         'necrozma', 'magearna', 'marshadow', 'poipole', 'naganadel', 'stakataka', 'blacephalon', 'zeraora',
         'meltan', 'melmetal',
         
-        // Generazione 8 (Galar)
+        // Generazione 8 (Galar) - 89 Pokemon
         'grookey', 'thwackey', 'rillaboom', 'scorbunny', 'raboot', 'cinderace',
         'sobble', 'drizzile', 'inteleon', 'skwovet', 'greedent', 'rookidee', 'corvisquire', 'corviknight',
         'blipbug', 'dottler', 'orbeetle', 'nickit', 'thievul', 'gossifleur', 'eldegoss',
@@ -872,7 +871,7 @@ function extractTitleInfo(title) {
         'dreepy', 'drakloak', 'dragapult', 'zacian', 'zamazenta', 'eternatus', 'kubfu', 'urshifu',
         'zarude', 'regieleki', 'regidrago', 'glastrier', 'spectrier', 'calyrex',
         
-        // Generazione 9 (Paldea)
+        // Generazione 9 (Paldea) - 120 Pokemon
         'sprigatito', 'floragato', 'meowscarada', 'fuecoco', 'crocalor', 'skeledirge',
         'quaxly', 'quaxwell', 'quaquaval', 'lechonk', 'oinkologne', 'tarountula', 'spidops',
         'nymble', 'lokix', 'pawmi', 'pawmo', 'pawmot', 'tandemaus', 'maushold',
