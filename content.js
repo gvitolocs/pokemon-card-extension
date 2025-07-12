@@ -863,9 +863,16 @@ function extractTitleInfo(title) {
         // Cerca anche con forme speciali (Ex, GX, V, VMAX, etc.)
         const specialForms = ['ex', 'gx', 'v', 'vmax', 'vstar', 'break', 'prime', 'star', 'delta', 'shining', 'crystal'];
         for (const form of specialForms) {
+            // Cerca con spazio: "Leafeon ex" o senza spazio: "Leafeonex"
             if (titleLower.includes(pokemonLower + ' ' + form) || titleLower.includes(pokemonLower + form)) {
                 pokemonName = pokemon.toLowerCase();
                 console.log('✅ [CardTrader] Pokemon trovato (con forma speciale):', pokemonName, 'forma:', form);
+                break;
+            }
+            // Cerca anche con trattino: "Leafeon-ex"
+            if (titleLower.includes(pokemonLower + '-' + form)) {
+                pokemonName = pokemon.toLowerCase();
+                console.log('✅ [CardTrader] Pokemon trovato (con forma speciale e trattino):', pokemonName, 'forma:', form);
                 break;
             }
         }
@@ -889,8 +896,8 @@ function extractTitleInfo(title) {
             collectorNumber = singleNumberMatch[1];
             console.log(`🎯 [CardTrader] Numero collezionista estratto (singolo): ${collectorNumber} da ${singleNumberMatch[0]}`);
         } else {
-            // Cerca un numero singolo isolato (per casi come "148")
-            const isolatedNumberMatch = titleLower.match(/\b(\d{1,3})\b/);
+            // Cerca un numero singolo isolato (per casi come "148", "200")
+            const isolatedNumberMatch = titleLower.match(/\b(\d{1,4})\b/);
             if (isolatedNumberMatch) {
                 collectorNumber = isolatedNumberMatch[1];
                 console.log(`🎯 [CardTrader] Numero collezionista estratto (isolato): ${collectorNumber} da ${isolatedNumberMatch[0]}`);
@@ -1380,18 +1387,18 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] Match nome: ${name} -> +1000 punti`);
             }
             
-            // Punteggio per numero collezionista (PRIORITÀ ASSOLUTA - 2000 punti per match esatto)
+            // Punteggio per numero collezionista (PRIORITÀ ASSOLUTA - 2500 punti per match esatto)
             if (titleInfo.collectorNumber && result.collector_number) {
                 if (result.collector_number === titleInfo.collectorNumber) {
-                    score += 2000;
-                    console.log(`🎯 [CardTrader] Match numero esatto: ${result.collector_number} -> +2000 punti (PRIORITÀ ASSOLUTA)`);
+                    score += 2500;
+                    console.log(`🎯 [CardTrader] Match numero esatto: ${result.collector_number} -> +2500 punti (PRIORITÀ ASSOLUTA)`);
                 } else if (result.exact_number_match) {
-                    score += 2000;
-                    console.log(`🎯 [CardTrader] Match numero esatto (variante): ${result.collector_number} -> +2000 punti (PRIORITÀ ASSOLUTA)`);
+                    score += 2500;
+                    console.log(`🎯 [CardTrader] Match numero esatto (variante): ${result.collector_number} -> +2500 punti (PRIORITÀ ASSOLUTA)`);
                 } else if (result.collector_number.toString().includes(titleInfo.collectorNumber) || 
                           titleInfo.collectorNumber.includes(result.collector_number.toString())) {
-                    score += 500;
-                    console.log(`🎯 [CardTrader] Match numero parziale: ${result.collector_number} -> +500 punti`);
+                    score += 800;
+                    console.log(`🎯 [CardTrader] Match numero parziale: ${result.collector_number} -> +800 punti`);
                 }
             }
             
@@ -1446,11 +1453,11 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             //     console.log(`🎯 [CardTrader] Match nell'image_url (pattern: ${result.matched_pattern}) -> +800 punti (PRIORITÀ ALTA)`);
             // }
             
-            // Bonus per carte "ex" (300 punti)
+            // Bonus per carte "ex" (500 punti) - AUMENTATO per Leafeon ex Terastal
             const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
             if (cardName.includes(' ex') || cardName.endsWith('ex')) {
-                score += 300;
-                console.log(`🎯 [CardTrader] Carta EX rilevata: ${cardName} -> +300 punti`);
+                score += 500;
+                console.log(`🎯 [CardTrader] Carta EX rilevata: ${cardName} -> +500 punti`);
             }
             
             // Bonus per rarità (200 punti) - RIMOSSO per evitare errori 400
@@ -1507,8 +1514,8 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                             return true;
                         }
                         
-                        // Match per codici specifici che devono essere esatti (SL7, XY123, etc.)
-                        const exactMatchCodes = ['sl', 'xy', 'swsh', 'sm', 'bw'];
+                        // Match per codici specifici che devono essere esatti (SL7, XY123, sv8a, etc.)
+                        const exactMatchCodes = ['sl', 'xy', 'swsh', 'sm', 'bw', 'sv'];
                         const needsExactMatch = exactMatchCodes.some(code => 
                             expansionCodeToCheck.startsWith(code) && expansionCodeToCheck.length <= 6
                         );
@@ -1547,7 +1554,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         }
                         
                         // Match per parole chiave comuni
-                        const expansionKeywords = ['festival', 'terastal', 'ex', 'gx', 'v', 'vmax', 'vstar'];
+                        const expansionKeywords = ['festival', 'terastal', 'ex', 'gx', 'v', 'vmax', 'vstar', 'sv'];
                         const hasKeyword = expansionKeywords.some(keyword => 
                             resultExpansion.includes(keyword) && originalTitleLower.includes(keyword)
                         );
@@ -1557,7 +1564,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         }
                         
                         // Match per codici di espansione comuni nel titolo
-                        const commonCodes = ['sar', 'sv', 'swsh', 'sm', 'xy', 'bw'];
+                        const commonCodes = ['sar', 'sv', 'swsh', 'sm', 'xy', 'bw', 'sv8a'];
                         const hasCommonCode = commonCodes.some(code => 
                             originalTitleLower.includes(code) && resultExpansionCode.includes(code)
                         );
