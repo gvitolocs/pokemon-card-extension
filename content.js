@@ -1383,48 +1383,48 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 console.log(`🎯 [CardTrader] Match nome: ${name} -> +1000 punti`);
             }
             
-            // Punteggio per numero collezionista (500 punti per match esatto, 200 per match parziale)
+            // Punteggio per numero collezionista (PRIORITÀ ASSOLUTA - 2000 punti per match esatto)
             if (titleInfo.collectorNumber && result.collector_number) {
                 if (result.collector_number === titleInfo.collectorNumber) {
-                    score += 500;
-                    console.log(`🎯 [CardTrader] Match numero esatto: ${result.collector_number} -> +500 punti`);
+                    score += 2000;
+                    console.log(`🎯 [CardTrader] Match numero esatto: ${result.collector_number} -> +2000 punti (PRIORITÀ ASSOLUTA)`);
                 } else if (result.exact_number_match) {
-                    score += 500;
-                    console.log(`🎯 [CardTrader] Match numero esatto (variante): ${result.collector_number} -> +500 punti`);
+                    score += 2000;
+                    console.log(`🎯 [CardTrader] Match numero esatto (variante): ${result.collector_number} -> +2000 punti (PRIORITÀ ASSOLUTA)`);
                 } else if (result.collector_number.toString().includes(titleInfo.collectorNumber) || 
                           titleInfo.collectorNumber.includes(result.collector_number.toString())) {
-                    score += 200;
-                    console.log(`🎯 [CardTrader] Match numero parziale: ${result.collector_number} -> +200 punti`);
+                    score += 500;
+                    console.log(`🎯 [CardTrader] Match numero parziale: ${result.collector_number} -> +500 punti`);
                 }
             }
             
-            // Punteggio per espansione (200 punti per match esatto, 150 per match URL, 100 per match parziale)
+            // Punteggio per espansione (PRIORITÀ ALTA - 1500 punti per match esatto)
             if (titleInfo.expansion || titleInfo.expansionCode) {
                 const expansion = (result.expansion_name_en || result.expansion_name || '').toLowerCase();
                 const expansionCode = (result.expansion_code || '').toUpperCase();
                 const searchExpansion = titleInfo.expansion ? titleInfo.expansion.toLowerCase() : '';
                 const searchExpansionCode = titleInfo.expansionCode || '';
-                // Match per codice di espansione (priorità alta)
+                // Match per codice di espansione (PRIORITÀ ASSOLUTA)
                 if (searchExpansionCode && expansionCode === searchExpansionCode) {
-                    score += 300;
-                    console.log(`🎯 [CardTrader] Match codice espansione: ${expansionCode} -> +300 punti`);
+                    score += 1500;
+                    console.log(`🎯 [CardTrader] Match codice espansione: ${expansionCode} -> +1500 punti (PRIORITÀ ASSOLUTA)`);
                 } else if (expansion.includes(searchExpansion) || searchExpansion.includes(expansion)) {
-                    score += 200;
-                    console.log(`🎯 [CardTrader] Match espansione: ${expansion} -> +200 punti`);
+                    score += 1000;
+                    console.log(`🎯 [CardTrader] Match espansione: ${expansion} -> +1000 punti (PRIORITÀ ALTA)`);
                 } else if (result.expansion_url_match) {
-                    score += 150;
-                    console.log(`🎯 [CardTrader] Match espansione nell'URL: ${expansion} -> +150 punti`);
+                    score += 800;
+                    console.log(`🎯 [CardTrader] Match espansione nell'URL: ${expansion} -> +800 punti`);
                 } else if (result.expansion_name_match) {
-                    score += 125;
-                    console.log(`🎯 [CardTrader] Match nome espansione: ${expansion} -> +125 punti`);
+                    score += 600;
+                    console.log(`🎯 [CardTrader] Match nome espansione: ${expansion} -> +600 punti`);
                 } else if (result.expansion_match) {
-                    score += 100;
-                    console.log(`🎯 [CardTrader] Match espansione parziale: ${expansion} -> +100 punti`);
+                    score += 400;
+                    console.log(`🎯 [CardTrader] Match espansione parziale: ${expansion} -> +400 punti`);
                 }
                 // Punti extra se expansionCode è presente in image_url
                 if (searchExpansionCode && result.image_url && result.image_url.toUpperCase().includes(searchExpansionCode)) {
-                    score += 200;
-                    console.log(`🎯 [CardTrader] Codice espansione ${searchExpansionCode} presente in image_url -> +200 punti EXTRA`);
+                    score += 500;
+                    console.log(`🎯 [CardTrader] Codice espansione ${searchExpansionCode} presente in image_url -> +500 punti EXTRA`);
                 }
             }
             
