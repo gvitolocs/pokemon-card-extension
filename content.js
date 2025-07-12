@@ -2360,8 +2360,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         }
                     }
                 }
+                
+                // BONUS SPECIFICO per espansioni nell'image_url (mantenuto per compatibilità)
+                if (result.image_url && originalTitle) {
+                    const imageUrl = result.image_url.toLowerCase();
+                    const titleLower = originalTitle.toLowerCase();
                     
-                    // BONUS SPECIFICO per espansioni nell'image_url (mantenuto per compatibilità)
                     const expansionKeywords = [
                         'vstar-universe', 'vstar universe', 'v star universe',
                         'dragon-frontier', 'dragon frontier', 'ex dragon frontiers',
@@ -2379,13 +2383,13 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
                 
                 // BONUS per espansioni generiche trovate nel titolo
-                const expansionKeywords = ['dragon frontier', 'ex dragon frontiers', 'delta species', 'holo', 'rare', 'ex', 'v star universe', 'vstar universe'];
-                for (const keyword of expansionKeywords) {
+                const genericExpansionKeywords = ['dragon frontier', 'ex dragon frontiers', 'delta species', 'holo', 'rare', 'ex', 'v star universe', 'vstar universe'];
+                for (const keyword of genericExpansionKeywords) {
                     if (originalTitle.toLowerCase().includes(keyword) && result.expansion_name_en) {
                         const cardExpansion = result.expansion_name_en.toLowerCase();
                         if (cardExpansion.includes(keyword) || keyword.includes(cardExpansion)) {
-                            nameScore += 10000; // Bonus per keyword espansione
-                            console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +10000 punti`);
+                            nameScore += 25000; // Bonus per keyword espansione
+                            console.log(`🎯 [CardTrader] KEYWORD ESPANSIONE TROVATO: "${keyword}" in "${cardExpansion}" -> +25000 punti`);
                             break; // Solo il primo match
                         }
                     }
