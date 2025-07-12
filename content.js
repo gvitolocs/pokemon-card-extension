@@ -2067,79 +2067,17 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             .not('name_en', 'ilike', '%deck%')  // Escludi deck
             .not('name_en', 'ilike', '%booster%')  // Escludi booster
             .not('name_en', 'ilike', '%bundle%')  // Escludi bundle
-            .not('name_en', 'ilike', '%box%')  // Escludi box
-            .not('name_en', 'ilike', '%tin%')  // Escludi tin
-            .not('name_en', 'ilike', '%collection%')  // Escludi collection
-            .not('name_en', 'ilike', '%set%')  // Escludi set completi
-            .not('name_en', 'ilike', '%pack%')  // Escludi pack
-            .not('name_en', 'ilike', '%display%')  // Escludi display
-            .not('name_en', 'ilike', '%case%')  // Escludi case
             .not('name_en', 'ilike', '%lot%')  // Escludi lot
             .not('name_en', 'ilike', '%binder%')  // Escludi binder
             .not('name_en', 'ilike', '%album%')  // Escludi album
             .not('name_en', 'ilike', '%sleeve%')  // Escludi sleeve
-            .not('name_en', 'ilike', '%mat%')  // Escludi playmat
             .not('name_en', 'ilike', '%dice%')  // Escludi dice
-            .not('name_en', 'ilike', '%coin%')  // Escludi coin
             .not('name_en', 'ilike', '%token%')  // Escludi token
             .not('name_en', 'ilike', '%energy%')  // Escludi energy (a meno che non sia specificamente richiesto)
             .not('name_en', 'ilike', '%trainer%')  // Escludi trainer (a meno che non sia specificamente richiesto)
             .not('name_en', 'ilike', '%stadium%')  // Escludi stadium (a meno che non sia specificamente richiesto)
             .not('name_en', 'ilike', '%item%')  // Escludi item (a meno che non sia specificamente richiesto)
-                            .not('name_en', 'ilike', '%supporter%')  // Escludi supporter (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%coin%')  // Escludi coin
-                .not('name_en', 'ilike', '%pin%')  // Escludi pin
-                .not('name_en', 'ilike', '%mat%')  // Escludi playmat
-                .not('name_en', 'ilike', '%box%')  // Escludi box (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%tin%')  // Escludi tin
-                .not('name_en', 'ilike', '%collection%')  // Escludi collection (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%gift%')  // Escludi gift
-                .not('name_en', 'ilike', '%commemoration%')  // Escludi commemoration
-                .not('name_en', 'ilike', '%anniversary%')  // Escludi anniversary
-                .not('name_en', 'ilike', '%celebration%')  // Escludi celebration
-                .not('name_en', 'ilike', '%special%')  // Escludi special (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%limited%')  // Escludi limited
-                .not('name_en', 'ilike', '%exclusive%')  // Escludi exclusive
-                .not('name_en', 'ilike', '%premium%')  // Escludi premium (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%deluxe%')  // Escludi deluxe
-                .not('name_en', 'ilike', '%ultimate%')  // Escludi ultimate
-                .not('name_en', 'ilike', '%master%')  // Escludi master (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%champion%')  // Escludi champion (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%world%')  // Escludi world (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%tournament%')  // Escludi tournament
-                .not('name_en', 'ilike', '%league%')  // Escludi league (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%battle%')  // Escludi battle (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%theme%')  // Escludi theme
-                .not('name_en', 'ilike', '%starter%')  // Escludi starter (a meno che non sia specificamente richiesto)
-                .not('name_en', 'ilike', '%elite%')  // Escludi elite
-                .not('name_en', 'ilike', '%premium%')  // Escludi premium
-                .not('name_en', 'ilike', '%special%')  // Escludi special
-                .not('name_en', 'ilike', '%limited%')  // Escludi limited
-                .not('name_en', 'ilike', '%exclusive%')  // Escludi exclusive
-                .not('name_en', 'ilike', '%gift%')  // Escludi gift
-                .not('name_en', 'ilike', '%commemoration%')  // Escludi commemoration
-                .not('name_en', 'ilike', '%anniversary%')  // Escludi anniversary
-                .not('name_en', 'ilike', '%celebration%')  // Escludi celebration
-                .not('name_en', 'ilike', '%deluxe%')  // Escludi deluxe
-                .not('name_en', 'ilike', '%ultimate%')  // Escludi ultimate
-                .not('name_en', 'ilike', '%tournament%')  // Escludi tournament
-                .not('name_en', 'ilike', '%theme%')  // Escludi theme
-                .not('name_en', 'ilike', '%starter%')  // Escludi starter
-                .not('name_en', 'ilike', '%elite%')  // Escludi elite
-                .not('name_en', 'ilike', '%premium%')  // Escludi premium
-                .not('name_en', 'ilike', '%special%')  // Escludi special
-                .not('name_en', 'ilike', '%limited%')  // Escludi limited
-                .not('name_en', 'ilike', '%exclusive%')  // Escludi exclusive
-                .not('name_en', 'ilike', '%gift%')  // Escludi gift
-                .not('name_en', 'ilike', '%commemoration%')  // Escludi commemoration
-                .not('name_en', 'ilike', '%anniversary%')  // Escludi anniversary
-                .not('name_en', 'ilike', '%celebration%')  // Escludi celebration
-                .not('name_en', 'ilike', '%deluxe%')  // Escludi deluxe
-                .not('name_en', 'ilike', '%ultimate%')  // Escludi ultimate
-                .not('name_en', 'ilike', '%tournament%')  // Escludi tournament
-                .not('name_en', 'ilike', '%theme%')  // Escludi theme
-                .not('name_en', 'ilike', '%starter%')  // Escludi starter
-                .not('name_en', 'ilike', '%elite%')  // Escludi elite;
+            .not('name_en', 'ilike', '%supporter%');  // Escludi supporter (a meno che non sia specificamente richiesto)
         
         if (!cardsError && cards && cards.length > 0) {
             console.log(`✅ [CardTrader] Trovate ${cards.length} carte base per ${titleInfo.pokemonName}`);
@@ -2149,7 +2087,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 const cardName = (card.name_en || '').toLowerCase();
                 const imageUrl = (card.image_url || '').toLowerCase();
                 
-                // Escludi prodotti generici
+                // Escludi prodotti generici (solo quelli che sono chiaramente non-carte)
                 const excludePatterns = [
                     'pokemon-products',
                     'preconstructed',
@@ -2157,8 +2095,6 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     'theme-deck',
                     'starter-deck',
                     'elite-trainer',
-                    'premium-collection',
-                    'special-collection',
                     'holiday-collection',
                     'anniversary-collection',
                     'celebration-collection',
@@ -2172,7 +2108,15 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     'intro-pack',
                     'beginner-deck',
                     'learning-deck',
-                    'practice-deck'
+                    'practice-deck',
+                    'coin',
+                    'pin',
+                    'playmat',
+                    'dice',
+                    'token',
+                    'binder',
+                    'album',
+                    'sleeve'
                 ];
                 
                 // Controlla se il nome o l'image_url contengono pattern da escludere
