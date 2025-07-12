@@ -904,21 +904,38 @@ function extractTitleInfo(title) {
     
     // Cerca numero collezionista (pattern: numero/numero o XY numero o solo numero)
     let collectorNumber = null;
+    let specialPattern = null; // Per memorizzare TG o SL
     
-    // Prima cerca il pattern standard numero/numero
-    const standardMatch = title.match(/(\d+)\/(\d+)/);
-    if (standardMatch) {
-        collectorNumber = standardMatch[1];
+    // Prima cerca pattern speciali come TG16/TG30 o SL16/SL30
+    const tgSlMatch = title.match(/(?:tg|sl)(\d+)\/(?:tg|sl)?(\d+)/i);
+    if (tgSlMatch) {
+        collectorNumber = tgSlMatch[1]; // Prendi il primo numero
+        specialPattern = title.match(/(tg|sl)/i)[1].toLowerCase(); // Estrai TG o SL
+        console.log(`🔍 [CardTrader] Trovato pattern TG/SL: ${collectorNumber} da ${tgSlMatch[0]}, pattern: ${specialPattern}`);
     } else {
-        // Cerca pattern come "XY 156", "xy156", "XY156"
-        const xyMatch = title.match(/(?:xy|xy\s+)(\d+)/i);
-        if (xyMatch) {
-            collectorNumber = `xy${xyMatch[1]}`;
+        // Cerca pattern singolo come TG16 o SL16
+        const singleTgSlMatch = title.match(/(?:tg|sl)(\d+)/i);
+        if (singleTgSlMatch) {
+            collectorNumber = singleTgSlMatch[1];
+            specialPattern = title.match(/(tg|sl)/i)[1].toLowerCase(); // Estrai TG o SL
+            console.log(`🔍 [CardTrader] Trovato pattern TG/SL singolo: ${collectorNumber} da ${singleTgSlMatch[0]}, pattern: ${specialPattern}`);
         } else {
-            // Cerca solo numeri isolati (ma non anni come 2016)
-            const numberMatch = title.match(/\b(?!2016|2015|2014|2013|2012|2011|2010|2009|2008|2007|2006|2005|2004|2003|2002|2001|2000|1999)(\d{1,3})\b/);
-            if (numberMatch) {
-                collectorNumber = numberMatch[1];
+            // Cerca il pattern standard numero/numero
+            const standardMatch = title.match(/(\d+)\/(\d+)/);
+            if (standardMatch) {
+                collectorNumber = standardMatch[1];
+            } else {
+                // Cerca pattern come "XY 156", "xy156", "XY156"
+                const xyMatch = title.match(/(?:xy|xy\s+)(\d+)/i);
+                if (xyMatch) {
+                    collectorNumber = `xy${xyMatch[1]}`;
+                } else {
+                    // Cerca solo numeri isolati (ma non anni come 2016)
+                    const numberMatch = title.match(/\b(?!2016|2015|2014|2013|2012|2011|2010|2009|2008|2007|2006|2005|2004|2003|2002|2001|2000|1999)(\d{1,3})\b/);
+                    if (numberMatch) {
+                        collectorNumber = numberMatch[1];
+                    }
+                }
             }
         }
     }
@@ -1086,6 +1103,7 @@ function extractTitleInfo(title) {
     return {
         pokemonName: pokemonName,
         collectorNumber: collectorNumber,
+        specialPattern: specialPattern,
         trainerName: trainerName,
         cardType: cardType,
         rarity: rarity,
@@ -1365,6 +1383,22 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     score -= 300; // Penalità se il titolo dice promo ma l'URL no
                     reason += 'PROMO richiesto ma non nell\'URL ';
                     console.log(`❌ [CardTrader] PROMO richiesto ma non trovato in: "${result.image_url}" -> -300 punti`);
+                }
+            }
+            
+            // PRIORITÀ 4.5: Match TG/SL nell'URL (ALTA PRIORITÀ quando il titolo contiene TG o SL)
+            if (titleInfo.specialPattern && result.image_url) {
+                const imageUrlLower = result.image_url.toLowerCase();
+                const pattern = titleInfo.specialPattern.toLowerCase();
+                
+                if (imageUrlLower.includes(pattern)) {
+                    score += 600; // Bonus alto per match TG/SL
+                    reason += `${pattern.toUpperCase()} nell\'URL CORRETTO `;
+                    console.log(`🎯 [CardTrader] MATCH ${pattern.toUpperCase()}: "${result.image_url}" -> +600 punti`);
+                } else {
+                    score -= 200; // Penalità se il titolo dice TG/SL ma l'URL no
+                    reason += `${pattern.toUpperCase()} richiesto ma non nell\'URL `;
+                    console.log(`❌ [CardTrader] ${pattern.toUpperCase()} richiesto ma non trovato in: "${result.image_url}" -> -200 punti`);
                 }
             }
             
