@@ -982,6 +982,12 @@ function extractTitleInfo(title) {
             specialPattern = title.match(/(tg|sl)/i)[1].toLowerCase(); // Estrai TG o SL
             console.log(`🔍 [CardTrader] Trovato pattern TG/SL singolo: ${collectorNumber} da ${singleTgSlMatch[0]}, pattern: ${specialPattern}`);
         } else {
+            // Cerca "trainer gallery" come pattern TG
+            if (titleLower.includes('trainer gallery')) {
+                specialPattern = 'tg';
+                console.log(`🎯 [CardTrader] Pattern speciale trovato: Trainer Gallery (TG)`);
+            }
+            
             // Cerca il pattern standard numero/numero
             const standardMatch = title.match(/(\d+)\/(\d+)/);
             if (standardMatch) {
@@ -1162,6 +1168,12 @@ function extractTitleInfo(title) {
         }
     }
     
+    // Verifica se è una carta V
+    const isVCard = /\bv\b/i.test(title);
+    if (isVCard) {
+        console.log(`🎯 [CardTrader] Carta V rilevata nel titolo`);
+    }
+    
     return {
         pokemonName: pokemonName,
         collectorNumber: collectorNumber,
@@ -1170,6 +1182,7 @@ function extractTitleInfo(title) {
         cardType: cardType,
         rarity: rarity,
         expansion: expansion,
+        isVCard: isVCard,
         originalTitle: title
     };
 }
@@ -1496,6 +1509,21 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     score -= 200; // Penalità se il titolo dice TG/SL ma l'URL no
                     reason += `${pattern.toUpperCase()} richiesto ma non nell\'URL `;
                     console.log(`❌ [CardTrader] ${pattern.toUpperCase()} richiesto ma non trovato in: "${result.image_url}" -> -200 punti`);
+                }
+            }
+            
+            // PRIORITÀ 4.6: Match V nell'URL (ALTA PRIORITÀ quando il titolo contiene V)
+            if (titleInfo.isVCard && result.image_url) {
+                const imageUrlLower = result.image_url.toLowerCase();
+                
+                if (imageUrlLower.includes('v')) {
+                    score += 400; // Bonus alto per match V
+                    reason += 'V nell\'URL CORRETTO ';
+                    console.log(`🎯 [CardTrader] MATCH V: "${result.image_url}" -> +400 punti`);
+                } else {
+                    score -= 300; // Penalità severa se il titolo dice V ma l'URL no
+                    reason += 'V richiesto ma non nell\'URL ';
+                    console.log(`❌ [CardTrader] V richiesto ma non trovato in: "${result.image_url}" -> -300 punti`);
                 }
             }
             
