@@ -1882,6 +1882,33 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     validationReason += 'V mancante nell\'URL ';
                 }
                 
+                // Verifica obbligatoria per Masterball e Pokeball
+                const titleLower = originalTitle.toLowerCase();
+                if (titleLower.includes('masterball') && !imageUrlLower.includes('masterball')) {
+                    validationScore -= 500; // Penalità MASSIMA per Masterball mancante
+                    validationReason += 'Masterball richiesto ma mancante nell\'URL ';
+                    console.log(`❌ [CardTrader] Masterball richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+                }
+                
+                if (titleLower.includes('pokeball') && !imageUrlLower.includes('pokeball')) {
+                    validationScore -= 500; // Penalità MASSIMA per Pokeball mancante
+                    validationReason += 'Pokeball richiesto ma mancante nell\'URL ';
+                    console.log(`❌ [CardTrader] Pokeball richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+                }
+                
+                // Bonus se Masterball/Pokeball sono presenti nell'URL quando richiesti
+                if (titleLower.includes('masterball') && imageUrlLower.includes('masterball')) {
+                    validationScore += 300; // Bonus alto per Masterball presente
+                    validationReason += 'Masterball nell\'URL CORRETTO ';
+                    console.log(`🎯 [CardTrader] Masterball trovato in: "${result.image_url}" -> +300 punti`);
+                }
+                
+                if (titleLower.includes('pokeball') && imageUrlLower.includes('pokeball')) {
+                    validationScore += 300; // Bonus alto per Pokeball presente
+                    validationReason += 'Pokeball nell\'URL CORRETTO ';
+                    console.log(`🎯 [CardTrader] Pokeball trovato in: "${result.image_url}" -> +300 punti`);
+                }
+                
                 score += validationScore;
                 reason += validationReason;
                 
