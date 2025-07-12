@@ -1254,12 +1254,11 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         
         let allResults = [];
         
-        // 1. Cerca nelle carte con il nome Pokemon (senza filtro numero)
+        // 1. Cerca nelle carte con il nome Pokemon (senza filtro numero) - NO LIMIT
         const { data: cards, error: cardsError } = await supabaseClient
             .from('cards')
             .select('*')
-            .ilike('name_en', `%${titleInfo.pokemonName}%`)
-            .limit(20);
+            .ilike('name_en', `%${titleInfo.pokemonName}%`);
         
         if (!cardsError && cards && cards.length > 0) {
             console.log(`✅ [CardTrader] Trovate ${cards.length} carte con nome Pokemon`);
@@ -1284,7 +1283,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             joinQuery = joinQuery.or(`expansion_name_en.ilike.%${expansionFilter}%,expansion_code.ilike.%${expansionFilter}%`);
         }
         
-        const { data: cardsWithVariants, error: joinError } = await joinQuery.limit(50);
+        const { data: cardsWithVariants, error: joinError } = await joinQuery;
         
         if (!joinError && cardsWithVariants && cardsWithVariants.length > 0) {
             console.log(`✅ [CardTrader] Trovate ${cardsWithVariants.length} carte con JOIN`);
@@ -1331,8 +1330,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     .from('cards')
                     .select('*')
                     .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .ilike('expansion_name_en', `%${expansionLower}%`)
-                    .limit(10);
+                    .ilike('expansion_name_en', `%${expansionLower}%`);
                 
                 if (!error1 && cards1) {
                     expansionNameCards.push(...cards1);
@@ -1345,8 +1343,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     .from('cards')
                     .select('*')
                     .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                    .ilike('expansion_code', `%${expansionCode}%`)
-                    .limit(10);
+                    .ilike('expansion_code', `%${expansionCode}%`);
                 
                 if (!error2 && cards2) {
                     expansionNameCards.push(...cards2);
@@ -1478,11 +1475,21 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
         // Ordina per punteggio (decrescente)
         scoredResults.sort((a, b) => b.score - a.score);
         
-        // Filtra solo risultati con punteggio > 0 e prendi i migliori
-        let filteredResults = scoredResults
+        // Filtra solo risultati con punteggio > 0 e rimuovi duplicati per blueprint_id
+        const uniqueResults = [];
+        const seenBlueprintIds = new Set();
+        
+        scoredResults
             .filter(item => item.score > 0)
-            .map(item => item.result)
-            .slice(0, 10);
+            .forEach(item => {
+                const blueprintId = item.result.blueprint_id;
+                if (!seenBlueprintIds.has(blueprintId)) {
+                    seenBlueprintIds.add(blueprintId);
+                    uniqueResults.push(item.result);
+                }
+            });
+        
+        let filteredResults = uniqueResults.slice(0, 10);
         
         // Filtro finale: se abbiamo un'espansione, verifica che sia presente nel titolo originale (MIGLIORATO)
         if (originalTitle && (titleInfo.expansion || titleInfo.expansionCode)) {

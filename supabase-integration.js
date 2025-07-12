@@ -113,14 +113,13 @@ class SupabasePokemonDB {
             'expansion_name_en', 'expansion_code'
         ];
         
-        // Search in each possible column
+        // Search in each possible column (NO LIMIT)
         for (const columnName of possibleColumns) {
             try {
                 const { data, error } = await this.supabase
                     .from(tableName)
                     .select('*')
-                    .ilike(columnName, `%${pokemonName}%`)
-                    .limit(10);
+                    .ilike(columnName, `%${pokemonName}%`);
                 
                 if (!error && data && data.length > 0) {
                     console.log(`✅ Found ${data.length} results in ${tableName}.${columnName}`);
@@ -134,11 +133,10 @@ class SupabasePokemonDB {
         // If no results found with specific columns, try a broader search
         if (results.length === 0) {
             try {
-                // Try to get all data and filter client-side
+                // Try to get all data and filter client-side (NO LIMIT)
                 const { data, error } = await this.supabase
                     .from(tableName)
-                    .select('*')
-                    .limit(50); // Limit to avoid performance issues
+                    .select('*');
                 
                 if (!error && data) {
                     // Filter results that contain the pokemon name
@@ -283,12 +281,11 @@ class SupabasePokemonDB {
             const pokemonNameLower = pokemonName.toLowerCase();
             let results = [];
             
-            // First, search in the cards table to get blueprint_ids
+            // First, search in the cards table to get blueprint_ids (NO LIMIT)
             const { data: cards, error: cardsError } = await this.supabase
                 .from('cards')
                 .select('blueprint_id, name_en, expansion_name_en, expansion_code')
-                .ilike('name_en', `%${pokemonNameLower}%`)
-                .limit(50); // Increased limit to get more results
+                .ilike('name_en', `%${pokemonNameLower}%`);
             
             if (cardsError) {
                 console.log('Error searching cards table:', cardsError.message);
@@ -302,45 +299,70 @@ class SupabasePokemonDB {
                 const blueprintIds = cards.map(card => card.blueprint_id).filter(id => id);
                 
                 if (blueprintIds.length > 0) {
-                    // Search for variants of these cards
+                    // Search for variants of these cards (NO LIMIT)
                     const { data: variants, error: variantsError } = await this.supabase
                         .from('card_variants')
                         .select('*')
-                        .in('blueprint_id', blueprintIds)
-                        .limit(100); // Increased limit for variants
+                        .in('blueprint_id', blueprintIds);
                     
                     if (!variantsError && variants && variants.length > 0) {
-                        // Combine card data with variant data
-                        const combinedResults = variants.map(variant => {
-                            const card = cards.find(c => c.blueprint_id === variant.blueprint_id);
-                            return {
-                                ...variant,
+                        // Group variants by blueprint_id to avoid duplicates
+                        const variantsByBlueprint = {};
+                        variants.forEach(variant => {
+                            if (!variantsByBlueprint[variant.blueprint_id]) {
+                                variantsByBlueprint[variant.blueprint_id] = [];
+                            }
+                            variantsByBlueprint[variant.blueprint_id].push(variant);
+                        });
+                        
+                        // Combine card data with variant data (one result per blueprint)
+                        Object.keys(variantsByBlueprint).forEach(blueprintId => {
+                            const card = cards.find(c => c.blueprint_id === parseInt(blueprintId));
+                            const blueprintVariants = variantsByBlueprint[blueprintId];
+                            
+                            // Use the first variant as the main result, but include all collector numbers
+                            const mainVariant = blueprintVariants[0];
+                            const allCollectorNumbers = blueprintVariants
+                                .map(v => v.collector_number)
+                                .filter(n => n)
+                                .join(', ');
+                            
+                            const combinedResult = {
+                                ...mainVariant,
                                 name_en: card?.name_en,
                                 card_name: card?.name_en,
                                 pokemon_name: card?.name_en,
                                 expansion_name_en: card?.expansion_name_en,
                                 expansion_name: card?.expansion_name_en,
                                 expansion_code: card?.expansion_code,
-                                collector_number: variant.collector_number, // Get from variant, not card
+                                collector_number: mainVariant.collector_number,
+                                all_collector_numbers: allCollectorNumbers,
+                                variant_count: blueprintVariants.length,
                                 source_table: 'card_variants'
                             };
+                            
+                            results.push(combinedResult);
                         });
                         
-                        results.push(...combinedResults);
-                        console.log(`✅ Found ${combinedResults.length} variants for ${pokemonName}`);
+                        console.log(`✅ Found ${results.length} unique blueprint results for ${pokemonName} (from ${variants.length} total variants)`);
                     }
                 }
                 
-                // Also add the base cards themselves
-                const baseCards = cards.map(card => ({
-                    ...card,
-                    name_en: card.name_en,
-                    pokemon_name: card.name_en,
-                    expansion_name_en: card.expansion_name_en,
-                    expansion_name: card.expansion_name_en,
-                    collector_number: null, // Cards table doesn't have collector_number
-                    source_table: 'cards'
-                }));
+                // Also add the base cards themselves (only if not already included as variants)
+                const existingBlueprintIds = new Set(results.map(r => r.blueprint_id));
+                const baseCards = cards
+                    .filter(card => !existingBlueprintIds.has(card.blueprint_id))
+                    .map(card => ({
+                        ...card,
+                        name_en: card.name_en,
+                        pokemon_name: card.name_en,
+                        expansion_name_en: card.expansion_name_en,
+                        expansion_name: card.expansion_name_en,
+                        collector_number: null, // Cards table doesn't have collector_number
+                        all_collector_numbers: '',
+                        variant_count: 0,
+                        source_table: 'cards'
+                    }));
                 
                 results.push(...baseCards);
                 console.log(`✅ Added ${baseCards.length} base cards to results`);
