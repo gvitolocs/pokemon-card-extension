@@ -893,12 +893,74 @@ function extractTitleInfo(title) {
         'ogerpon', 'gouging fire', 'raging bolt', 'iron boulder', 'iron crown', 'terapagos', 'pecharunt'
     ];
     
-    // Cerca il Pokemon nel titolo
+    // Cerca il Pokemon nel titolo con fuzzy search
     let pokemonName = null;
+    const titleWords = titleLower.split(/\s+/);
+    
+    // Prima cerca match esatti
     for (const pokemon of pokemonNames) {
         if (titleLower.includes(pokemon.toLowerCase())) {
             pokemonName = pokemon;
+            console.log(`🎯 [CardTrader] Match esatto trovato: "${pokemon}" in "${title}"`);
             break;
+        }
+    }
+    
+    // Se non trova match esatti, cerca match fuzzy
+    if (!pokemonName) {
+        console.log(`🔍 [CardTrader] Nessun match esatto, cercando match fuzzy...`);
+        
+        for (const pokemon of pokemonNames) {
+            const pokemonLower = pokemon.toLowerCase();
+            
+            // Controlla ogni parola del titolo
+            for (const word of titleWords) {
+                const wordLower = word.toLowerCase();
+                
+                // Match fuzzy: una parola contiene il Pokemon o viceversa
+                if (wordLower.includes(pokemonLower) || pokemonLower.includes(wordLower)) {
+                    // Calcola similarità per evitare falsi positivi
+                    const similarity = calculateSimilarity(wordLower, pokemonLower);
+                    
+                    if (similarity >= 0.7) { // Soglia di similarità
+                        pokemonName = pokemon;
+                        console.log(`🎯 [CardTrader] Match fuzzy trovato: "${word}" → "${pokemon}" (similarità: ${Math.round(similarity * 100)}%)`);
+                        break;
+                    }
+                }
+            }
+            
+            if (pokemonName) break;
+        }
+    }
+    
+    // Se ancora non trova nulla, cerca match più permissivi per casi speciali
+    if (!pokemonName) {
+        console.log(`🔍 [CardTrader] Nessun match fuzzy, cercando match permissivi...`);
+        
+        // Casi speciali noti
+        const specialCases = {
+            'evee': 'eevee',
+            'eevee': 'eevee',
+            'eve': 'eevee',
+            'pikachu': 'pikachu',
+            'pikach': 'pikachu',
+            'charizard': 'charizard',
+            'chariz': 'charizard',
+            'mew': 'mew',
+            'mewtwo': 'mewtwo',
+            'lugia': 'lugia',
+            'ho-oh': 'ho-oh',
+            'hooh': 'ho-oh'
+        };
+        
+        for (const word of titleWords) {
+            const wordLower = word.toLowerCase();
+            if (specialCases[wordLower]) {
+                pokemonName = specialCases[wordLower];
+                console.log(`🎯 [CardTrader] Match speciale trovato: "${word}" → "${pokemonName}"`);
+                break;
+            }
         }
     }
     
@@ -1137,8 +1199,21 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         .not('name_en', 'ilike', '%mewtwo%');
         } else if (titleInfo.pokemonName === 'mewtwo') {
             query = query.ilike('name_en', '%mewtwo%');
+        } else if (titleInfo.pokemonName === 'eevee') {
+            // Gestione speciale per Eevee e variazioni
+            query = query.or('name_en.ilike.%eevee%,name_en.ilike.%evee%')
+                        .not('name_en', 'ilike', '%vaporeon%')
+                        .not('name_en', 'ilike', '%jolteon%')
+                        .not('name_en', 'ilike', '%flareon%')
+                        .not('name_en', 'ilike', '%espeon%')
+                        .not('name_en', 'ilike', '%umbreon%')
+                        .not('name_en', 'ilike', '%leafeon%')
+                        .not('name_en', 'ilike', '%glaceon%')
+                        .not('name_en', 'ilike', '%sylveon%');
         } else {
-            query = query.ilike('name_en', `%${titleInfo.pokemonName}%`);
+            // Ricerca fuzzy per altri Pokemon
+            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+            query = query.or(`name_en.ilike.%${pokemonNameLower}%,name_en.ilike.%${pokemonNameLower}%`);
         }
         
         const { data: cards, error: cardsError } = await query
@@ -1210,6 +1285,17 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                                          .not('name_en', 'ilike', '%mewtwo%');
             } else if (titleInfo.pokemonName === 'mewtwo') {
                 pokemonQuery = pokemonQuery.ilike('name_en', '%mewtwo%');
+            } else if (titleInfo.pokemonName === 'eevee') {
+                // Gestione speciale per Eevee e variazioni
+                pokemonQuery = pokemonQuery.or('name_en.ilike.%eevee%,name_en.ilike.%evee%')
+                            .not('name_en', 'ilike', '%vaporeon%')
+                            .not('name_en', 'ilike', '%jolteon%')
+                            .not('name_en', 'ilike', '%flareon%')
+                            .not('name_en', 'ilike', '%espeon%')
+                            .not('name_en', 'ilike', '%umbreon%')
+                            .not('name_en', 'ilike', '%leafeon%')
+                            .not('name_en', 'ilike', '%glaceon%')
+                            .not('name_en', 'ilike', '%sylveon%');
             } else {
                 pokemonQuery = pokemonQuery.ilike('name_en', `%${titleInfo.pokemonName}%`);
             }
@@ -1261,6 +1347,17 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                                              .not('name_en', 'ilike', '%mewtwo%');
             } else if (titleInfo.pokemonName === 'mewtwo') {
                 expansionQuery = expansionQuery.ilike('name_en', '%mewtwo%');
+            } else if (titleInfo.pokemonName === 'eevee') {
+                // Gestione speciale per Eevee e variazioni
+                expansionQuery = expansionQuery.or('name_en.ilike.%eevee%,name_en.ilike.%evee%')
+                            .not('name_en', 'ilike', '%vaporeon%')
+                            .not('name_en', 'ilike', '%jolteon%')
+                            .not('name_en', 'ilike', '%flareon%')
+                            .not('name_en', 'ilike', '%espeon%')
+                            .not('name_en', 'ilike', '%umbreon%')
+                            .not('name_en', 'ilike', '%leafeon%')
+                            .not('name_en', 'ilike', '%glaceon%')
+                            .not('name_en', 'ilike', '%sylveon%');
             } else {
                 expansionQuery = expansionQuery.ilike('name_en', `%${titleInfo.pokemonName}%`);
             }
@@ -1524,6 +1621,20 @@ function calculateSimilarity(str1, str2) {
     // Se una contiene l'altra, alta similarità
     if (s1.includes(s2) || s2.includes(s1)) return 0.9;
     
+    // Casi speciali per Pokemon
+    const specialMatches = {
+        'evee': 'eevee',
+        'eevee': 'evee',
+        'pikach': 'pikachu',
+        'chariz': 'charizard',
+        'mew': 'mewtwo',
+        'mewtwo': 'mew'
+    };
+    
+    if (specialMatches[s1] === s2 || specialMatches[s2] === s1) {
+        return 0.8; // Alta similarità per casi speciali
+    }
+    
     // Calcola similarità basata su caratteri comuni
     const len1 = s1.length;
     const len2 = s2.length;
@@ -1531,22 +1642,33 @@ function calculateSimilarity(str1, str2) {
     
     if (maxLen === 0) return 1;
     
-    let commonChars = 0;
+    // Calcola la distanza di Levenshtein semplificata
+    let distance = 0;
     let i = 0, j = 0;
     
     while (i < len1 && j < len2) {
         if (s1[i] === s2[j]) {
-            commonChars++;
             i++;
             j++;
-        } else if (s1[i] < s2[j]) {
-            i++;
         } else {
-            j++;
+            distance++;
+            // Avanza nella stringa più corta
+            if (len1 < len2) {
+                j++;
+            } else if (len2 < len1) {
+                i++;
+            } else {
+                i++;
+                j++;
+            }
         }
     }
     
-    return commonChars / maxLen;
+    // Aggiungi la differenza di lunghezza
+    distance += Math.abs(len1 - len2);
+    
+    // Converti distanza in similarità
+    return Math.max(0, 1 - (distance / maxLen));
 }
 
 // Funzione per estrarre TUTTE le parole dal titolo (escludendo Pokemon name e collector number)
