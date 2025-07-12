@@ -1847,6 +1847,34 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             }
         }
         
+        // 3.2. Se il titolo contiene "sl", cerca specificamente carte SL (Shining Legends)
+        if (originalTitle.toLowerCase().includes('sl')) {
+            console.log(`🔍 [CardTrader] Cercando carte SL (Shining Legends) per: ${titleInfo.pokemonName}`);
+            
+            // Cerca carte che contengono "SL" nel nome o nell'image_url
+            const { data: slCards, error: slCardsError } = await supabaseClient
+                .from('cards')
+                .select('*')
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .or(`name_en.ilike.%sl%,image_url.ilike.%sl%`);
+            
+            if (!slCardsError && slCards && slCards.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${slCards.length} carte SL`);
+                
+                slCards.forEach(card => {
+                    // Evita duplicati
+                    const existing = allResults.find(r => r.blueprint_id === card.blueprint_id);
+                    if (!existing) {
+                        allResults.push({ 
+                            ...card, 
+                            source: 'sl_cards',
+                            sl_match: true
+                        });
+                    }
+                });
+            }
+        }
+        
         // 4. Filtro finale basato su image_url per eliminare dubbi (verrà applicato dopo il punteggio)
         console.log(`🔍 [CardTrader] Filtro image_url verrà applicato dopo il punteggio per eliminare dubbi`);
         
@@ -1912,6 +1940,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             if (result.image_url && result.image_url.toLowerCase().includes('tg')) {
                 nameScore += 10000; // Bonus MASSIMO per image_url con TG
                 console.log(`🎯 [CardTrader] IMAGE_URL CON TG TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
+            }
+            
+            // BONUS MASSIMO per image_url che contiene SL (priorità assoluta per carte SL)
+            if (result.image_url && result.image_url.toLowerCase().includes('sl')) {
+                nameScore += 10000; // Bonus MASSIMO per image_url con SL
+                console.log(`🎯 [CardTrader] IMAGE_URL CON SL TROVATO: ${result.image_url} -> +10000 punti (PRIORITÀ ASSOLUTA)`);
             }
             
             if (result.image_url) {
