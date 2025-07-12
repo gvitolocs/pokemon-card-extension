@@ -2344,12 +2344,14 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                     const imageUrl = result.image_url.toLowerCase();
                     const titleLower = originalTitle.toLowerCase();
                     
-                    // Estrai TUTTE le parole rilevanti dal titolo
+                    // Estrai SOLO le parole rilevanti che sono effettivamente presenti nel titolo
+                    const relevantKeywords = ['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'holo', 'rare', 'ex', 'gx', 'v', 'vmax', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'promo', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'black', 'white', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'];
+                    
                     const relevantWords = titleLower.split(/\s+/).filter(word => 
                         word.length > 2 && 
                         !['pokemon', 'card', 'game', 'tcg', 'carta', 'pokémon'].includes(word) &&
-                        // Includi sia parole dell'espansione che parole descrittive
-                        ['star', 'universe', 'frontier', 'dragon', 'delta', 'species', 'holo', 'rare', 'ex', 'gx', 'v', 'vmax', 'secret', 'ultra', 'shining', 'crystal', 'gold', 'silver', 'rainbow', 'full', 'art', 'promo', 'black', 'white', 'neo', 'gym', 'heroes', 'challenge', 'team', 'rocket', 'legendary', 'collection', 'base', 'jungle', 'fossil', 'genesis', 'discovery', 'revelation', 'destiny', 'phantoms', 'guardians', 'keepers', 'ruby', 'sapphire', 'emerald', 'fire', 'red', 'leaf', 'green', 'hidden', 'legends', 'deoxys', 'unseen', 'forces', 'holon', 'crystal', 'power', 'magma', 'aqua', 'sandstorm', 'legend', 'maker', 'terastal', 'festival', 'prismatic', 'evolution', 'scarlet', 'violet', 'sword', 'shield', 'sun', 'moon', 'black', 'white', 'heartgold', 'soulsilver', 'platinum', 'diamond', 'pearl', 'sar', 'sv8a', 'sv', 'swsh', 'sm', 'xy', 'sit'].includes(word)
+                        // Includi SOLO parole che sono effettivamente presenti nel titolo E sono parole chiave rilevanti
+                        relevantKeywords.includes(word)
                     );
                     
                     console.log(`🎯 [CardTrader] Parole rilevanti trovate nel titolo: [${relevantWords.join(', ')}]`);
@@ -2421,7 +2423,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 // BONUS per espansioni generiche trovate nel titolo (CONTROLLO RIGOROSO)
                 const genericExpansionKeywords = ['dragon frontier', 'ex dragon frontiers', 'delta species', 'holo', 'rare', 'ex', 'v star universe', 'vstar universe'];
                 for (const keyword of genericExpansionKeywords) {
-                    if (originalTitle.toLowerCase().includes(keyword) && result.expansion_name_en) {
+                    // CONTROLLO RIGOROSO: Verifica che la keyword sia una parola intera nel titolo
+                    const titleWords = originalTitle.toLowerCase().split(/\s+/);
+                    const hasKeywordAsWord = titleWords.includes(keyword) || 
+                                           titleWords.some(word => word.startsWith(keyword + ' ') || word.endsWith(' ' + keyword) || word === keyword);
+                    
+                    if (hasKeywordAsWord && result.expansion_name_en) {
                         const cardExpansion = result.expansion_name_en.toLowerCase();
                         
                         // CONTROLLO RIGOROSO: Verifica che l'espansione sia effettivamente correlata
@@ -2584,7 +2591,14 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 ];
                 
                 for (const keyword of expansionKeywords) {
-                    if (titleLower.includes(keyword.replace('-', ' ')) && imageUrl.includes(keyword)) {
+                    // CONTROLLO RIGOROSO: Verifica che la keyword sia una parola intera nel titolo
+                    const titleWords = titleLower.split(/\s+/);
+                    const hasKeywordAsWord = titleWords.includes(keyword.replace('-', ' ')) || 
+                                           titleWords.some(word => word.startsWith(keyword.replace('-', ' ') + ' ') || 
+                                                                 word.endsWith(' ' + keyword.replace('-', ' ')) || 
+                                                                 word === keyword.replace('-', ' '));
+                    
+                    if (hasKeywordAsWord && imageUrl.includes(keyword)) {
                         nameScore += 40000; // Bonus MASSIMO per espansione nell'image_url
                         console.log(`🎯 [CardTrader] ESPANSIONE IMAGE_URL TROVATA: "${keyword}" -> +40000 punti (PRIORITÀ ASSOLUTA)`);
                         break; // Solo il primo match
@@ -2595,7 +2609,12 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             // BONUS per espansioni generiche trovate nel titolo
             const expansionKeywords = ['dragon frontier', 'ex dragon frontiers', 'delta species', 'holo', 'rare', 'ex', 'v star universe', 'vstar universe'];
             for (const keyword of expansionKeywords) {
-                if (originalTitle.toLowerCase().includes(keyword) && result.expansion_name_en) {
+                // CONTROLLO RIGOROSO: Verifica che la keyword sia una parola intera nel titolo
+                const titleWords = originalTitle.toLowerCase().split(/\s+/);
+                const hasKeywordAsWord = titleWords.includes(keyword) || 
+                                       titleWords.some(word => word.startsWith(keyword + ' ') || word.endsWith(' ' + keyword) || word === keyword);
+                
+                if (hasKeywordAsWord && result.expansion_name_en) {
                     const cardExpansion = result.expansion_name_en.toLowerCase();
                     if (cardExpansion.includes(keyword) || keyword.includes(cardExpansion)) {
                         nameScore += 25000; // Bonus per keyword espansione
