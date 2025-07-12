@@ -2259,21 +2259,36 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             const titleLower = originalTitle.toLowerCase();
             const cardName = (result.name_en || result.pokemon_name || '').toLowerCase();
             
-            // Match base del Pokemon (con controllo per carte speciali)
-            if (cardName.includes(titleInfo.pokemonName.toLowerCase())) {
+            // Match base del Pokemon (con controllo per carte speciali e match esatti)
+            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
+            const cardNameLower = cardName.toLowerCase();
+            
+            // CONTROLLO RIGOROSO: Verifica che sia un match esatto o molto specifico
+            const isExactMatch = cardNameLower === pokemonNameLower;
+            const isContainedMatch = cardNameLower.includes(pokemonNameLower) && 
+                                   (cardNameLower === pokemonNameLower || 
+                                    cardNameLower.startsWith(pokemonNameLower + ' ') ||
+                                    cardNameLower.includes(' ' + pokemonNameLower + ' ') ||
+                                    cardNameLower.endsWith(' ' + pokemonNameLower));
+            
+            if (isExactMatch || isContainedMatch) {
                 // CONTROLLO: Se è una carta speciale come Ancient Mew, riduci il punteggio
-                const isSpecialCard = cardName.includes('ancient') || 
-                                     cardName.includes('promo') || 
-                                     cardName.includes('miscellaneous') ||
-                                     cardName.includes('international');
+                const isSpecialCard = cardNameLower.includes('ancient') || 
+                                     cardNameLower.includes('promo') || 
+                                     cardNameLower.includes('miscellaneous') ||
+                                     cardNameLower.includes('international');
                 
                 if (isSpecialCard) {
                     nameScore += 2000; // Punteggio ridotto per carte speciali
-                    console.log(`🎯 [CardTrader] MATCH POKEMON SPECIALE: "${titleInfo.pokemonName}" in "${cardName}" -> +2000 punti (carta speciale)`);
+                    console.log(`🎯 [CardTrader] MATCH POKEMON SPECIALE: "${pokemonNameLower}" in "${cardNameLower}" -> +2000 punti (carta speciale)`);
                 } else {
                     nameScore += 10000; // Base score per match Pokemon normale
-                    console.log(`🎯 [CardTrader] MATCH POKEMON BASE: "${titleInfo.pokemonName}" in "${cardName}" -> +10000 punti`);
+                    console.log(`🎯 [CardTrader] MATCH POKEMON BASE: "${pokemonNameLower}" in "${cardNameLower}" -> +10000 punti`);
                 }
+            } else if (cardNameLower.includes(pokemonNameLower)) {
+                // Match parziale (es. "mew" in "mewtwo") - punteggio molto basso
+                nameScore += 500; // Punteggio molto basso per match parziali
+                console.log(`🎯 [CardTrader] MATCH POKEMON PARZIALE: "${pokemonNameLower}" in "${cardNameLower}" -> +500 punti (match parziale)`);
             }
             
             // PRIORITÀ 2: MATCH NUMERO COLLEZIONE (ALTA PRIORITÀ)
@@ -2292,6 +2307,16 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
             
             // PRIORITÀ 3: ESPANSIONE (solo se abbiamo già un buon match Pokemon + Numero)
             if (nameScore >= 15000) { // Solo se abbiamo almeno un match Pokemon + numero
+                // CONTROLLO AGGIUNTIVO: Non dare bonus espansione a carte con match parziali
+                const hasGoodPokemonMatch = nameScore >= 10000 && !cardNameLower.includes(pokemonNameLower) || 
+                                          (cardNameLower === pokemonNameLower || 
+                                           cardNameLower.startsWith(pokemonNameLower + ' ') ||
+                                           cardNameLower.includes(' ' + pokemonNameLower + ' ') ||
+                                           cardNameLower.endsWith(' ' + pokemonNameLower));
+                
+                if (!hasGoodPokemonMatch) {
+                    console.log(`🚫 [CardTrader] Match Pokemon non sufficientemente buono per bonus espansione: "${pokemonNameLower}" in "${cardNameLower}"`);
+                } else {
                 // BONUS per espansioni specifiche trovate nel titolo
                 if (titleInfo.expansion && result.expansion_name_en) {
                     const titleExpansion = titleInfo.expansion.toLowerCase();
@@ -2315,7 +2340,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                 }
                 
                 // BONUS per espansioni nell'image_url (solo se abbiamo già un buon match E l'espansione è specifica)
-                if (result.image_url && originalTitle && titleInfo.expansion) {
+                if (result.image_url && originalTitle && titleInfo.expansion && nameScore >= 10000) { // Solo se abbiamo un buon match Pokemon
                     const imageUrl = result.image_url.toLowerCase();
                     const titleLower = originalTitle.toLowerCase();
                     
@@ -2425,6 +2450,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
                         }
                     }
                 }
+            }
             }
             
             // PRIORITÀ ASSOLUTA: Se abbiamo un allenatore, cerca nel nome della carta
