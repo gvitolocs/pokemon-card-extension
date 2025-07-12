@@ -373,6 +373,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Gestisce la ricerca manuale dal popup
         handlePopupSearch(request.titleInfo, sendResponse);
         return true; // Mantieni il canale aperto per risposta asincrona
+    } else if (request.action === 'autoSearchCurrentPage') {
+        // Gestisce la ricerca automatica dalla pagina corrente
+        handleAutoSearchCurrentPage(sendResponse);
+        return true; // Mantieni il canale aperto per risposta asincrona
     }
     
     return true;
@@ -393,6 +397,95 @@ async function handlePopupSearch(titleInfo, sendResponse) {
         });
     } catch (error) {
         console.error('❌ [Popup] Errore nella ricerca:', error);
+        sendResponse({
+            success: false,
+            error: error.message
+        });
+    }
+}
+
+// Gestisce la ricerca automatica dalla pagina corrente
+async function handleAutoSearchCurrentPage(sendResponse) {
+    try {
+        console.log('🔍 [Popup] Ricerca automatica richiesta');
+        
+        // Estrai il titolo dalla pagina corrente
+        let title = null;
+        
+        if (window.location.hostname.includes('ebay')) {
+            // Per eBay
+            const titleSelectors = [
+                'h1.x-item-title__mainTitle',
+                '.x-item-title__mainTitle',
+                '[data-testid="x-item-title"] h1',
+                '[data-testid="item-title"]',
+                '.item-title',
+                'h1'
+            ];
+            
+            for (const selector of titleSelectors) {
+                const titleElem = document.querySelector(selector);
+                if (titleElem) {
+                    title = titleElem.textContent.replace(/\s+/g, ' ').trim();
+                    break;
+                }
+            }
+        } else if (window.location.hostname.includes('vinted')) {
+            // Per Vinted
+            const titleSelectors = [
+                '[data-testid="item-title"]',
+                '.item-title',
+                'h1',
+                '.title'
+            ];
+            
+            for (const selector of titleSelectors) {
+                const titleElem = document.querySelector(selector);
+                if (titleElem) {
+                    title = titleElem.textContent.replace(/\s+/g, ' ').trim();
+                    break;
+                }
+            }
+        }
+        
+        if (!title) {
+            console.log('❌ [Popup] Nessun titolo trovato nella pagina');
+            sendResponse({
+                success: false,
+                error: 'Nessun titolo trovato nella pagina'
+            });
+            return;
+        }
+        
+        console.log('📝 [Popup] Titolo estratto:', title);
+        
+        // Estrai informazioni dal titolo
+        const titleInfo = extractTitleInfo(title);
+        
+        if (!titleInfo.pokemonName) {
+            console.log('❌ [Popup] Nessun Pokemon trovato nel titolo');
+            sendResponse({
+                success: false,
+                error: 'Nessun Pokemon trovato nel titolo'
+            });
+            return;
+        }
+        
+        console.log('🎯 [Popup] Pokemon trovato:', titleInfo.pokemonName);
+        
+        // Cerca nel database
+        const results = await searchCardInDatabase(titleInfo);
+        
+        console.log('✅ [Popup] Risultati trovati:', results.length);
+        
+        sendResponse({
+            success: true,
+            titleInfo: titleInfo,
+            results: results
+        });
+        
+    } catch (error) {
+        console.error('❌ [Popup] Errore nella ricerca automatica:', error);
         sendResponse({
             success: false,
             error: error.message

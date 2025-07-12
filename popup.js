@@ -47,12 +47,59 @@ document.addEventListener('DOMContentLoaded', function() {
             // Verifica stato connessione
             checkConnectionStatus();
             
+            // Se siamo su eBay/Vinted, cerca automaticamente
+            await autoSearchCurrentPage();
+            
             // Aggiorna statistiche ogni 2 secondi
             setInterval(updateStatsFromStorage, 2000);
             
         } catch (error) {
             console.error('Errore nell\'inizializzazione del popup:', error);
             updateStatus('error', 'Errore di inizializzazione');
+        }
+    }
+    
+    // Ricerca automatica sulla pagina corrente
+    async function autoSearchCurrentPage() {
+        try {
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            
+            if (tab && (tab.url.includes('ebay') || tab.url.includes('vinted'))) {
+                // Mostra messaggio di caricamento
+                showResult('🔍 Cercando carta nella pagina corrente...', 'loading');
+                
+                // Chiedi al content script di estrarre il titolo e cercare
+                const response = await new Promise((resolve, reject) => {
+                    chrome.tabs.sendMessage(tab.id, { 
+                        action: 'autoSearchCurrentPage'
+                    }, function(response) {
+                        if (chrome.runtime.lastError) {
+                            reject(new Error('Errore di comunicazione con la pagina'));
+                        } else if (response && response.success) {
+                            resolve(response);
+                        } else {
+                            reject(new Error(response?.error || 'Errore sconosciuto'));
+                        }
+                    });
+                });
+                
+                if (response.titleInfo && response.results) {
+                    // Mostra i risultati automaticamente
+                    displayResults(response.results, response.titleInfo);
+                    
+                    // Aggiorna statistiche
+                    stats.linksGenerated += response.results.length;
+                    await saveStats();
+                    updateStats();
+                } else {
+                    showResult('❌ Nessuna carta Pokemon trovata in questa pagina', 'error');
+                }
+            } else {
+                showResult('⚠️ Apri una pagina eBay o Vinted per cercare automaticamente', 'info');
+            }
+        } catch (error) {
+            console.error('Errore nella ricerca automatica:', error);
+            showResult('❌ Errore nella ricerca automatica: ' + error.message, 'error');
         }
     }
     
