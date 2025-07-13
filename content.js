@@ -577,10 +577,6 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         if (inserted) {
             console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${bestResult.name_en || bestResult.pokemon_name}`);
             
-            // Cambia il colore in verde quando ha trovato il link
-            button.style.background = '#28a745';
-            console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
-            
             // Apri direttamente il link CardTrader quando si clicca
             button.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -589,18 +585,24 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
                 window.open(cardTraderUrl, '_blank');
             });
             
-            // Effetti hover migliorati (verde)
-            button.addEventListener('mouseenter', () => {
-                button.style.background = '#218838';
-                button.style.transform = 'scale(1.05)';
-                button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-            });
-            
-            button.addEventListener('mouseleave', () => {
+            // Cambia il colore in verde dopo un breve delay per simulare il caricamento
+            setTimeout(() => {
                 button.style.background = '#28a745';
-                button.style.transform = 'scale(1)';
-                button.style.boxShadow = 'none';
-            });
+                console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
+                
+                // Effetti hover migliorati (verde)
+                button.addEventListener('mouseenter', () => {
+                    button.style.background = '#218838';
+                    button.style.transform = 'scale(1.05)';
+                    button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.style.background = '#28a745';
+                    button.style.transform = 'scale(1)';
+                    button.style.boxShadow = 'none';
+                });
+            }, 100); // Delay di 100ms per mostrare l'effetto loading
         } else {
             console.log(`⚠️ [CardTrader] Impossibile inserire pulsante per ${bestResult.name_en || bestResult.pokemon_name}`);
         }
