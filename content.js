@@ -438,6 +438,7 @@ async function processListing(listingElement) {
         // Controllo immediato: se il pulsante è già presente, salta
         if (listingElement.hasAttribute('data-pokemon-linker-button-added') || 
             listingElement.querySelector('.pokemon-linker-button')) {
+            console.log('🚫 [CardTrader] Pulsante già presente, saltando');
             return;
         }
         
@@ -445,7 +446,18 @@ async function processListing(listingElement) {
         if (observerCache.has(listingElement) || 
             listingElement.hasAttribute('data-pokemon-linker-processed') ||
             processingElements.has(listingElement)) {
+            console.log('🚫 [CardTrader] Elemento già processato, saltando');
             return;
+        }
+        
+        // Controllo specifico per Cardmarket: evita duplicati
+        const hostname = window.location.hostname;
+        if (hostname.includes('cardmarket')) {
+            const existingButtons = document.querySelectorAll('.pokemon-linker-button');
+            if (existingButtons.length > 0) {
+                console.log(`🚫 [CardTrader] Già presenti ${existingButtons.length} pulsanti su Cardmarket, saltando`);
+                return;
+            }
         }
         
         // Marca come in fase di processamento
@@ -459,7 +471,6 @@ async function processListing(listingElement) {
         }
         
         // Controllo per evitare elementi non rilevanti (Vinted specifico)
-        const hostname = window.location.hostname;
         if (hostname.includes('vinted')) {
             // Controllo attributi data-testid
             const irrelevantTestIds = ['service', 'commission', 'fee', 'protection', 'payment'];
@@ -524,23 +535,45 @@ async function processListing(listingElement) {
         if (inserted) {
             console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${titleInfo.pokemonName}`);
             
-            // Cerca nel database
-            const results = await searchCardInDatabase(titleInfo, title);
-            if (results && results.length > 0) {
-                console.log(`✅ [CardTrader] Trovati ${results.length} risultati`);
-                
-                // Salva in cache per future ricerche
-                cardCache.set(cacheKey, { results, titleInfo });
-                
-                // Limita la dimensione della cache (max 100 elementi)
-                if (cardCache.size > 100) {
-                    const firstKey = cardCache.keys().next().value;
-                    cardCache.delete(firstKey);
+                    // Cerca nel database
+        console.log(`🔍 [CardTrader] Avvio ricerca per: "${title}"`);
+        let results = await searchCardInDatabase(titleInfo, title);
+        console.log(`🔍 [CardTrader] Risultati ricevuti:`, results);
+        
+        // Se non ci sono risultati e siamo su Vinted, prova a riavviare Supabase
+        if ((!results || results.length === 0) && hostname.includes('vinted')) {
+            console.log('🔄 [CardTrader] Nessun risultato su Vinted, tentativo di riavvio Supabase...');
+            
+            // Prova a reinizializzare Supabase
+            if (typeof initializeSupabase === 'function') {
+                try {
+                    const supabaseReady = await initializeSupabase();
+                    if (supabaseReady) {
+                        console.log('✅ [CardTrader] Supabase riavviato, riprovo la ricerca...');
+                        results = await searchCardInDatabase(titleInfo, title);
+                        console.log(`🔍 [CardTrader] Risultati dopo riavvio:`, results);
+                    }
+                } catch (error) {
+                    console.warn('⚠️ [CardTrader] Errore nel riavvio Supabase:', error);
                 }
-                
-                // Cambia il colore in verde quando ha trovato il link
-                button.style.background = '#28a745';
-                console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
+            }
+        }
+        
+        if (results && results.length > 0) {
+            console.log(`✅ [CardTrader] Trovati ${results.length} risultati`);
+            
+            // Salva in cache per future ricerche
+            cardCache.set(cacheKey, { results, titleInfo });
+            
+            // Limita la dimensione della cache (max 100 elementi)
+            if (cardCache.size > 100) {
+                const firstKey = cardCache.keys().next().value;
+                cardCache.delete(firstKey);
+            }
+            
+            // Cambia il colore in verde quando ha trovato il link
+            button.style.background = '#28a745';
+            console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde per: ${titleInfo.pokemonName}`);
                 
                 // Apri direttamente il link CardTrader quando si clicca
                 const bestResult = results[0];
@@ -563,22 +596,28 @@ async function processListing(listingElement) {
                     button.style.transform = 'scale(1)';
                     button.style.boxShadow = 'none';
                 });
-            } else {
-                console.log('❌ [CardTrader] Nessun risultato trovato nel database');
-                
-                // Effetti hover per pulsante grigio (disabilitato)
-                button.addEventListener('mouseenter', () => {
-                    button.style.background = '#5a6268';
-                    button.style.transform = 'scale(1.05)';
-                    button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
-                });
-                
-                button.addEventListener('mouseleave', () => {
-                    button.style.background = '#6c757d';
-                    button.style.transform = 'scale(1)';
-                    button.style.boxShadow = 'none';
-                });
+                    } else {
+            console.log('❌ [CardTrader] Nessun risultato trovato nel database');
+            
+            // Controlla se Supabase è disponibile
+            if (typeof window.supabaseClient === 'undefined' || !window.supabaseClient) {
+                console.log('⚠️ [CardTrader] Supabase non disponibile, pulsante rimane grigio');
+                button.innerHTML = 'CardTrader (DB offline)';
             }
+            
+            // Effetti hover per pulsante grigio (disabilitato)
+            button.addEventListener('mouseenter', () => {
+                button.style.background = '#5a6268';
+                button.style.transform = 'scale(1.05)';
+                button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+            });
+            
+            button.addEventListener('mouseleave', () => {
+                button.style.background = '#6c757d';
+                button.style.transform = 'scale(1)';
+                button.style.boxShadow = 'none';
+            });
+        }
         } else {
             console.log(`⚠️ [CardTrader] Impossibile inserire pulsante per ${titleInfo.pokemonName}`);
         }
@@ -699,11 +738,11 @@ function extractTitleFromListing(listingElement) {
 // Aggiungi i link CardTrader
 function addCardTraderLinks(listingElement, results, titleInfo) {
     try {
-        // Rimuovi tutti i pulsanti CardTrader esistenti nella pagina per evitare duplicati
-        const allExistingButtons = document.querySelectorAll('.pokemon-linker-button');
-        if (allExistingButtons.length > 0) {
-            console.log(`🧹 [CardTrader] Rimossi ${allExistingButtons.length} pulsanti esistenti dalla pagina`);
-            allExistingButtons.forEach(button => button.remove());
+        // Rimuovi solo i pulsanti CardTrader esistenti in questo elemento specifico
+        const existingButtons = listingElement.querySelectorAll('.pokemon-linker-button');
+        if (existingButtons.length > 0) {
+            console.log(`🧹 [CardTrader] Rimossi ${existingButtons.length} pulsanti esistenti da questo elemento`);
+            existingButtons.forEach(button => button.remove());
         }
         
         // Crea il pulsante con "CardTrader" (grigio di default)
