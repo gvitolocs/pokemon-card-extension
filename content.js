@@ -49,8 +49,7 @@ async function initializeExtension() {
             console.warn('⚠️ Funzione initializeSupabase non disponibile');
         }
         
-        // Pulisci attributi processati esistenti
-        cleanupProcessedAttributes();
+
         
         // Avvia l'osservatore per le nuove inserzioni
         startObserver();
@@ -63,55 +62,12 @@ async function initializeExtension() {
     }
 }
 
-// Funzione per pulire gli attributi processati
-function cleanupProcessedAttributes() {
-    const hostname = window.location.hostname;
-    
-    if (hostname.includes('vinted')) {
-        const cleanupSelectors = [
-            '[data-testid="item-attributes-upload_date"]',
-            '[data-testid="item-attributes-status"]',
-            '[data-testid="item-attributes-brand-menu-button"]',
-            '.details-list__item-value',
-            '.web_ui__Text__subtitle',
-            '.web_ui__Text__body',
-            '.web_ui__Spacer__',
-            '.web_ui__Divider__',
-            '.overflow-menu',
-            '.u-cursor-pointer',
-            'button',
-            'a'
-        ];
-        
-        cleanupSelectors.forEach(selector => {
-            const elements = document.querySelectorAll(selector);
-            elements.forEach(element => {
-                if (element.hasAttribute('data-pokemon-linker-processed')) {
-                    element.removeAttribute('data-pokemon-linker-processed');
-                }
-            });
-        });
-        
-        console.log('🧹 [CardTrader] Puliti attributi processati da elementi non rilevanti');
-    }
-    
-    // Pulisci anche gli attributi dei pulsanti per evitare duplicati
-    const buttonElements = document.querySelectorAll('[data-pokemon-linker-button-added]');
-    buttonElements.forEach(element => {
-        element.removeAttribute('data-pokemon-linker-button-added');
-    });
-    
-    if (buttonElements.length > 0) {
-        console.log(`🧹 [CardTrader] Puliti ${buttonElements.length} attributi pulsanti`);
-    }
-}
+
 
 // Avvia l'osservatore per rilevare nuove inserzioni
 function startObserver() {
     try {
         console.log('🔍 [CardTrader] Avvio osservatore ottimizzato...');
-        
-        cleanupProcessedAttributes();
         
         const observer = new MutationObserver((mutations) => {
             if (!isEnabled) return;
@@ -591,18 +547,6 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             allExistingButtons.forEach(button => button.remove());
         }
         
-        // Rimuovi pulsanti esistenti (per sicurezza) e pulisci attributi
-        const existingButtons = listingElement.querySelectorAll('.pokemon-linker-button');
-        existingButtons.forEach(button => button.remove());
-        
-        // Rimuovi attributi da tutti gli elementi figli
-        const allElements = listingElement.querySelectorAll('*');
-        allElements.forEach(el => {
-            el.removeAttribute('data-pokemon-linker-button-added');
-            el.removeAttribute('data-pokemon-linker-processed');
-        });
-        listingElement.removeAttribute('data-pokemon-linker-button-added');
-        
         // Prendi il miglior risultato (il primo)
         const bestResult = results[0];
         if (!bestResult) return;
@@ -631,8 +575,6 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         const inserted = insertLinkContainer(listingElement, button);
         
         if (inserted) {
-            // Marca l'elemento come già processato
-            listingElement.setAttribute('data-pokemon-linker-button-added', 'true');
             console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${bestResult.name_en || bestResult.pokemon_name}`);
             
             // Cambia il colore in verde quando ha trovato il link
@@ -684,38 +626,15 @@ function insertLinkContainer(listingElement, button) {
         for (const selector of insertAfterSelectors) {
             const element = listingElement.querySelector(selector);
             if (element && element.parentNode) {
-                // Verifica che il pulsante non sia già presente nel parent
                 const parent = element.parentNode;
-                if (!parent.querySelector('.pokemon-linker-button')) {
-                    // Verifica anche che non ci sia già un pulsante con lo stesso testo
-                    const existingButtons = parent.querySelectorAll('button');
-                    const hasCTButton = Array.from(existingButtons).some(btn => 
-                        btn.textContent.trim() === 'CardTrader' || 
-                        btn.classList.contains('pokemon-linker-button')
-                    );
-                    
-                    if (!hasCTButton) {
-                        parent.insertBefore(button, element.nextSibling);
-                        return true;
-                    }
-                }
-            }
-        }
-        
-        // Fallback: inserisci alla fine dell'elemento se non è già presente
-        if (!listingElement.querySelector('.pokemon-linker-button')) {
-            // Verifica anche che non ci sia già un pulsante con lo stesso testo
-            const existingButtons = listingElement.querySelectorAll('button');
-            const hasCTButton = Array.from(existingButtons).some(btn => 
-                btn.textContent.trim() === 'CardTrader' || 
-                btn.classList.contains('pokemon-linker-button')
-            );
-            
-            if (!hasCTButton) {
-                listingElement.appendChild(button);
+                parent.insertBefore(button, element.nextSibling);
                 return true;
             }
         }
+        
+        // Fallback: inserisci alla fine dell'elemento
+        listingElement.appendChild(button);
+        return true;
         
     } else if (hostname.includes('ebay')) {
         // Per eBay, inserisci dopo il titolo
@@ -728,88 +647,15 @@ function insertLinkContainer(listingElement, button) {
         for (const selector of insertAfterSelectors) {
             const element = listingElement.querySelector(selector);
             if (element && element.parentNode) {
-                // Verifica che il pulsante non sia già presente nel parent
                 const parent = element.parentNode;
-                if (!parent.querySelector('.pokemon-linker-button')) {
-                    // Verifica anche che non ci sia già un pulsante con lo stesso testo
-                    const existingButtons = parent.querySelectorAll('button');
-                    const hasCTButton = Array.from(existingButtons).some(btn => 
-                        btn.textContent.trim() === 'CardTrader' || 
-                        btn.classList.contains('pokemon-linker-button')
-                    );
-                    
-                    if (!hasCTButton) {
-                        parent.insertBefore(button, element.nextSibling);
-                        return true;
-                    }
-                }
-            }
-        }
-        
-        // Fallback: inserisci alla fine dell'elemento se non è già presente
-        if (!listingElement.querySelector('.pokemon-linker-button')) {
-            // Verifica anche che non ci sia già un pulsante con lo stesso testo
-            const existingButtons = listingElement.querySelectorAll('button');
-            const hasCTButton = Array.from(existingButtons).some(btn => 
-                btn.textContent.trim() === 'CardTrader' || 
-                btn.classList.contains('pokemon-linker-button')
-            );
-            
-            if (!hasCTButton) {
-                listingElement.appendChild(button);
+                parent.insertBefore(button, element.nextSibling);
                 return true;
             }
         }
-    } else if (hostname.includes('cardmarket')) {
-        // Per Cardmarket, inserisci dopo il titolo
-        const insertAfterSelectors = [
-            'h1',
-            '.col-12 .d-flex .flex-grow-1 h1',
-            '.product-details h1',
-            '.card-title',
-            '.product-title'
-        ];
         
-        for (const selector of insertAfterSelectors) {
-            const element = listingElement.querySelector(selector);
-            if (element && element.parentNode) {
-                // Verifica che il pulsante non sia già presente nel parent
-                const parent = element.parentNode;
-                
-                // Controlla se c'è già un pulsante CardTrader in tutto il contenitore
-                const existingButtons = parent.querySelectorAll('.pokemon-linker-button');
-                const hasCTButton = existingButtons.length > 0;
-                
-                // Controlla anche se c'è già un pulsante con il testo "CardTrader"
-                const allButtons = parent.querySelectorAll('button');
-                const hasCardTraderText = Array.from(allButtons).some(btn => 
-                    btn.textContent.trim() === 'CardTrader'
-                );
-                
-                if (!hasCTButton && !hasCardTraderText) {
-                    parent.insertBefore(button, element.nextSibling);
-                    return true;
-                } else {
-                    console.log(`ℹ️ [CardTrader] Pulsante già presente in Cardmarket, saltando inserimento`);
-                    return false;
-                }
-            }
-        }
-        
-        // Fallback: inserisci alla fine dell'elemento se non è già presente
-        if (!listingElement.querySelector('.pokemon-linker-button')) {
-            // Verifica anche che non ci sia già un pulsante con lo stesso testo
-            const existingButtons = listingElement.querySelectorAll('button');
-            const hasCTButton = Array.from(existingButtons).some(btn => 
-                btn.textContent.trim() === 'CardTrader' || 
-                btn.classList.contains('pokemon-linker-button')
-            );
-            
-            if (!hasCTButton) {
-                listingElement.appendChild(button);
-                return true;
-            }
-        }
+        // Fallback: inserisci alla fine dell'elemento
+        listingElement.appendChild(button);
+        return true;
     }
     
     return false;
@@ -916,10 +762,6 @@ async function handleAutoSearchCurrentPage(sendResponse) {
             let totalResults = 0;
             
             for (const listing of listings) {
-                if (listing.hasAttribute('data-pokemon-linker-processed')) {
-                    continue;
-                }
-                
                 const listingTitle = extractTitleFromListing(listing);
                 if (!listingTitle) continue;
                 
@@ -932,7 +774,6 @@ async function handleAutoSearchCurrentPage(sendResponse) {
                     totalResults += listingResults.length;
                 }
                 
-                listing.setAttribute('data-pokemon-linker-processed', 'true');
                 totalProcessed++;
             }
             
@@ -1214,7 +1055,7 @@ function patchCardmarketProductPage() {
                 console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (loading fallback)`);
             }
         }
-        titleElement.setAttribute('data-pokemon-linker-button-added', 'true');
+
         
         // Cerca nel database
         searchCardInDatabase(titleInfo, title).then(results => {
