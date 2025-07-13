@@ -547,10 +547,6 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             allExistingButtons.forEach(button => button.remove());
         }
         
-        // Prendi il miglior risultato (il primo)
-        const bestResult = results[0];
-        if (!bestResult) return;
-        
         // Crea il pulsante con "CardTrader" (grigio di default)
         const button = document.createElement('button');
         button.className = 'pokemon-linker-button';
@@ -575,20 +571,22 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         const inserted = insertLinkContainer(listingElement, button);
         
         if (inserted) {
-            console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${bestResult.name_en || bestResult.pokemon_name}`);
+            console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${titleInfo.pokemonName}`);
             
-            // Apri direttamente il link CardTrader quando si clicca
-            button.addEventListener('click', (e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
-                window.open(cardTraderUrl, '_blank');
-            });
-            
-            // Cambia il colore in verde dopo un breve delay per simulare il caricamento
-            setTimeout(() => {
+            // Cerca nel database e cambia colore quando trova risultati
+            const bestResult = results[0];
+            if (bestResult) {
+                // Cambia il colore in verde quando ha trovato il link
                 button.style.background = '#28a745';
                 console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
+                
+                // Apri direttamente il link CardTrader quando si clicca
+                button.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
+                    window.open(cardTraderUrl, '_blank');
+                });
                 
                 // Effetti hover migliorati (verde)
                 button.addEventListener('mouseenter', () => {
@@ -602,9 +600,24 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
                     button.style.transform = 'scale(1)';
                     button.style.boxShadow = 'none';
                 });
-            }, 100); // Delay di 100ms per mostrare l'effetto loading
+            } else {
+                console.log(`⚠️ [CardTrader] Nessun risultato trovato, pulsante rimane grigio`);
+                
+                // Effetti hover per pulsante grigio (disabilitato)
+                button.addEventListener('mouseenter', () => {
+                    button.style.background = '#5a6268';
+                    button.style.transform = 'scale(1.05)';
+                    button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.style.background = '#6c757d';
+                    button.style.transform = 'scale(1)';
+                    button.style.boxShadow = 'none';
+                });
+            }
         } else {
-            console.log(`⚠️ [CardTrader] Impossibile inserire pulsante per ${bestResult.name_en || bestResult.pokemon_name}`);
+            console.log(`⚠️ [CardTrader] Impossibile inserire pulsante per ${titleInfo.pokemonName}`);
         }
         
     } catch (error) {
