@@ -494,15 +494,11 @@ function getListingSelectors() {
             '.srp-results .s-item__title'
         ];
     } else if (hostname.includes('cardmarket')) {
+        // Per Cardmarket, usa solo selettori per listing (non pagine prodotto)
+        // Le pagine prodotto sono gestite dal patch
         return [
-            // Selettori più specifici per evitare duplicati
-            '.page-title-container .flex-grow-1 h1', // h1 specifico della pagina prodotto
-            '.col-12 .d-flex .flex-grow-1 h1', // struttura tipica Cardmarket
-            // Rimuovi selettori troppo generici che causano duplicati
-            // '.page-title-container', // troppo generico
-            // 'h1', // troppo generico
-            // '.product-title', // troppo generico
-            // '.col-12 .product-title' // troppo generico
+            '.product-title', // solo per listing
+            '.col-12 .product-title' // solo per listing
         ];
     }
     
@@ -1329,10 +1325,140 @@ function patchVintedProductPage() {
 function patchCardmarketProductPage() {
     if (!window.location.hostname.includes('cardmarket')) return;
     
-    // DISABILITATO: L'observer si occupa già di tutto per Cardmarket
-    // Questo evita duplicati e conflitti con l'observer
-    console.log('🚫 [CardTrader] Patch Cardmarket disabilitato - l\'observer gestisce tutto');
-    return;
+    try {
+        // Cerca il titolo del prodotto
+        const titleSelectors = [
+            '.page-title-container h1',
+            'h1',
+            '.col-12 .d-flex .flex-grow-1 h1',
+            '.product-details h1',
+            '.card-title',
+            '.product-title'
+        ];
+        
+        let titleElement = null;
+        for (const selector of titleSelectors) {
+            titleElement = document.querySelector(selector);
+            if (titleElement) break;
+        }
+        
+        if (!titleElement) {
+            console.log('⚠️ [CardTrader] Titolo prodotto Cardmarket non trovato');
+            return;
+        }
+        
+        // Per Cardmarket, prendi TUTTO il contenuto dell'h1 inclusi gli span (per avere l'espansione)
+        let title = titleElement.textContent.trim();
+        
+        if (!title) {
+            console.log('⚠️ [CardTrader] Titolo prodotto Cardmarket vuoto');
+            return;
+        }
+        
+        console.log(`🔍 [CardTrader] Titolo prodotto Cardmarket: "${title}"`);
+        
+        // Estrai informazioni dal titolo
+        const titleInfo = extractTitleInfo(title);
+        if (!titleInfo.pokemonName) {
+            console.log('🚫 [CardTrader] Nessun Pokemon trovato nel titolo prodotto');
+            return;
+        }
+        
+        // Crea subito il pulsante grigio (loading)
+        const button = document.createElement('button');
+        button.className = 'pokemon-linker-button';
+        button.innerHTML = 'CardTrader';
+        button.style.cssText = `
+            margin: 0;
+            padding: 6px 12px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            cursor: pointer;
+            font-weight: bold;
+            min-width: 90px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            text-align: center;
+        `;
+        
+        // Cerca il link "Contact Support" e sostituiscilo con il pulsante CardTrader
+        const supportLink = document.querySelector('a[href*="support/tickets/new"]');
+        if (supportLink && supportLink.parentNode) {
+            // Sostituisci il link di supporto con il pulsante CardTrader
+            supportLink.parentNode.replaceChild(button, supportLink);
+            console.log(`✅ [CardTrader] Sostituito link supporto con pulsante CT su Cardmarket (loading)`);
+        } else {
+            // Cerca il contenitore del link di supporto e inserisci il pulsante lì
+            const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
+            if (supportContainer) {
+                supportContainer.appendChild(button);
+                console.log(`✅ [CardTrader] Inserito pulsante CT nel contenitore supporto su Cardmarket (loading)`);
+            } else {
+                // Fallback: inserisci direttamente nell'h1
+                titleElement.appendChild(button);
+                console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (loading fallback)`);
+            }
+        }
+
+        
+        // Cerca nel database
+        searchCardInDatabase(titleInfo, title).then(results => {
+            if (results && results.length > 0) {
+                // Cambia il colore in verde quando ha trovato il link
+                button.style.background = '#28a745';
+                console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
+                
+                // Apri direttamente il link CardTrader quando si clicca
+                button.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const bestResult = results[0];
+                    const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
+                    window.open(cardTraderUrl, '_blank');
+                });
+                
+                // Effetti hover migliorati (verde)
+                button.addEventListener('mouseenter', () => {
+                    button.style.background = '#218838';
+                    button.style.transform = 'scale(1.02)';
+                    button.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.style.background = '#28a745';
+                    button.style.transform = 'scale(1)';
+                    button.style.boxShadow = 'none';
+                });
+                
+            } else {
+                // Mantieni grigio se non ha trovato risultati
+                console.log(`⚠️ [CardTrader] Nessun risultato trovato, pulsante rimane grigio`);
+                
+                // Effetti hover per pulsante grigio (disabilitato)
+                button.addEventListener('mouseenter', () => {
+                    button.style.background = '#5a6268';
+                    button.style.transform = 'scale(1.02)';
+                    button.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.style.background = '#6c757d';
+                    button.style.transform = 'scale(1)';
+                    button.style.boxShadow = 'none';
+                });
+            }
+        });
+        
+    } catch (error) {
+        console.error('❌ [CardTrader] Errore nel patch pagina prodotto Cardmarket:', error);
+    }
+}
     
     try {
         // Cerca il titolo del prodotto
