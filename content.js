@@ -331,9 +331,10 @@ function getListingSelectors() {
             '[data-testid="item-card"]',
             '.feed-grid__item',
             '.web_ui__Card__body',
-            '.web_ui__Text__title',
-            '.web_ui__Text__subtitle',
-            '.web_ui__Text__body'
+            // Selettori più specifici per evitare elementi non rilevanti
+            '[data-testid="item-page-summary-plugin"] .web_ui__Text__title',
+            '.item-details .web_ui__Text__title',
+            '.product-details .web_ui__Text__title'
         ];
     } else if (hostname.includes('ebay')) {
         return [
@@ -385,6 +386,38 @@ async function processListing(listingElement) {
         if (!title) {
             console.log('🚫 [CardTrader] Nessun titolo trovato, saltando');
             return;
+        }
+        
+        // Controllo per evitare elementi non rilevanti (Vinted specifico)
+        const hostname = window.location.hostname;
+        if (hostname.includes('vinted')) {
+            // Controllo attributi data-testid
+            const irrelevantTestIds = ['service', 'commission', 'fee', 'protection', 'payment'];
+            const hasIrrelevantTestId = irrelevantTestIds.some(testId => 
+                listingElement.getAttribute('data-testid')?.includes(testId) ||
+                listingElement.querySelector(`[data-testid*="${testId}"]`)
+            );
+            
+            if (hasIrrelevantTestId) {
+                console.log(`🚫 [CardTrader] Elemento con data-testid non rilevante rilevato, saltando`);
+                return;
+            }
+            
+            // Controllo testo non rilevante
+            const irrelevantTexts = [
+                'commissione', 'protezione', 'acquisti', 'spedizione', 'consegna',
+                'pagamento', 'sicurezza', 'garanzia', 'restituzione', 'rimborso',
+                'assistenza', 'supporto', 'aiuto', 'informazioni', 'condizioni',
+                'privacy', 'cookies', 'termini', 'legali', 'contatti'
+            ];
+            
+            const titleLower = title.toLowerCase();
+            const hasIrrelevantText = irrelevantTexts.some(text => titleLower.includes(text));
+            
+            if (hasIrrelevantText) {
+                console.log(`🚫 [CardTrader] Elemento non rilevante rilevato: "${title}", saltando`);
+                return;
+            }
         }
         
         // Genera una chiave cache per questa ricerca
@@ -452,17 +485,13 @@ function extractTitleFromListing(listingElement) {
     const hostname = window.location.hostname;
     
     if (hostname.includes('vinted')) {
-        // Selettori per Vinted
+        // Selettori per Vinted (più specifici)
         const titleSelectors = [
             '[data-testid="item-card-title"]',
-            '.web_ui__Text__title',
-            '.web_ui__Text__subtitle',
-            '.web_ui__Text__body',
-            'h3',
-            'h4',
-            'h5',
-            '.title',
-            '.name'
+            '[data-testid="item-page-summary-plugin"] .web_ui__Text__title',
+            '.item-details .web_ui__Text__title',
+            '.product-details .web_ui__Text__title',
+            '.web_ui__Text__title:not([data-testid*="service"]):not([data-testid*="commission"])'
         ];
         
         for (const selector of titleSelectors) {
