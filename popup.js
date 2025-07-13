@@ -166,16 +166,20 @@ document.addEventListener('DOMContentLoaded', function() {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
             
             if (tab && (tab.url.includes('ebay') || tab.url.includes('vinted') || tab.url.includes('cardmarket'))) {
+                console.log(`🔍 [Popup] Controllando pagina: ${tab.url}`);
                 // Chiedi al content script di estrarre il titolo
                 const response = await new Promise((resolve, reject) => {
                     chrome.tabs.sendMessage(tab.id, { 
                         action: 'autoSearchCurrentPage'
                     }, function(response) {
                         if (chrome.runtime.lastError) {
+                            console.log(`❌ [Popup] Errore runtime:`, chrome.runtime.lastError);
                             resolve(null);
                         } else if (response && response.success && response.results && response.results.length > 0) {
+                            console.log(`✅ [Popup] Risposta ricevuta con ${response.results.length} risultati`);
                             resolve(response);
                         } else {
+                            console.log(`⚠️ [Popup] Nessun risultato trovato`);
                             resolve(null);
                         }
                     });

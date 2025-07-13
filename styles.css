@@ -8,12 +8,12 @@
 .cardtrader-link-badge a {
     display: inline-flex;
     align-items: center;
-    padding: 6px 12px;
+    padding: 8px 16px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     text-decoration: none;
     border-radius: 12px;
-    font-size: 13px;
+    font-size: 15px;
     font-weight: 500;
     transition: all 0.2s ease;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
@@ -38,7 +38,7 @@
 }
 
 .badge-text {
-    font-size: 14px;
+    font-size: 16px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
     font-weight: 600;
@@ -83,12 +83,12 @@
 /* Responsive */
 @media (max-width: 768px) {
     .cardtrader-link-badge a {
-        font-size: 12px;
-        padding: 5px 10px;
+        font-size: 14px;
+        padding: 6px 12px;
     }
     
     .badge-text {
-        font-size: 12px;
+        font-size: 14px;
     }
 }
 

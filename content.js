@@ -614,15 +614,15 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         button.style.cssText = `
             margin-top: 8px;
             margin-left: 8px;
-            padding: 6px 12px;
+            padding: 8px 16px;
             background: #28a745;
             color: white;
             border: none;
             border-radius: 8px;
-            font-size: 10px;
+            font-size: 14px;
             cursor: pointer;
             font-weight: bold;
-            min-width: 80px;
+            min-width: 100px;
             display: inline-block;
             transition: all 0.2s ease;
         `;
@@ -838,35 +838,122 @@ async function handleAutoSearchCurrentPage(sendResponse) {
     try {
         console.log('🔍 [CardTrader] Ricerca automatica pagina corrente');
         
-        const listings = findListings();
-        let totalProcessed = 0;
-        let totalResults = 0;
+        const hostname = window.location.hostname;
+        let title = '';
+        let titleInfo = null;
+        let results = [];
         
-        for (const listing of listings) {
-            if (listing.hasAttribute('data-pokemon-linker-processed')) {
-                continue;
+        // Per pagine prodotto, estrai il titolo direttamente
+        if (hostname.includes('cardmarket')) {
+            const titleSelectors = [
+                '.page-title-container h1',
+                'h1',
+                '.col-12 .d-flex .flex-grow-1 h1',
+                '.product-details h1',
+                '.card-title',
+                '.product-title'
+            ];
+            
+            let titleElement = null;
+            for (const selector of titleSelectors) {
+                titleElement = document.querySelector(selector);
+                if (titleElement) break;
             }
             
-            const title = extractTitleFromListing(listing);
-            if (!title) continue;
+            if (titleElement) {
+                title = titleElement.textContent.trim();
+                console.log(`🔍 [CardTrader] Titolo Cardmarket: "${title}"`);
+            }
+        } else if (hostname.includes('ebay')) {
+            const titleSelectors = [
+                'h1.x-item-title__mainTitle',
+                'h1[data-testid="x-item-title__mainTitle"]',
+                'h1.x-item-title__titleText',
+                '[data-testid="x-item-title"] h1',
+                'h1[class*="title"]',
+                'h1'
+            ];
             
-            const titleInfo = extractTitleInfo(title);
-            if (!titleInfo.pokemonName) continue;
-            
-            const results = await searchCardInDatabase(titleInfo, title);
-            if (results && results.length > 0) {
-                addCardTraderLinks(listing, results, titleInfo);
-                totalResults += results.length;
+            let titleElement = null;
+            for (const selector of titleSelectors) {
+                titleElement = document.querySelector(selector);
+                if (titleElement) break;
             }
             
-            listing.setAttribute('data-pokemon-linker-processed', 'true');
-            totalProcessed++;
+            if (titleElement) {
+                title = titleElement.textContent.trim();
+                console.log(`🔍 [CardTrader] Titolo eBay: "${title}"`);
+            }
+        } else if (hostname.includes('vinted')) {
+            const titleSelectors = [
+                '[data-testid="item-title"]',
+                'h1[data-testid="item-title"]',
+                'h1',
+                '.web_ui__Text__title',
+                '.web_ui__Text__subtitle'
+            ];
+            
+            let titleElement = null;
+            for (const selector of titleSelectors) {
+                titleElement = document.querySelector(selector);
+                if (titleElement) break;
+            }
+            
+            if (titleElement) {
+                title = titleElement.textContent.trim();
+                console.log(`🔍 [CardTrader] Titolo Vinted: "${title}"`);
+            }
+        }
+        
+        // Se non abbiamo trovato un titolo di prodotto, cerca nelle liste
+        if (!title) {
+            const listings = findListings();
+            let totalProcessed = 0;
+            let totalResults = 0;
+            
+            for (const listing of listings) {
+                if (listing.hasAttribute('data-pokemon-linker-processed')) {
+                    continue;
+                }
+                
+                const listingTitle = extractTitleFromListing(listing);
+                if (!listingTitle) continue;
+                
+                const listingTitleInfo = extractTitleInfo(listingTitle);
+                if (!listingTitleInfo.pokemonName) continue;
+                
+                const listingResults = await searchCardInDatabase(listingTitleInfo, listingTitle);
+                if (listingResults && listingResults.length > 0) {
+                    addCardTraderLinks(listing, listingResults, listingTitleInfo);
+                    totalResults += listingResults.length;
+                }
+                
+                listing.setAttribute('data-pokemon-linker-processed', 'true');
+                totalProcessed++;
+            }
+            
+            sendResponse({
+                success: true,
+                processed: totalProcessed,
+                results: totalResults
+            });
+            return;
+        }
+        
+        // Per pagine prodotto, cerca nel database
+        if (title) {
+            titleInfo = extractTitleInfo(title);
+            if (titleInfo.pokemonName) {
+                results = await searchCardInDatabase(titleInfo, title);
+                console.log(`🔍 [CardTrader] Risultati trovati: ${results ? results.length : 0}`);
+            }
         }
         
         sendResponse({
-            success: true,
-            processed: totalProcessed,
-            results: totalResults
+            success: results && results.length > 0,
+            titleInfo: titleInfo,
+            results: results || [],
+            processed: 1
         });
         
     } catch (error) {
@@ -1096,15 +1183,15 @@ function patchCardmarketProductPage() {
                     button.style.cssText = `
                         margin-top: 8px;
                         margin-left: 8px;
-                        padding: 6px 12px;
+                        padding: 8px 16px;
                         background: #28a745;
                         color: white;
                         border: none;
                         border-radius: 8px;
-                        font-size: 10px;
+                        font-size: 14px;
                         cursor: pointer;
                         font-weight: bold;
-                        min-width: 80px;
+                        min-width: 100px;
                         display: inline-block;
                         transition: all 0.2s ease;
                     `;
