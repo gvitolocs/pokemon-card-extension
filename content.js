@@ -1195,8 +1195,13 @@ function patchVintedProductPage() {
                     linkContainer.appendChild(linkElement);
                 }
                 
-                // Inserisci dopo il titolo
-                titleElement.parentNode.insertBefore(linkContainer, titleElement.nextSibling);
+                // Inserisci dopo il titolo (con controllo per evitare errori DOM)
+                if (titleElement.parentNode && !titleElement.parentNode.contains(linkContainer)) {
+                    titleElement.parentNode.insertBefore(linkContainer, titleElement.nextSibling);
+                } else {
+                    console.log('⚠️ [CardTrader] Impossibile inserire link container, fallback...');
+                    titleElement.appendChild(linkContainer);
+                }
                 
                 console.log(`✅ [CardTrader] Aggiunti ${maxLinks} link CardTrader alla pagina prodotto`);
             }
@@ -1348,8 +1353,13 @@ function patchCardmarketProductPage() {
 
 // Estrai informazioni dal titolo
 function extractTitleInfo(title) {
-    console.log(`🔍 [CardTrader] Processando titolo: "${title}"`);
-    const titleLower = title.toLowerCase();
+    // Pulisci il titolo da "CardTrader" e altri elementi dell'estensione
+    let cleanTitle = title.replace(/\bCardTrader\b/g, '').trim();
+    cleanTitle = cleanTitle.replace(/\bDB offline\b/g, '').trim();
+    cleanTitle = cleanTitle.replace(/\bCaricamento\.\.\.\b/g, '').trim();
+    
+    console.log(`🔍 [CardTrader] Processando titolo: "${cleanTitle}" (originale: "${title}")`);
+    const titleLower = cleanTitle.toLowerCase();
     
     // Lista completa di tutti i Pokemon (Generazioni 1-9)
     const pokemonNames = [
@@ -1873,8 +1883,14 @@ function extractTitleInfo(title) {
     
     let trainerName = null;
     for (const trainer of trainerNames) {
-        if (titleLower.includes(trainer.toLowerCase())) {
+        // Evita di rilevare trainer names che sono solo lettere singole (come "n" in "giratina")
+        if (trainer.length <= 1) continue;
+        
+        // Cerca il trainer name come parola separata
+        const trainerRegex = new RegExp(`\\b${trainer.toLowerCase()}\\b`, 'i');
+        if (trainerRegex.test(titleLower)) {
             trainerName = trainer;
+            console.log(`🎯 [CardTrader] Trainer name rilevato: "${trainer}"`);
             break;
         }
     }
@@ -2060,13 +2076,13 @@ function extractTitleInfo(title) {
     }
     
     // Verifica se è una carta V
-    const isVCard = /\bv\b/i.test(title);
+    const isVCard = /\bv\b/i.test(cleanTitle);
     if (isVCard) {
         console.log(`🎯 [CardTrader] Carta V rilevata nel titolo`);
     }
     
     // Verifica se è una carta GX
-    const isGXCard = /\bgx\b/i.test(title);
+    const isGXCard = /\bgx\b/i.test(cleanTitle);
     if (isGXCard) {
         console.log(`🎯 [CardTrader] Carta GX rilevata nel titolo`);
     }
