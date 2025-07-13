@@ -48,7 +48,10 @@ async function updateStats(type, increment = 1) {
 
 // Gestione messaggi dal content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    console.log('📨 [Background] Messaggio ricevuto:', request);
+    
     if (request.action === 'updateIcon') {
+        console.log('🎨 [Background] Aggiornamento icona a:', request.status);
         updateIcon(request.status);
         sendResponse({ success: true });
     } else if (request.action === 'updateStats') {

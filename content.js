@@ -885,12 +885,15 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         if (inserted) {
             console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${titleInfo.pokemonName}`);
             
-            // Cerca nel database e cambia colore quando trova risultati
-            const bestResult = results[0];
-            if (bestResult) {
-                // Cambia il colore in verde quando ha trovato il link
-                button.style.background = '#28a745';
-                console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
+                    // Cerca nel database e cambia colore quando trova risultati
+        console.log(`🔍 [CardTrader] Risultati ricevuti: ${results.length} risultati`);
+        console.log(`🔍 [CardTrader] Primo risultato:`, results[0]);
+        
+        const bestResult = results[0];
+        if (bestResult) {
+            // Cambia il colore in verde quando ha trovato il link
+            button.style.background = '#28a745';
+            console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
                 
                 // Apri direttamente il link CardTrader quando si clicca
                 button.addEventListener('click', (e) => {
