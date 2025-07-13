@@ -977,9 +977,12 @@ function insertLinkContainer(listingElement, button) {
             }
         }
         
-        // Fallback: inserisci alla fine dell'elemento
-        listingElement.appendChild(button);
-        return true;
+        // Fallback: inserisci dopo l'elemento
+        if (listingElement.parentNode) {
+            listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
+            return true;
+        }
+        return false;
         
     } else if (hostname.includes('ebay')) {
         // Per eBay, inserisci dopo il titolo
@@ -998,9 +1001,38 @@ function insertLinkContainer(listingElement, button) {
             }
         }
         
-        // Fallback: inserisci alla fine dell'elemento
-        listingElement.appendChild(button);
-        return true;
+        // Fallback: inserisci dopo l'elemento
+        if (listingElement.parentNode) {
+            listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
+            return true;
+        }
+        return false;
+    } else if (hostname.includes('cardmarket')) {
+        // Per Cardmarket, inserisci dopo il titolo
+        const insertAfterSelectors = [
+            '.col-12 .d-flex .flex-grow-1 h1',
+            '.product-details h1',
+            '.card-title',
+            '.product-title',
+            'h1',
+            '.page-title-container h1'
+        ];
+        
+        for (const selector of insertAfterSelectors) {
+            const element = listingElement.querySelector(selector);
+            if (element && element.parentNode) {
+                const parent = element.parentNode;
+                parent.insertBefore(button, element.nextSibling);
+                return true;
+            }
+        }
+        
+        // Fallback: inserisci dopo l'elemento
+        if (listingElement.parentNode) {
+            listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
+            return true;
+        }
+        return false;
     }
     
     return false;
