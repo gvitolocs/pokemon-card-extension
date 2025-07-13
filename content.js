@@ -477,10 +477,10 @@ function extractTitleFromListing(listingElement) {
             if (element && element.textContent && element.textContent.trim()) {
                 console.log(`🔍 [CardTrader] Cardmarket selettore trovato: "${selector}"`);
                 let title = '';
-                // Se il titolo è in un h1 con uno span, prendi solo il testo principale (prima del primo span)
-                if (element.tagName === 'H1' && element.childNodes.length > 1 && element.childNodes[0].nodeType === Node.TEXT_NODE) {
-                    title = element.childNodes[0].textContent.trim();
-                    console.log(`🔍 [CardTrader] Cardmarket H1 con span - Titolo estratto: "${title}"`);
+                // Per Cardmarket, prendi TUTTO il contenuto dell'h1 inclusi gli span (per avere l'espansione)
+                if (element.tagName === 'H1') {
+                    title = element.textContent.trim();
+                    console.log(`🔍 [CardTrader] Cardmarket H1 completo - Titolo estratto: "${title}"`);
                 } else {
                     title = element.textContent.trim();
                     console.log(`🔍 [CardTrader] Cardmarket titolo normale - Titolo estratto: "${title}"`);
@@ -894,18 +894,8 @@ function patchCardmarketProductPage() {
             return;
         }
         
-        // Estrai il titolo escludendo gli span (come nella logica di estrazione)
-        let title = '';
-        if (titleElement.querySelector('span')) {
-            // Se ci sono span, prendi solo il testo principale
-            const spans = titleElement.querySelectorAll('span');
-            title = titleElement.textContent;
-            spans.forEach(span => {
-                title = title.replace(span.textContent, '').trim();
-            });
-        } else {
-            title = titleElement.textContent.trim();
-        }
+        // Per Cardmarket, prendi TUTTO il contenuto dell'h1 inclusi gli span (per avere l'espansione)
+        let title = titleElement.textContent.trim();
         
         if (!title) {
             console.log('⚠️ [CardTrader] Titolo prodotto Cardmarket vuoto');
