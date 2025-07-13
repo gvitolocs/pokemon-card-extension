@@ -1785,7 +1785,7 @@ function extractTitleInfo(title) {
         }
     }
     
-    // Lista completa di Trainer (tutti i trainer principali)
+    // Lista completa di Trainer (spostata dopo la definizione di expansions e cardTypes)
     const trainerNames = [
         // Gym Leaders Kanto
         'brock', 'misty', 'lt. surge', 'erika', 'koga', 'sabrina', 'blaine', 'giovanni',
@@ -1796,9 +1796,9 @@ function extractTitleInfo(title) {
         // Protagonisti e rivali
         'red', 'blue', 'green', 'leaf', 'yellow', 'crystal', 'ethan', 'lyra', 'kris',
         'brendan', 'may', 'ruby', 'sapphire', 'emerald', 'lucas', 'dawn', 'diamond', 'pearl', 'platinum',
-        'hilbert', 'hilda', 'nate', 'rosa', 'black', 'white', 'black 2', 'white 2',
+        'hilbert', 'hilda', 'nate', 'rosa', 'black 2', 'white 2',
         'calem', 'serena', 'x', 'y', 'elio', 'selene', 'sun', 'moon', 'ultra sun', 'ultra moon',
-        'victor', 'gloria', 'sword', 'shield', 'florian', 'juliana', 'scarlet', 'violet',
+        'victor', 'gloria', 'florian', 'juliana',
         
         // Gym Leaders Johto
         'falkner', 'bugsy', 'whitney', 'morty', 'chuck', 'jasmine', 'pryce', 'clair',
@@ -1880,43 +1880,6 @@ function extractTitleInfo(title) {
         'calem', 'serena', 'x', 'y', 'elio', 'selene', 'sun', 'moon', 'ultra sun', 'ultra moon',
         'victor', 'gloria', 'florian', 'juliana'
     ];
-    
-    let trainerName = null;
-    for (const trainer of trainerNames) {
-        // Evita di rilevare trainer names che sono solo lettere singole (come "n" in "giratina")
-        if (trainer.length <= 1) continue;
-        
-        // Cerca il trainer name come parola separata
-        const trainerRegex = new RegExp(`\\b${trainer.toLowerCase()}\\b`, 'i');
-        if (trainerRegex.test(titleLower)) {
-            // Controlla se il trainer name fa parte di un'espansione
-            let isPartOfExpansion = false;
-            for (const exp of expansions) {
-                if (exp.toLowerCase().includes(trainer.toLowerCase())) {
-                    console.log(`🚫 [CardTrader] Trainer "${trainer}" ignorato perché parte dell'espansione "${exp}"`);
-                    isPartOfExpansion = true;
-                    break;
-                }
-            }
-            
-            // Controlla anche se fa parte di tipi di carta
-            if (!isPartOfExpansion) {
-                for (const type of cardTypes) {
-                    if (type.toLowerCase().includes(trainer.toLowerCase())) {
-                        console.log(`🚫 [CardTrader] Trainer "${trainer}" ignorato perché parte del tipo "${type}"`);
-                        isPartOfExpansion = true;
-                        break;
-                    }
-                }
-            }
-            
-            if (!isPartOfExpansion) {
-                trainerName = trainer;
-                console.log(`🎯 [CardTrader] Trainer name rilevato: "${trainer}"`);
-                break;
-            }
-        }
-    }
     
     // Cerca tipi di carta specifici (GX, V, VMAX, VSTAR, EX, ecc.)
     const cardTypes = [
@@ -2108,6 +2071,44 @@ function extractTitleInfo(title) {
     const isGXCard = /\bgx\b/i.test(cleanTitle);
     if (isGXCard) {
         console.log(`🎯 [CardTrader] Carta GX rilevata nel titolo`);
+    }
+    
+    // Cerca trainer names (dopo aver definito expansions e cardTypes)
+    let trainerName = null;
+    for (const trainer of trainerNames) {
+        // Evita di rilevare trainer names che sono solo lettere singole (come "n" in "giratina")
+        if (trainer.length <= 1) continue;
+        
+        // Cerca il trainer name come parola separata
+        const trainerRegex = new RegExp(`\\b${trainer.toLowerCase()}\\b`, 'i');
+        if (trainerRegex.test(titleLower)) {
+            // Controlla se il trainer name fa parte di un'espansione
+            let isPartOfExpansion = false;
+            for (const exp of expansions) {
+                if (exp.toLowerCase().includes(trainer.toLowerCase())) {
+                    console.log(`🚫 [CardTrader] Trainer "${trainer}" ignorato perché parte dell'espansione "${exp}"`);
+                    isPartOfExpansion = true;
+                    break;
+                }
+            }
+            
+            // Controlla anche se fa parte di tipi di carta
+            if (!isPartOfExpansion) {
+                for (const type of cardTypes) {
+                    if (type.toLowerCase().includes(trainer.toLowerCase())) {
+                        console.log(`🚫 [CardTrader] Trainer "${trainer}" ignorato perché parte del tipo "${type}"`);
+                        isPartOfExpansion = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!isPartOfExpansion) {
+                trainerName = trainer;
+                console.log(`🎯 [CardTrader] Trainer name rilevato: "${trainer}"`);
+                break;
+            }
+        }
     }
     
     return {
