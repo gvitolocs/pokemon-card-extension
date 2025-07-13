@@ -1143,6 +1143,37 @@ function extractTitleInfo(title) {
         }
     }
     
+    // Estrazione specifica per Cardmarket: cerca pattern come "Pokemon (SET 123)" o "Pokemon (SET123)"
+    let cardmarketMatch = title.match(/([a-z]+)\s+\(([a-z]{2,4})\s*(\d+)\)/i);
+    
+    // Se non trova il pattern con parentesi, cerca senza parentesi: "Pokemon SET 123"
+    if (!cardmarketMatch) {
+        cardmarketMatch = title.match(/([a-z]+)\s+([a-z]{2,4})\s+(\d+)/i);
+    }
+    
+    if (cardmarketMatch) {
+        const [, extractedPokemon, setCode, cardNumber] = cardmarketMatch;
+        console.log(`🎯 [CardTrader] Pattern Cardmarket trovato: Pokemon="${extractedPokemon}", Set="${setCode}", Numero="${cardNumber}"`);
+        
+        // Se il Pokemon estratto dal pattern corrisponde a un Pokemon valido
+        const extractedPokemonLower = extractedPokemon.toLowerCase();
+        if (pokemonNames.includes(extractedPokemonLower)) {
+            pokemonName = extractedPokemon;
+            console.log(`✅ [CardTrader] Pokemon confermato dal pattern Cardmarket: "${pokemonName}"`);
+        } else {
+            // Cerca un match fuzzy nel caso il nome non sia esatto
+            for (const pokemon of pokemonNames) {
+                if (pokemon.toLowerCase() === extractedPokemonLower || 
+                    pokemon.toLowerCase().includes(extractedPokemonLower) || 
+                    extractedPokemonLower.includes(pokemon.toLowerCase())) {
+                    pokemonName = pokemon;
+                    console.log(`✅ [CardTrader] Pokemon trovato con match fuzzy dal pattern Cardmarket: "${extractedPokemon}" -> "${pokemonName}"`);
+                    break;
+                }
+            }
+        }
+    }
+    
     // Se non trova match esatti, cerca match fuzzy
     if (!pokemonName) {
         console.log(`🔍 [CardTrader] Nessun match esatto, cercando match fuzzy...`);
@@ -1457,11 +1488,125 @@ function extractTitleInfo(title) {
     ];
     
     let expansion = null;
-    for (const exp of expansions) {
-        if (titleLower.includes(exp.toLowerCase())) {
-            expansion = exp;
-            break;
+    
+    // Se abbiamo un pattern Cardmarket, usa l'espansione dal pattern
+    if (cardmarketMatch) {
+        const [, , setCode, cardNumber] = cardmarketMatch;
+        
+        // Mappa dei codici set Cardmarket alle espansioni
+        const setCodeMap = {
+            // Black & White Series
+            'bw': 'black & white',
+            'nxd': 'next destinies',
+            'dex': 'dark explorers',
+            'drx': 'dragons exalted',
+            'bcr': 'boundaries crossed',
+            'pls': 'plasma storm',
+            'plf': 'plasma freeze',
+            'plb': 'plasma blast',
+            'lt': 'legendary treasures',
+            
+            // XY Series
+            'xy': 'xy',
+            'flf': 'flashfire',
+            'ffi': 'furious fists',
+            'phf': 'phantom forces',
+            'pcl': 'primal clash',
+            'ros': 'roaring skies',
+            'aor': 'ancient origins',
+            'bkt': 'breakthrough',
+            'bkp': 'breakpoint',
+            'fco': 'fates collide',
+            'sts': 'steam siege',
+            'evo': 'evolutions',
+            
+            // Sun & Moon Series
+            'sm': 'sun & moon',
+            'gri': 'guardians rising',
+            'bus': 'burning shadows',
+            'cri': 'crimson invasion',
+            'upl': 'ultra prism',
+            'fli': 'forbidden light',
+            'ces': 'celestial storm',
+            'drm': 'dragon majesty',
+            'lot': 'lost thunder',
+            'teu': 'team up',
+            'unb': 'unbroken bonds',
+            'unm': 'unified minds',
+            'hif': 'hidden fates',
+            'cos': 'cosmic eclipse',
+            
+            // Sword & Shield Series
+            'ss': 'sword & shield',
+            'rcl': 'rebel clash',
+            'dab': 'darkness ablaze',
+            'cpa': 'champions path',
+            'vvi': 'vivid voltage',
+            'shf': 'shining fates',
+            'bst': 'battle styles',
+            'chr': 'chilling reign',
+            'evs': 'evolving skies',
+            'fus': 'fusion strike',
+            'brs': 'brilliant stars',
+            'ast': 'astral radiance',
+            'lor': 'lost origin',
+            'sit': 'silver tempest',
+            
+            // Scarlet & Violet Series
+            'sv': 'scarlet & violet',
+            'pal': 'paldea evolved',
+            'obf': 'obsidian flames',
+            '151': '151',
+            'par': 'paradox rift',
+            'tfu': 'temporal forces',
+            
+            // Diamond & Pearl Series
+            'dp': 'diamond & pearl',
+            'mt': 'mysterious treasures',
+            'sw': 'secret wonders',
+            'ge': 'great encounters',
+            'md': 'majestic dawn',
+            'la': 'legends awakened',
+            'sf': 'stormfront',
+            'pl': 'platinum',
+            'rr': 'rising rivals',
+            'sv': 'supreme victors',
+            'ar': 'arceus',
+            
+            // HeartGold & SoulSilver Series
+            'hgss': 'heartgold & soulsilver',
+            'ul': 'unleashed',
+            'ud': 'undone',
+            'tm': 'triumphant',
+            'cl': 'call of legends'
+        };
+        
+        if (setCodeMap[setCode.toLowerCase()]) {
+            expansion = setCodeMap[setCode.toLowerCase()];
+            console.log(`🎯 [CardTrader] Espansione estratta dal pattern Cardmarket: "${setCode}" -> "${expansion}"`);
         }
+        
+        // Se non abbiamo ancora un numero collezionista, usa quello dal pattern
+        if (!collectorNumber) {
+            collectorNumber = cardNumber;
+            console.log(`🎯 [CardTrader] Numero collezionista estratto dal pattern Cardmarket: "${collectorNumber}"`);
+        } else {
+            // Se abbiamo già un numero, ma il pattern Cardmarket è più specifico, usa quello
+            console.log(`🎯 [CardTrader] Pattern Cardmarket trovato ma numero già estratto: "${collectorNumber}" vs "${cardNumber}"`);
+        }
+    }
+    
+    // Se non abbiamo trovato l'espansione dal pattern, cerca nelle espansioni note
+    if (!expansion) {
+        for (const exp of expansions) {
+            if (titleLower.includes(exp.toLowerCase())) {
+                expansion = exp;
+                console.log(`🎯 [CardTrader] Espansione trovata nel testo: "${expansion}"`);
+                break;
+            }
+        }
+    } else {
+        console.log(`🎯 [CardTrader] Espansione estratta dal pattern Cardmarket: "${expansion}"`);
     }
     
     // Logica speciale per espansioni correlate
