@@ -771,18 +771,23 @@ function insertLinkContainer(listingElement, button) {
             if (element && element.parentNode) {
                 // Verifica che il pulsante non sia già presente nel parent
                 const parent = element.parentNode;
-                if (!parent.querySelector('.pokemon-linker-button')) {
-                    // Verifica anche che non ci sia già un pulsante con lo stesso testo
-                    const existingButtons = parent.querySelectorAll('button');
-                    const hasCTButton = Array.from(existingButtons).some(btn => 
-                        btn.textContent.trim() === 'CardTrader' || 
-                        btn.classList.contains('pokemon-linker-button')
-                    );
-                    
-                    if (!hasCTButton) {
-                        parent.insertBefore(button, element.nextSibling);
-                        return true;
-                    }
+                
+                // Controlla se c'è già un pulsante CardTrader in tutto il contenitore
+                const existingButtons = parent.querySelectorAll('.pokemon-linker-button');
+                const hasCTButton = existingButtons.length > 0;
+                
+                // Controlla anche se c'è già un pulsante con il testo "CardTrader"
+                const allButtons = parent.querySelectorAll('button');
+                const hasCardTraderText = Array.from(allButtons).some(btn => 
+                    btn.textContent.trim() === 'CardTrader'
+                );
+                
+                if (!hasCTButton && !hasCardTraderText) {
+                    parent.insertBefore(button, element.nextSibling);
+                    return true;
+                } else {
+                    console.log(`ℹ️ [CardTrader] Pulsante già presente in Cardmarket, saltando inserimento`);
+                    return false;
                 }
             }
         }
@@ -1041,6 +1046,7 @@ function patchCardmarketProductPage() {
     try {
         // Cerca il titolo del prodotto
         const titleSelectors = [
+            '.page-title-container h1',
             'h1',
             '.col-12 .d-flex .flex-grow-1 h1',
             '.product-details h1',
@@ -1079,10 +1085,58 @@ function patchCardmarketProductPage() {
         // Cerca nel database
         searchCardInDatabase(titleInfo, title).then(results => {
             if (results && results.length > 0) {
-                // Usa il pulsante CT come nelle liste
-                addCardTraderLinks(titleElement.parentNode, results, titleInfo);
-                
-                console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket`);
+                // Controlla se il pulsante è già stato aggiunto
+                const existingButton = titleElement.querySelector('.pokemon-linker-button');
+                if (!existingButton) {
+                    // Crea il pulsante direttamente
+                    const bestResult = results[0];
+                    const button = document.createElement('button');
+                    button.className = 'pokemon-linker-button';
+                    button.innerHTML = 'CardTrader';
+                    button.style.cssText = `
+                        margin-top: 8px;
+                        margin-left: 8px;
+                        padding: 6px 12px;
+                        background: #28a745;
+                        color: white;
+                        border: none;
+                        border-radius: 8px;
+                        font-size: 10px;
+                        cursor: pointer;
+                        font-weight: bold;
+                        min-width: 80px;
+                        display: inline-block;
+                        transition: all 0.2s ease;
+                    `;
+                    
+                    // Apri direttamente il link CardTrader quando si clicca
+                    button.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
+                        window.open(cardTraderUrl, '_blank');
+                    });
+                    
+                    // Effetti hover migliorati
+                    button.addEventListener('mouseenter', () => {
+                        button.style.background = '#218838';
+                        button.style.transform = 'scale(1.05)';
+                        button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+                    });
+                    
+                    button.addEventListener('mouseleave', () => {
+                        button.style.background = '#28a745';
+                        button.style.transform = 'scale(1)';
+                        button.style.boxShadow = 'none';
+                    });
+                    
+                    // Inserisci direttamente nell'h1
+                    titleElement.appendChild(button);
+                    titleElement.setAttribute('data-pokemon-linker-button-added', 'true');
+                    console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket`);
+                } else {
+                    console.log(`ℹ️ [CardTrader] Pulsante CT già presente nella pagina prodotto Cardmarket`);
+                }
             }
         });
         
