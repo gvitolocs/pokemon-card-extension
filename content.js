@@ -615,7 +615,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             margin-top: 8px;
             margin-left: 8px;
             padding: 8px 16px;
-            background: #28a745;
+            background: #6c757d;
             color: white;
             border: none;
             border-radius: 8px;
@@ -637,13 +637,13 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         
         // Effetti hover migliorati
         button.addEventListener('mouseenter', () => {
-            button.style.background = '#218838';
+            button.style.background = '#5a6268';
             button.style.transform = 'scale(1.05)';
             button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
         });
         
         button.addEventListener('mouseleave', () => {
-            button.style.background = '#28a745';
+            button.style.background = '#6c757d';
             button.style.transform = 'scale(1)';
             button.style.boxShadow = 'none';
         });
@@ -1185,7 +1185,7 @@ function patchCardmarketProductPage() {
                                     button.style.cssText = `
                         margin: 0;
                         padding: 6px 12px;
-                        background: #28a745;
+                        background: #6c757d;
                         color: white;
                         border: none;
                         border-radius: 6px;
@@ -1209,18 +1209,18 @@ function patchCardmarketProductPage() {
                     window.open(cardTraderUrl, '_blank');
                 });
                 
-                // Effetti hover migliorati
-                button.addEventListener('mouseenter', () => {
-                    button.style.background = '#218838';
-                    button.style.transform = 'scale(1.02)';
-                    button.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
-                });
-                
-                button.addEventListener('mouseleave', () => {
-                    button.style.background = '#28a745';
-                    button.style.transform = 'scale(1)';
-                    button.style.boxShadow = 'none';
-                });
+                                    // Effetti hover migliorati
+                    button.addEventListener('mouseenter', () => {
+                        button.style.background = '#5a6268';
+                        button.style.transform = 'scale(1.02)';
+                        button.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
+                    });
+                    
+                    button.addEventListener('mouseleave', () => {
+                        button.style.background = '#6c757d';
+                        button.style.transform = 'scale(1)';
+                        button.style.boxShadow = 'none';
+                    });
                 
                                     // Cerca il link "Contact Support" e sostituiscilo con il pulsante CardTrader
                     const supportLink = document.querySelector('a[href*="support/tickets/new"]');
