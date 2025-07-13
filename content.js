@@ -1889,9 +1889,32 @@ function extractTitleInfo(title) {
         // Cerca il trainer name come parola separata
         const trainerRegex = new RegExp(`\\b${trainer.toLowerCase()}\\b`, 'i');
         if (trainerRegex.test(titleLower)) {
-            trainerName = trainer;
-            console.log(`🎯 [CardTrader] Trainer name rilevato: "${trainer}"`);
-            break;
+            // Controlla se il trainer name fa parte di un'espansione
+            let isPartOfExpansion = false;
+            for (const exp of expansions) {
+                if (exp.toLowerCase().includes(trainer.toLowerCase())) {
+                    console.log(`🚫 [CardTrader] Trainer "${trainer}" ignorato perché parte dell'espansione "${exp}"`);
+                    isPartOfExpansion = true;
+                    break;
+                }
+            }
+            
+            // Controlla anche se fa parte di tipi di carta
+            if (!isPartOfExpansion) {
+                for (const type of cardTypes) {
+                    if (type.toLowerCase().includes(trainer.toLowerCase())) {
+                        console.log(`🚫 [CardTrader] Trainer "${trainer}" ignorato perché parte del tipo "${type}"`);
+                        isPartOfExpansion = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (!isPartOfExpansion) {
+                trainerName = trainer;
+                console.log(`🎯 [CardTrader] Trainer name rilevato: "${trainer}"`);
+                break;
+            }
         }
     }
     
