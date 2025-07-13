@@ -1732,7 +1732,21 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
             let trainerQuery = supabaseClient
                 .from('cards')
                 .select('*')
-                .ilike('name_en', `%${titleInfo.trainerName}%${titleInfo.pokemonName}%`);
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .ilike('name_en', `%${titleInfo.trainerName}%`)
+                .not('name_en', 'ilike', '%deck%')
+                .not('name_en', 'ilike', '%booster%')
+                .not('name_en', 'ilike', '%bundle%')
+                .not('name_en', 'ilike', '%lot%')
+                .not('name_en', 'ilike', '%binder%')
+                .not('name_en', 'ilike', '%album%')
+                .not('name_en', 'ilike', '%sleeve%')
+                .not('name_en', 'ilike', '%dice%')
+                .not('name_en', 'ilike', '%token%')
+                .not('name_en', 'ilike', '%gift box%')
+                .not('name_en', 'ilike', '%box%')
+                .not('name_en', 'ilike', '%tin%')
+                .not('name_en', 'ilike', '%collection%');
             
             const { data: trainerResults, error: trainerError } = await trainerQuery;
             
@@ -1761,21 +1775,39 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                         } else if (numberResults && numberResults.length > 0) {
                             console.log(`✅ [CardTrader] Trovate ${numberResults.length} carte con trainer + numero`);
                             
-                            // Combina i risultati
+                            // Combina i risultati e filtra per assicurarsi che siano carte valide
                             const combinedResults = numberResults.map(variant => {
                                 const card = trainerResults.find(c => c.blueprint_id === variant.blueprint_id);
-                                return {
-                                    ...variant,
-                                    name_en: card.name_en,
-                                    pokemon_name: card.name_en,
-                                    expansion_name_en: card.expansion_name_en,
-                                    expansion_code: card.expansion_code,
-                                    source: 'trainer_number_match',
-                                    exact_number_match: true
-                                };
-                            });
+                                if (card) {
+                                    // Verifica aggiuntiva: il nome deve contenere sia Pokemon che trainer
+                                    const cardNameLower = card.name_en.toLowerCase();
+                                    const pokemonLower = titleInfo.pokemonName.toLowerCase();
+                                    const trainerLower = titleInfo.trainerName.toLowerCase();
+                                    
+                                    if (cardNameLower.includes(pokemonLower) && cardNameLower.includes(trainerLower)) {
+                                        console.log(`✅ [CardTrader] Carta valida trovata: "${card.name_en}"`);
+                                        return {
+                                            ...variant,
+                                            name_en: card.name_en,
+                                            pokemon_name: card.name_en,
+                                            expansion_name_en: card.expansion_name_en,
+                                            expansion_code: card.expansion_code,
+                                            source: 'trainer_number_match',
+                                            exact_number_match: true
+                                        };
+                                    } else {
+                                        console.log(`❌ [CardTrader] Carta scartata: "${card.name_en}" (manca Pokemon o trainer)`);
+                                    }
+                                }
+                                return null;
+                            }).filter(result => result !== null);
                             
-                            return scoreAndValidateResults(combinedResults, titleInfo, originalTitle);
+                            if (combinedResults.length > 0) {
+                                console.log(`✅ [CardTrader] ${combinedResults.length} risultati validi dopo filtro`);
+                                return scoreAndValidateResults(combinedResults, titleInfo, originalTitle);
+                            } else {
+                                console.log(`⚠️ [CardTrader] Nessun risultato valido dopo filtro`);
+                            }
                         }
                     }
                 }
