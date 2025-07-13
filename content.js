@@ -1114,94 +1114,47 @@ async function handlePopupSearch(titleInfo, sendResponse) {
 // Gestisci la ricerca automatica della pagina corrente
 async function handleAutoSearchCurrentPage(sendResponse) {
     try {
-        console.log('🔍 [Popup] Ricerca automatica pagina corrente per popup');
+        console.log('🔍 [Popup] Ottieni informazioni pagina corrente');
         
         const hostname = window.location.hostname;
-        let title = '';
-        let titleInfo = null;
-        let results = [];
+        let pageInfo = {
+            url: window.location.href,
+            title: document.title,
+            hostname: hostname
+        };
         
-        // Per pagine prodotto, estrai il titolo direttamente
+        // Estrai il titolo della pagina
         if (hostname.includes('cardmarket')) {
-            const titleSelectors = [
-                '.page-title-container h1',
-                'h1',
-                '.col-12 .d-flex .flex-grow-1 h1',
-                '.product-details h1',
-                '.card-title',
-                '.product-title'
-            ];
-            
-            let titleElement = null;
-            for (const selector of titleSelectors) {
-                titleElement = document.querySelector(selector);
-                if (titleElement) break;
-            }
-            
+            const titleElement = document.querySelector('h1, .page-title, .product-title');
             if (titleElement) {
-                title = titleElement.textContent.trim();
-                console.log(`🔍 [Popup] Titolo Cardmarket: "${title}"`);
+                pageInfo.pageTitle = titleElement.textContent.trim();
             }
         } else if (hostname.includes('ebay')) {
-            const titleSelectors = [
-                'h1.x-item-title__mainTitle',
-                'h1[data-testid="x-item-title__mainTitle"]',
-                'h1.x-item-title__titleText',
-                '[data-testid="x-item-title"] h1',
-                'h1[class*="title"]',
-                'h1'
-            ];
-            
-            let titleElement = null;
-            for (const selector of titleSelectors) {
-                titleElement = document.querySelector(selector);
-                if (titleElement) break;
-            }
-            
+            const titleElement = document.querySelector('h1, [data-testid="x-item-title"], .x-item-title');
             if (titleElement) {
-                title = titleElement.textContent.trim();
-                console.log(`🔍 [Popup] Titolo eBay: "${title}"`);
+                pageInfo.pageTitle = titleElement.textContent.trim();
             }
         } else if (hostname.includes('vinted')) {
-            const titleSelectors = [
-                '[data-testid="item-title"]',
-                'h1[data-testid="item-title"]',
-                'h1',
-                '.web_ui__Text__title',
-                '.web_ui__Text__subtitle'
-            ];
-            
-            let titleElement = null;
-            for (const selector of titleSelectors) {
-                titleElement = document.querySelector(selector);
-                if (titleElement) break;
-            }
-            
+            const titleElement = document.querySelector('h1, [data-testid="item-title"], .web_ui__Text__title');
             if (titleElement) {
-                title = titleElement.textContent.trim();
-                console.log(`🔍 [Popup] Titolo Vinted: "${title}"`);
+                pageInfo.pageTitle = titleElement.textContent.trim();
             }
         }
         
-        // Per pagine prodotto, cerca nel database
-        if (title) {
-            titleInfo = extractTitleInfo(title);
-            if (titleInfo.pokemonName) {
-                // Per il popup, cerca su Cardmarket invece che su CardTrader
-                results = await searchCardInDatabaseForPopup(titleInfo, title);
-                console.log(`🔍 [Popup] Risultati trovati: ${results ? results.length : 0}`);
-            }
+        // Se non abbiamo un titolo specifico, usa il titolo del documento
+        if (!pageInfo.pageTitle) {
+            pageInfo.pageTitle = document.title;
         }
+        
+        console.log(`✅ [Popup] Informazioni pagina: ${pageInfo.pageTitle}`);
         
         sendResponse({
-            success: results && results.length > 0,
-            titleInfo: titleInfo,
-            results: results || [],
-            processed: 1
+            success: true,
+            pageInfo: pageInfo
         });
         
     } catch (error) {
-        console.error('❌ [Popup] Errore nella ricerca automatica:', error);
+        console.error('❌ [Popup] Errore nel recupero informazioni pagina:', error);
         sendResponse({
             success: false,
             error: error.message

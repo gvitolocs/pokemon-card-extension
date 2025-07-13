@@ -1,60 +1,59 @@
-// Popup script per Blocco Note Carte Pokemon - Versione Moderna
+// Blocco Note Carte Pokemon - Versione Completamente Riscritta
 let currentCardData = null;
 let currentFilter = 'all';
 let currentSearch = '';
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Elementi DOM
-    const cardInput = document.getElementById('cardInput');
-    const categorySelect = document.getElementById('categorySelect');
-    const addButton = document.getElementById('addButton');
-    const clearButton = document.getElementById('clearButton');
-    const exportButton = document.getElementById('exportButton');
-    const notesContent = document.getElementById('notesContent');
-    const autoAddSection = document.getElementById('autoAddSection');
-    const cardName = document.getElementById('cardName');
-    const cardInfo = document.getElementById('cardInfo');
-    const cardPrice = document.getElementById('cardPrice');
-    const cardUrl = document.getElementById('cardUrl');
-    const saveCardButton = document.getElementById('saveCardButton');
-    const viewCardButton = document.getElementById('viewCardButton');
-    const searchInput = document.getElementById('searchInput');
-    const exportDataBtn = document.getElementById('exportDataBtn');
-    const importDataBtn = document.getElementById('importDataBtn');
-    const autoCategorySelect = document.getElementById('autoCategorySelect');
+    console.log('🚀 [Popup] Inizializzazione blocco note...');
     
-    // Tabs
+    // Elementi DOM
     const tabs = document.querySelectorAll('.tab');
     const tabContents = document.querySelectorAll('.tab-content');
     
-    // Filtri categoria
+    // Auto-detection
+    const autoDetection = document.getElementById('autoDetection');
+    const autoCardName = document.getElementById('autoCardName');
+    const autoCardInfo = document.getElementById('autoCardInfo');
+    const autoCardUrl = document.getElementById('autoCardUrl');
+    const autoSaveBtn = document.getElementById('autoSaveBtn');
+    const autoViewBtn = document.getElementById('autoViewBtn');
+    
+    // Manual add
+    const manualCardInput = document.getElementById('manualCardInput');
+    const manualCategorySelect = document.getElementById('manualCategorySelect');
+    const manualAddBtn = document.getElementById('manualAddBtn');
+    const manualCardInput2 = document.getElementById('manualCardInput2');
+    const manualCategorySelect2 = document.getElementById('manualCategorySelect2');
+    const manualAddBtn2 = document.getElementById('manualAddBtn2');
+    
+    // Collection
+    const searchInput = document.getElementById('searchInput');
     const categoryButtons = document.querySelectorAll('.category-btn');
+    const cardsList = document.getElementById('cardsList');
+    const exportBtn = document.getElementById('exportBtn');
+    const clearBtn = document.getElementById('clearBtn');
     
-    // Toggle switches
-    const autoDetectionToggle = document.getElementById('autoDetectionToggle');
-    const priceNotificationsToggle = document.getElementById('priceNotificationsToggle');
-    const darkThemeToggle = document.getElementById('darkThemeToggle');
-    
-    // Inizializza il blocco note
-    initializeNotepad();
+    // Inizializza
     initializeTabs();
-    initializeFilters();
-    initializeSettings();
+    initializeCollection();
+    checkForAutoDetection();
     
     // Event listeners
-    addButton.addEventListener('click', addCard);
-    clearButton.addEventListener('click', clearAllNotes);
-    exportButton.addEventListener('click', exportNotes);
-    cardInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            addCard();
-        }
-    });
-    saveCardButton.addEventListener('click', saveCurrentCard);
-    viewCardButton.addEventListener('click', viewCurrentCard);
+    autoSaveBtn.addEventListener('click', saveAutoDetectedCard);
+    autoViewBtn.addEventListener('click', viewAutoDetectedCard);
+    manualAddBtn.addEventListener('click', () => addManualCard(manualCardInput, manualCategorySelect));
+    manualAddBtn2.addEventListener('click', () => addManualCard(manualCardInput2, manualCategorySelect2));
+    exportBtn.addEventListener('click', exportCards);
+    clearBtn.addEventListener('click', clearAllCards);
     searchInput.addEventListener('input', handleSearch);
-    exportDataBtn.addEventListener('click', exportAllData);
-    importDataBtn.addEventListener('click', importAllData);
+    
+    // Enter key per input manuali
+    manualCardInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addManualCard(manualCardInput, manualCategorySelect);
+    });
+    manualCardInput2.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') addManualCard(manualCardInput2, manualCategorySelect2);
+    });
     
     // Inizializza i tab
     function initializeTabs() {
@@ -70,140 +69,170 @@ document.addEventListener('DOMContentLoaded', function() {
                 tab.classList.add('active');
                 document.getElementById(`${targetTab}-tab`).classList.add('active');
                 
-                // Aggiorna le statistiche quando si va alla collezione
+                // Se vai alla collezione, aggiorna la lista
                 if (targetTab === 'collection') {
-                    updateStats();
+                    loadCards();
                 }
             });
         });
     }
     
-    // Inizializza i filtri categoria
-    function initializeFilters() {
+    // Inizializza la collezione
+    function initializeCollection() {
+        // Event listeners per i filtri categoria
         categoryButtons.forEach(btn => {
             btn.addEventListener('click', () => {
                 categoryButtons.forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 currentFilter = btn.getAttribute('data-category');
-                loadNotes();
+                loadCards();
             });
         });
+        
+        // Carica le carte
+        loadCards();
     }
     
-    // Inizializza le impostazioni
-    function initializeSettings() {
-        // Carica le impostazioni salvate
-        const settings = getSettings();
-        
-        if (settings.autoDetection !== false) autoDetectionToggle.classList.add('active');
-        if (settings.priceNotifications) priceNotificationsToggle.classList.add('active');
-        if (settings.darkTheme) darkThemeToggle.classList.add('active');
-        
-        // Event listeners per i toggle
-        autoDetectionToggle.addEventListener('click', () => {
-            autoDetectionToggle.classList.toggle('active');
-            saveSettings({ autoDetection: autoDetectionToggle.classList.contains('active') });
-        });
-        
-        priceNotificationsToggle.addEventListener('click', () => {
-            priceNotificationsToggle.classList.toggle('active');
-            saveSettings({ priceNotifications: priceNotificationsToggle.classList.contains('active') });
-        });
-        
-        darkThemeToggle.addEventListener('click', () => {
-            darkThemeToggle.classList.toggle('active');
-            saveSettings({ darkTheme: darkThemeToggle.classList.contains('active') });
-            applyTheme();
-        });
-        
-        applyTheme();
-    }
-    
-    // Applica il tema
-    function applyTheme() {
-        const settings = getSettings();
-        if (settings.darkTheme) {
-            document.body.style.background = 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)';
-        } else {
-            document.body.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+    // Controlla se c'è una carta da rilevare automaticamente
+    async function checkForAutoDetection() {
+        try {
+            console.log('🔍 [Popup] Controllando rilevamento automatico...');
+            
+            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            
+            if (!tab) {
+                console.log('❌ [Popup] Nessun tab attivo trovato');
+                return;
+            }
+            
+            const hostname = new URL(tab.url).hostname;
+            const supportedSites = ['ebay.com', 'vinted.com', 'cardmarket.com'];
+            const isSupported = supportedSites.some(site => hostname.includes(site));
+            
+            if (!isSupported) {
+                console.log('🚫 [Popup] Sito non supportato:', hostname);
+                return;
+            }
+            
+            console.log(`✅ [Popup] Sito supportato: ${hostname}`);
+            
+            // Chiedi al content script di estrarre il titolo
+            const response = await new Promise((resolve, reject) => {
+                chrome.tabs.sendMessage(tab.id, { 
+                    action: 'autoSearchCurrentPage'
+                }, function(response) {
+                    if (chrome.runtime.lastError) {
+                        console.log(`❌ [Popup] Errore runtime:`, chrome.runtime.lastError);
+                        resolve(null);
+                    } else if (response && response.success && response.results && response.results.length > 0) {
+                        console.log(`✅ [Popup] Risposta ricevuta con ${response.results.length} risultati`);
+                        resolve(response);
+                    } else {
+                        console.log(`⚠️ [Popup] Nessun risultato trovato`);
+                        resolve(null);
+                    }
+                });
+            });
+            
+            if (response && response.pageInfo) {
+                const pageInfo = response.pageInfo;
+                const cardNameText = pageInfo.pageTitle || pageInfo.title || 'Pagina corrente';
+                
+                // Salva i dati della carta corrente
+                currentCardData = {
+                    name: cardNameText,
+                    info: `Pagina ${pageInfo.hostname}`,
+                    listingUrl: pageInfo.url,
+                    cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardNameText)}`
+                };
+                
+                // Popola i campi
+                autoCardName.textContent = cardNameText;
+                autoCardInfo.textContent = `Pagina ${pageInfo.hostname}`;
+                
+                // Mostra l'URL della pagina con icona del sito
+                let siteName, siteIcon;
+                if (pageInfo.hostname.includes('ebay')) {
+                    siteName = 'eBay';
+                    siteIcon = 'fas fa-shopping-cart';
+                } else if (pageInfo.hostname.includes('vinted')) {
+                    siteName = 'Vinted';
+                    siteIcon = 'fas fa-tshirt';
+                } else if (pageInfo.hostname.includes('cardmarket')) {
+                    siteName = 'Cardmarket';
+                    siteIcon = 'fas fa-cards-blank';
+                } else {
+                    siteName = 'Sito';
+                    siteIcon = 'fas fa-external-link-alt';
+                }
+                autoCardUrl.innerHTML = `<a href="${pageInfo.url}" target="_blank"><i class="${siteIcon}"></i> ${siteName}</a>`;
+                
+                // Controlla se la pagina è già stata salvata
+                const existingCard = checkIfPageExists(pageInfo.url);
+                if (existingCard) {
+                    showMessage(`Pagina già presente nelle ${getCategoryName(existingCard.category)}`, 'info');
+                    autoSaveBtn.innerHTML = '<i class="fas fa-check"></i> Già Salvata';
+                    autoSaveBtn.classList.add('disabled');
+                    autoSaveBtn.disabled = true;
+                } else {
+                    autoSaveBtn.innerHTML = '<i class="fas fa-save"></i> Salva';
+                    autoSaveBtn.classList.remove('disabled');
+                    autoSaveBtn.disabled = false;
+                }
+                
+                // Mostra la sezione con animazione
+                console.log('✅ [Popup] Mostrando sezione auto-detection');
+                autoDetection.classList.add('show');
+                
+            } else {
+                console.log('⚠️ [Popup] Nessuna carta rilevata');
+                autoDetection.classList.remove('show');
+            }
+            
+        } catch (error) {
+            console.error('❌ [Popup] Errore nel controllo automatico:', error);
+            autoDetection.classList.remove('show');
         }
     }
     
-    // Inizializza il blocco note
-    function initializeNotepad() {
-        loadNotes();
-        updateStats();
-        
-        // Nascondi la sezione auto-add di default
-        if (autoAddSection) {
-            autoAddSection.style.display = 'none';
-        }
-        
-        checkForAutoDetection();
-    }
-    
-    // Aggiunge una carta manualmente
-    function addCard() {
-        const cardText = cardInput.value.trim();
-        const category = categorySelect.value;
-        
-        if (!cardText) {
-            showMessage('Inserisci il nome di una carta', 'error');
-            return;
-        }
-        
-        const note = {
-            id: Date.now(),
-            text: cardText,
-            category: category,
-            date: new Date().toLocaleString('it-IT'),
-            type: 'manual',
-            added: new Date().toISOString()
-        };
-        
-        saveNote(note);
-        cardInput.value = '';
-        loadNotes();
-        updateStats();
-        showMessage(`Carta "${cardText}" aggiunta alla ${getCategoryName(category)}`, 'success');
-    }
-    
-    // Salva la carta corrente
-    function saveCurrentCard() {
-        const cardText = cardName.textContent;
-        if (!cardText) {
+    // Salva la carta rilevata automaticamente
+    function saveAutoDetectedCard() {
+        if (!currentCardData) {
             showMessage('Nessuna carta da salvare', 'error');
             return;
         }
         
-        const selectedCategory = autoCategorySelect.value;
-        const categoryName = getCategoryName(selectedCategory);
-        
-        const note = {
+        const card = {
             id: Date.now(),
-            text: cardText,
-            category: selectedCategory,
-            info: cardInfo.textContent,
-            price: cardPrice.textContent,
-            listingUrl: currentCardData?.listingUrl || '',
+            name: currentCardData.name,
+            info: currentCardData.info,
+            category: 'viewed', // Default per carte rilevate automaticamente
+            listingUrl: currentCardData.listingUrl,
+            cardmarketUrl: currentCardData.cardmarketUrl,
             date: new Date().toLocaleString('it-IT'),
-            type: 'current',
-            cardmarketUrl: currentCardData?.cardmarketUrl || '',
+            type: 'auto',
             added: new Date().toISOString()
         };
         
-        saveNote(note);
+        saveCard(card);
         showSaveConfirmation();
-        loadNotes();
-        updateStats();
-        showMessage(`Carta "${cardText}" salvata nelle ${categoryName}`, 'success');
+        loadCards();
+        showMessage(`Pagina "${currentCardData.name}" salvata nelle Viste`, 'success');
         
-        // Reset del selettore di categoria per la prossima carta
-        autoCategorySelect.value = 'viewed';
+        // Reset del pulsante
+        autoSaveBtn.innerHTML = '<i class="fas fa-check"></i> Salvata!';
+        autoSaveBtn.classList.add('disabled');
+        autoSaveBtn.disabled = true;
+        
+        setTimeout(() => {
+            autoSaveBtn.innerHTML = '<i class="fas fa-save"></i> Salva';
+            autoSaveBtn.classList.remove('disabled');
+            autoSaveBtn.disabled = false;
+        }, 2000);
     }
     
-    // Visualizza la carta corrente su Cardmarket
-    function viewCurrentCard() {
+    // Visualizza la carta rilevata su Cardmarket
+    function viewAutoDetectedCard() {
         if (currentCardData?.cardmarketUrl) {
             chrome.tabs.create({ url: currentCardData.cardmarketUrl });
         } else {
@@ -211,135 +240,102 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Mostra conferma di salvataggio
-    function showSaveConfirmation() {
-        const originalText = saveCardButton.innerHTML;
-        saveCardButton.innerHTML = '<i class="fas fa-check"></i> Salvata!';
-        saveCardButton.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+    // Aggiunge una carta manualmente
+    function addManualCard(inputElement, categoryElement) {
+        const cardText = inputElement.value.trim();
+        const category = categoryElement.value;
         
-        setTimeout(() => {
-            saveCardButton.innerHTML = originalText;
-            saveCardButton.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
-        }, 2000);
+        if (!cardText) {
+            showMessage('Inserisci il nome di una carta', 'error');
+            return;
+        }
+        
+        const card = {
+            id: Date.now(),
+            name: cardText,
+            info: '',
+            category: category,
+            listingUrl: '',
+            cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardText)}`,
+            date: new Date().toLocaleString('it-IT'),
+            type: 'manual',
+            added: new Date().toISOString()
+        };
+        
+        saveCard(card);
+        inputElement.value = '';
+        loadCards();
+        showMessage(`Carta "${cardText}" aggiunta alla ${getCategoryName(category)}`, 'success');
     }
     
     // Gestisce la ricerca
     function handleSearch() {
         currentSearch = searchInput.value.toLowerCase();
-        loadNotes();
+        loadCards();
     }
     
-    // Salva una nota nel localStorage
-    function saveNote(note) {
-        const notes = getNotes();
-        notes.unshift(note); // Aggiungi all'inizio
-        localStorage.setItem('pokemonCardNotes', JSON.stringify(notes));
+    // Salva una carta nel localStorage
+    function saveCard(card) {
+        const cards = getCards();
+        cards.unshift(card); // Aggiungi all'inizio
+        localStorage.setItem('pokemonCardNotes', JSON.stringify(cards));
     }
     
-    // Carica le note dal localStorage
-    function getNotes() {
-        const notes = localStorage.getItem('pokemonCardNotes');
-        return notes ? JSON.parse(notes) : [];
+    // Carica le carte dal localStorage
+    function getCards() {
+        const cards = localStorage.getItem('pokemonCardNotes');
+        return cards ? JSON.parse(cards) : [];
     }
     
-    // Carica e mostra le note
-    function loadNotes() {
-        let notes = getNotes();
+    // Carica e mostra le carte
+    function loadCards() {
+        let cards = getCards();
         
         // Filtra per categoria
         if (currentFilter !== 'all') {
-            notes = notes.filter(note => note.category === currentFilter);
+            cards = cards.filter(card => card.category === currentFilter);
         }
         
         // Filtra per ricerca
         if (currentSearch) {
-            notes = notes.filter(note => 
-                note.text.toLowerCase().includes(currentSearch) ||
-                (note.info && note.info.toLowerCase().includes(currentSearch))
+            cards = cards.filter(card => 
+                card.name.toLowerCase().includes(currentSearch) ||
+                card.info.toLowerCase().includes(currentSearch)
             );
         }
         
-        if (notes.length === 0) {
-            const emptyMessage = currentSearch || currentFilter !== 'all' 
-                ? 'Nessuna carta trovata con i filtri attuali'
-                : 'Nessuna carta salvata';
-            notesContent.innerHTML = `
-                <div class="empty-notes">
-                    <i class="fas fa-search"></i>
-                    <div>${emptyMessage}</div>
-                    <div style="font-size: 10px; margin-top: 5px;">
-                        ${currentSearch ? 'Prova a modificare la ricerca' : 'Inizia aggiungendo la tua prima carta!'}
-                    </div>
+        // Mostra le carte
+        if (cards.length === 0) {
+            cardsList.innerHTML = `
+                <div class="empty-state">
+                    <i class="fas fa-book-open"></i>
+                    <div>Nessuna carta trovata</div>
+                    <div style="font-size: 9px; margin-top: 4px;">Prova a cambiare filtro o ricerca</div>
                 </div>
             `;
-            return;
-        }
-        
-        let html = '';
-        notes.forEach(note => {
-            const cardInfoHtml = note.info ? `<div class="note-info">${note.info}</div>` : '';
-            const cardPriceHtml = note.price ? `<div class="note-price">${note.price}</div>` : '';
-            const listingUrlHtml = note.listingUrl ? `<div class="note-url"><a href="${note.listingUrl}" target="_blank" class="note-link"><i class="fas fa-external-link-alt"></i> Inserzione</a></div>` : '';
-            const cardTraderLink = note.cardTraderUrl ? 
-                `<a href="${note.cardTraderUrl}" target="_blank" class="note-link"><i class="fas fa-search"></i> CardTrader</a>` :
-                `<a href="https://cardtrader.com/search?q=${encodeURIComponent(note.text)}" target="_blank" class="note-link"><i class="fas fa-search"></i> Cerca su CardTrader</a>`;
-            
-            const categoryBadge = `<span class="note-category">${getCategoryIcon(note.category)} ${getCategoryName(note.category)}</span>`;
-            
-            html += `
-                <div class="note-item fade-in">
-                    <div class="note-header">
-                        <div class="note-text">${note.text}</div>
-                        ${categoryBadge}
+        } else {
+            cardsList.innerHTML = cards.map(card => `
+                <div class="card-item">
+                    <div class="card-item-header">
+                        <div class="card-item-name">${card.name}</div>
+                        <div class="card-item-category">${getCategoryIcon(card.category)} ${getCategoryName(card.category)}</div>
                     </div>
-                    ${cardInfoHtml}
-                    ${cardPriceHtml}
-                    ${listingUrlHtml}
-                    <div class="note-date"><i class="fas fa-clock"></i> ${note.date}</div>
-                    <div class="note-actions">
-                        ${cardTraderLink}
-                        <button class="delete-button" onclick="deleteNote(${note.id})">
-                            <i class="fas fa-trash"></i>
-                        </button>
-                    </div>
+                    ${card.info ? `<div class="card-item-info">${card.info}</div>` : ''}
+                    <div class="card-item-date">${card.date}</div>
                 </div>
-            `;
-        });
-        
-        notesContent.innerHTML = html;
-    }
-    
-    // Elimina una nota
-    window.deleteNote = function(noteId) {
-        if (confirm('Sei sicuro di voler eliminare questa carta?')) {
-            const notes = getNotes();
-            const filteredNotes = notes.filter(note => note.id !== noteId);
-            localStorage.setItem('pokemonCardNotes', JSON.stringify(filteredNotes));
-            loadNotes();
-            updateStats();
-            showMessage('Carta eliminata', 'success');
-        }
-    };
-    
-    // Svuota tutte le note
-    function clearAllNotes() {
-        if (confirm('Sei sicuro di voler eliminare tutte le carte? Questa azione non può essere annullata.')) {
-            localStorage.removeItem('pokemonCardNotes');
-            loadNotes();
-            updateStats();
-            showMessage('Tutte le carte sono state eliminate', 'success');
+            `).join('');
         }
     }
     
-    // Esporta le note
-    function exportNotes() {
-        const notes = getNotes();
-        if (notes.length === 0) {
+    // Esporta le carte
+    function exportCards() {
+        const cards = getCards();
+        if (cards.length === 0) {
             showMessage('Nessuna carta da esportare', 'error');
             return;
         }
         
-        const dataStr = JSON.stringify(notes, null, 2);
+        const dataStr = JSON.stringify(cards, null, 2);
         const dataBlob = new Blob([dataStr], { type: 'application/json' });
         const url = URL.createObjectURL(dataBlob);
         
@@ -349,79 +345,80 @@ document.addEventListener('DOMContentLoaded', function() {
         link.click();
         
         URL.revokeObjectURL(url);
-        showMessage('Carte esportate con successo', 'success');
+        showMessage(`${cards.length} carte esportate con successo`, 'success');
     }
     
-    // Esporta tutti i dati
-    function exportAllData() {
-        const data = {
-            notes: getNotes(),
-            settings: getSettings(),
-            exportDate: new Date().toISOString(),
-            version: '1.0'
-        };
-        
-        const dataStr = JSON.stringify(data, null, 2);
-        const dataBlob = new Blob([dataStr], { type: 'application/json' });
-        const url = URL.createObjectURL(dataBlob);
-        
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `pokemon-card-extension-backup-${new Date().toISOString().split('T')[0]}.json`;
-        link.click();
-        
-        URL.revokeObjectURL(url);
-        showMessage('Backup completo esportato', 'success');
+    // Svuota tutte le carte
+    function clearAllCards() {
+        if (confirm('Sei sicuro di voler eliminare tutte le carte?')) {
+            localStorage.removeItem('pokemonCardNotes');
+            loadCards();
+            showMessage('Tutte le carte sono state eliminate', 'success');
+        }
     }
     
-    // Importa tutti i dati
-    function importAllData() {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.json';
-        
-        input.onchange = function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const data = JSON.parse(e.target.result);
-                    
-                    if (data.notes) {
-                        localStorage.setItem('pokemonCardNotes', JSON.stringify(data.notes));
-                    }
-                    
-                    if (data.settings) {
-                        localStorage.setItem('pokemonCardSettings', JSON.stringify(data.settings));
-                        initializeSettings();
-                    }
-                    
-                    loadNotes();
-                    updateStats();
-                    showMessage('Dati importati con successo', 'success');
-                } catch (error) {
-                    showMessage('Errore nell\'importazione del file', 'error');
-                }
-            };
-            reader.readAsText(file);
-        };
-        
-        input.click();
+    // Controlla se una carta esiste già
+    function checkIfCardExists(cardName, cardInfo) {
+        const cards = getCards();
+        return cards.find(card => 
+            card.name.toLowerCase() === cardName.toLowerCase() &&
+            card.info === cardInfo
+        );
     }
     
-    // Aggiorna le statistiche
-    function updateStats() {
-        const notes = getNotes();
-        const totalCards = notes.length;
-        const wishlistCards = notes.filter(note => note.category === 'wishlist').length;
-        const viewedCards = notes.filter(note => note.category === 'viewed').length;
-        const favoriteCards = notes.filter(note => note.category === 'favorite').length;
+    // Controlla se una pagina esiste già
+    function checkIfPageExists(pageUrl) {
+        const cards = getCards();
+        return cards.find(card => card.listingUrl === pageUrl);
+    }
+    
+    // Mostra un messaggio
+    function showMessage(text, type = 'success') {
+        const messageDiv = document.createElement('div');
+        let iconClass;
         
-        document.getElementById('totalCards').textContent = totalCards;
-        document.getElementById('wishlistCards').textContent = wishlistCards;
-        document.getElementById('viewedCards').textContent = viewedCards + favoriteCards;
+        switch (type) {
+            case 'success':
+                iconClass = 'check-circle';
+                break;
+            case 'error':
+                iconClass = 'exclamation-circle';
+                break;
+            case 'info':
+                iconClass = 'info-circle';
+                break;
+            default:
+                iconClass = 'check-circle';
+        }
+        
+        messageDiv.className = `message ${type}`;
+        messageDiv.innerHTML = `
+            <i class="fas fa-${iconClass}"></i>
+            ${text}
+        `;
+        
+        // Inserisci il messaggio all'inizio del container
+        const container = document.querySelector('.container');
+        container.insertBefore(messageDiv, container.firstChild);
+        
+        // Rimuovi il messaggio dopo 3 secondi
+        setTimeout(() => {
+            if (messageDiv.parentNode) {
+                messageDiv.parentNode.removeChild(messageDiv);
+            }
+        }, 3000);
+    }
+    
+    // Mostra conferma di salvataggio
+    function showSaveConfirmation() {
+        const originalText = autoSaveBtn.innerHTML;
+        autoSaveBtn.innerHTML = '<i class="fas fa-check"></i> Salvata!';
+        autoSaveBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+        
+        setTimeout(() => {
+            autoSaveBtn.innerHTML = originalText;
+            autoSaveBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+        }, 2000);
     }
     
     // Ottiene il nome della categoria
@@ -444,194 +441,5 @@ document.addEventListener('DOMContentLoaded', function() {
         return icons[category] || '📝';
     }
     
-    // Controlla se una carta esiste già
-    function checkIfCardExists(cardName, cardInfo) {
-        const notes = getNotes();
-        return notes.find(note => 
-            note.text.toLowerCase() === cardName.toLowerCase() &&
-            note.info === cardInfo
-        );
-    }
-    
-    // Mostra un messaggio
-    function showMessage(text, type = 'success') {
-        const messageDiv = document.createElement('div');
-        let iconClass, messageClass;
-        
-        switch (type) {
-            case 'success':
-                iconClass = 'check-circle';
-                messageClass = 'success-message';
-                break;
-            case 'error':
-                iconClass = 'exclamation-circle';
-                messageClass = 'error-message';
-                break;
-            case 'info':
-                iconClass = 'info-circle';
-                messageClass = 'info-message';
-                break;
-            default:
-                iconClass = 'check-circle';
-                messageClass = 'success-message';
-        }
-        
-        messageDiv.className = messageClass;
-        messageDiv.innerHTML = `
-            <i class="fas fa-${iconClass}"></i>
-            ${text}
-        `;
-        
-        // Inserisci il messaggio all'inizio del container
-        const container = document.querySelector('.container');
-        container.insertBefore(messageDiv, container.firstChild);
-        
-        // Rimuovi il messaggio dopo 3 secondi
-        setTimeout(() => {
-            if (messageDiv.parentNode) {
-                messageDiv.parentNode.removeChild(messageDiv);
-            }
-        }, 3000);
-    }
-    
-    // Carica le impostazioni
-    function getSettings() {
-        const settings = localStorage.getItem('pokemonCardSettings');
-        return settings ? JSON.parse(settings) : {
-            autoDetection: true,
-            priceNotifications: false,
-            darkTheme: false
-        };
-    }
-    
-    // Salva le impostazioni
-    function saveSettings(newSettings) {
-        const currentSettings = getSettings();
-        const updatedSettings = { ...currentSettings, ...newSettings };
-        localStorage.setItem('pokemonCardSettings', JSON.stringify(updatedSettings));
-    }
-    
-    // Controlla se c'è una carta da rilevare automaticamente
-    async function checkForAutoDetection() {
-        const settings = getSettings();
-        if (!settings.autoDetection) {
-            console.log('🚫 [Popup] Rilevamento automatico disabilitato');
-            return;
-        }
-        
-        try {
-            const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-            
-            if (tab && (tab.url.includes('ebay') || tab.url.includes('vinted') || tab.url.includes('cardmarket'))) {
-                console.log(`🔍 [Popup] Controllando pagina: ${tab.url}`);
-                
-                // Chiedi al content script di estrarre il titolo
-                const response = await new Promise((resolve, reject) => {
-                    chrome.tabs.sendMessage(tab.id, { 
-                        action: 'autoSearchCurrentPage'
-                    }, function(response) {
-                        if (chrome.runtime.lastError) {
-                            console.log(`❌ [Popup] Errore runtime:`, chrome.runtime.lastError);
-                            resolve(null);
-                        } else if (response && response.success && response.results && response.results.length > 0) {
-                            console.log(`✅ [Popup] Risposta ricevuta con ${response.results.length} risultati`);
-                            resolve(response);
-                        } else {
-                            console.log(`⚠️ [Popup] Nessun risultato trovato`);
-                            resolve(null);
-                        }
-                    });
-                });
-                
-                if (response && response.titleInfo && response.results) {
-                    const bestMatch = response.results[0];
-                    const cardNameText = bestMatch.name_en || bestMatch.pokemon_name || 'N/A';
-                    const cardInfoText = `${bestMatch.expansion_name_en || bestMatch.expansion_code || ''} ${bestMatch.collector_number ? '#' + bestMatch.collector_number : ''}`.trim();
-                    
-                    // Salva i dati della carta corrente
-                    currentCardData = {
-                        name: cardNameText,
-                        info: cardInfoText,
-                        cardmarketUrl: bestMatch.cardmarketUrl || `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardNameText)}`,
-                        listingUrl: tab.url
-                    };
-                    
-                    // Popola i campi
-                    cardName.textContent = cardNameText;
-                    cardInfo.textContent = cardInfoText;
-                    
-                    // Prova a estrarre il prezzo dalla pagina
-                    let priceText = 'Prezzo: N/A';
-                    try {
-                        if (tab.url.includes('ebay')) {
-                            // Per eBay, potremmo estrarre il prezzo dal content script
-                            priceText = 'Prezzo: Controlla inserzione';
-                        } else if (tab.url.includes('vinted')) {
-                            priceText = 'Prezzo: Controlla inserzione';
-                        } else if (tab.url.includes('cardmarket')) {
-                            priceText = 'Prezzo: Controlla inserzione';
-                        }
-                    } catch (error) {
-                        console.log('Errore nell\'estrazione del prezzo:', error);
-                    }
-                    cardPrice.textContent = priceText;
-                    
-                    // Mostra l'URL dell'inserzione con icona del sito
-                    const hostname = new URL(tab.url).hostname;
-                    let siteName, siteIcon;
-                    if (hostname.includes('ebay')) {
-                        siteName = 'eBay';
-                        siteIcon = 'fas fa-shopping-cart';
-                    } else if (hostname.includes('vinted')) {
-                        siteName = 'Vinted';
-                        siteIcon = 'fas fa-tshirt';
-                    } else if (hostname.includes('cardmarket')) {
-                        siteName = 'Cardmarket';
-                        siteIcon = 'fas fa-cards-blank';
-                    } else {
-                        siteName = 'Sito';
-                        siteIcon = 'fas fa-external-link-alt';
-                    }
-                    cardUrl.innerHTML = `<a href="${tab.url}" target="_blank"><i class="${siteIcon}"></i> ${siteName}</a>`;
-                    
-                    // Controlla se la carta è già stata salvata
-                    const existingCard = checkIfCardExists(cardNameText, cardInfoText);
-                    if (existingCard) {
-                        // Mostra messaggio che la carta è già salvata
-                        showMessage(`Carta "${cardNameText}" già presente nelle ${getCategoryName(existingCard.category)}`, 'info');
-                        // Cambia il testo del pulsante
-                        saveCardButton.innerHTML = '<i class="fas fa-check"></i> Già Salvata';
-                        saveCardButton.style.background = 'linear-gradient(45deg, #FF9800, #F57C00)';
-                        saveCardButton.disabled = true;
-                    } else {
-                        // Reset del pulsante
-                        saveCardButton.innerHTML = '<i class="fas fa-save"></i> Salva Carta';
-                        saveCardButton.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
-                        saveCardButton.disabled = false;
-                    }
-                    
-                    // Mostra la sezione con animazione
-                    console.log('✅ [Popup] Mostrando sezione auto-add');
-                    autoAddSection.style.display = 'block';
-                    autoAddSection.classList.add('fade-in');
-                    
-                    // Suggerisci categoria basata sul sito
-                    if (hostname.includes('ebay') || hostname.includes('vinted')) {
-                        autoCategorySelect.value = 'wishlist'; // Probabilmente stai guardando per comprare
-                    } else {
-                        autoCategorySelect.value = 'viewed'; // Default per altri siti
-                    }
-                } else {
-                    console.log('⚠️ [Popup] Nessuna carta rilevata, nascondendo sezione auto-add');
-                    autoAddSection.style.display = 'none';
-                }
-            } else {
-                console.log('🚫 [Popup] Pagina non supportata per rilevamento automatico');
-                autoAddSection.style.display = 'none';
-            }
-        } catch (error) {
-            console.error('❌ [Popup] Errore nel controllo automatico:', error);
-            autoAddSection.style.display = 'none';
-        }
-    }
+    console.log('✅ [Popup] Blocco note inizializzato con successo');
 }); 
