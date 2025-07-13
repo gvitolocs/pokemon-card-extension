@@ -1236,13 +1236,86 @@ function patchEbayProductPage() {
             return;
         }
         
-        // Cerca nel database
+        // Controlla se il pulsante CT è già presente
+        const existingButton = document.querySelector('.pokemon-linker-button');
+        if (existingButton) {
+            console.log('🚫 [CardTrader] Pulsante CT già presente su eBay, non reinserisco');
+            return;
+        }
+        
+        // Crea subito il pulsante grigio (loading)
+        const button = document.createElement('button');
+        button.className = 'pokemon-linker-button';
+        button.innerHTML = 'CardTrader';
+        button.style.cssText = `
+            margin: 16px 0;
+            padding: 8px 16px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            font-weight: bold;
+            min-width: 120px;
+            display: inline-block;
+            transition: all 0.2s ease;
+        `;
+        
+        // Inserisci il pulsante dopo il titolo
+        if (titleElement.parentNode) {
+            titleElement.parentNode.insertBefore(button, titleElement.nextSibling);
+            console.log(`✅ [CardTrader] Aggiunto pulsante CT (loading) alla pagina prodotto eBay`);
+        } else {
+            console.log('⚠️ [CardTrader] Impossibile inserire pulsante CT su eBay');
+            return;
+        }
+        
+        // Cerca nel database e aggiorna il pulsante
         searchCardInDatabase(titleInfo, title).then(results => {
             if (results && results.length > 0) {
-                // Usa il pulsante CT come nelle liste
-                addCardTraderLinks(titleElement.parentNode, results, titleInfo);
+                // Cambia il colore in verde quando ha trovato il link
+                button.style.background = '#28a745';
+                console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde su eBay`);
                 
-                console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto eBay`);
+                // Apri direttamente il link CardTrader quando si clicca
+                const bestResult = results[0];
+                button.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
+                    window.open(cardTraderUrl, '_blank');
+                });
+                
+                // Effetti hover migliorati (verde)
+                button.addEventListener('mouseenter', () => {
+                    button.style.background = '#218838';
+                    button.style.transform = 'scale(1.05)';
+                    button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.style.background = '#28a745';
+                    button.style.transform = 'scale(1)';
+                    button.style.boxShadow = 'none';
+                });
+                
+            } else {
+                // Mantieni grigio se non ha trovato risultati
+                console.log(`⚠️ [CardTrader] Nessun risultato trovato, pulsante rimane grigio su eBay`);
+                
+                // Effetti hover per pulsante grigio (disabilitato)
+                button.addEventListener('mouseenter', () => {
+                    button.style.background = '#5a6268';
+                    button.style.transform = 'scale(1.05)';
+                    button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+                });
+                
+                button.addEventListener('mouseleave', () => {
+                    button.style.background = '#6c757d';
+                    button.style.transform = 'scale(1)';
+                    button.style.boxShadow = 'none';
+                });
             }
         });
         
