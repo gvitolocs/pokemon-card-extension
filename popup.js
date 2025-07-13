@@ -133,6 +133,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function initializeNotepad() {
         loadNotes();
         updateStats();
+        
+        // Nascondi la sezione auto-add di default
+        if (autoAddSection) {
+            autoAddSection.style.display = 'none';
+        }
+        
         checkForAutoDetection();
     }
     
@@ -182,7 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
             listingUrl: currentCardData?.listingUrl || '',
             date: new Date().toLocaleString('it-IT'),
             type: 'current',
-            cardTraderUrl: currentCardData?.cardTraderUrl || '',
+            cardmarketUrl: currentCardData?.cardmarketUrl || '',
             added: new Date().toISOString()
         };
         
@@ -196,12 +202,12 @@ document.addEventListener('DOMContentLoaded', function() {
         autoCategorySelect.value = 'viewed';
     }
     
-    // Visualizza la carta corrente su CardTrader
+    // Visualizza la carta corrente su Cardmarket
     function viewCurrentCard() {
-        if (currentCardData?.cardTraderUrl) {
-            chrome.tabs.create({ url: currentCardData.cardTraderUrl });
+        if (currentCardData?.cardmarketUrl) {
+            chrome.tabs.create({ url: currentCardData.cardmarketUrl });
         } else {
-            showMessage('Link CardTrader non disponibile', 'error');
+            showMessage('Link Cardmarket non disponibile', 'error');
         }
     }
     
@@ -508,7 +514,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Controlla se c'è una carta da rilevare automaticamente
     async function checkForAutoDetection() {
         const settings = getSettings();
-        if (!settings.autoDetection) return;
+        if (!settings.autoDetection) {
+            console.log('🚫 [Popup] Rilevamento automatico disabilitato');
+            return;
+        }
         
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -543,7 +552,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     currentCardData = {
                         name: cardNameText,
                         info: cardInfoText,
-                        cardTraderUrl: `https://cardtrader.com/cards/${bestMatch.blueprint_id}`,
+                        cardmarketUrl: bestMatch.cardmarketUrl || `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardNameText)}`,
                         listingUrl: tab.url
                     };
                     
@@ -602,6 +611,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     
                     // Mostra la sezione con animazione
+                    console.log('✅ [Popup] Mostrando sezione auto-add');
                     autoAddSection.style.display = 'block';
                     autoAddSection.classList.add('fade-in');
                     
@@ -611,10 +621,17 @@ document.addEventListener('DOMContentLoaded', function() {
                     } else {
                         autoCategorySelect.value = 'viewed'; // Default per altri siti
                     }
+                } else {
+                    console.log('⚠️ [Popup] Nessuna carta rilevata, nascondendo sezione auto-add');
+                    autoAddSection.style.display = 'none';
                 }
+            } else {
+                console.log('🚫 [Popup] Pagina non supportata per rilevamento automatico');
+                autoAddSection.style.display = 'none';
             }
         } catch (error) {
-            console.error('Errore nel controllo automatico:', error);
+            console.error('❌ [Popup] Errore nel controllo automatico:', error);
+            autoAddSection.style.display = 'none';
         }
     }
 }); 

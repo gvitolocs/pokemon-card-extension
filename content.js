@@ -1114,7 +1114,7 @@ async function handlePopupSearch(titleInfo, sendResponse) {
 // Gestisci la ricerca automatica della pagina corrente
 async function handleAutoSearchCurrentPage(sendResponse) {
     try {
-        console.log('🔍 [CardTrader] Ricerca automatica pagina corrente');
+        console.log('🔍 [Popup] Ricerca automatica pagina corrente per popup');
         
         const hostname = window.location.hostname;
         let title = '';
@@ -1140,7 +1140,7 @@ async function handleAutoSearchCurrentPage(sendResponse) {
             
             if (titleElement) {
                 title = titleElement.textContent.trim();
-                console.log(`🔍 [CardTrader] Titolo Cardmarket: "${title}"`);
+                console.log(`🔍 [Popup] Titolo Cardmarket: "${title}"`);
             }
         } else if (hostname.includes('ebay')) {
             const titleSelectors = [
@@ -1160,7 +1160,7 @@ async function handleAutoSearchCurrentPage(sendResponse) {
             
             if (titleElement) {
                 title = titleElement.textContent.trim();
-                console.log(`🔍 [CardTrader] Titolo eBay: "${title}"`);
+                console.log(`🔍 [Popup] Titolo eBay: "${title}"`);
             }
         } else if (hostname.includes('vinted')) {
             const titleSelectors = [
@@ -1179,46 +1179,17 @@ async function handleAutoSearchCurrentPage(sendResponse) {
             
             if (titleElement) {
                 title = titleElement.textContent.trim();
-                console.log(`🔍 [CardTrader] Titolo Vinted: "${title}"`);
+                console.log(`🔍 [Popup] Titolo Vinted: "${title}"`);
             }
-        }
-        
-        // Se non abbiamo trovato un titolo di prodotto, cerca nelle liste
-        if (!title) {
-            const listings = findListings();
-            let totalProcessed = 0;
-            let totalResults = 0;
-            
-            for (const listing of listings) {
-                const listingTitle = extractTitleFromListing(listing);
-                if (!listingTitle) continue;
-                
-                const listingTitleInfo = extractTitleInfo(listingTitle);
-                if (!listingTitleInfo.pokemonName) continue;
-                
-                const listingResults = await searchCardInDatabase(listingTitleInfo, listingTitle);
-                if (listingResults && listingResults.length > 0) {
-                    addCardTraderLinks(listing, listingResults, listingTitleInfo);
-                    totalResults += listingResults.length;
-                }
-                
-                totalProcessed++;
-            }
-            
-            sendResponse({
-                success: true,
-                processed: totalProcessed,
-                results: totalResults
-            });
-            return;
         }
         
         // Per pagine prodotto, cerca nel database
         if (title) {
             titleInfo = extractTitleInfo(title);
             if (titleInfo.pokemonName) {
-                results = await searchCardInDatabase(titleInfo, title);
-                console.log(`🔍 [CardTrader] Risultati trovati: ${results ? results.length : 0}`);
+                // Per il popup, cerca su Cardmarket invece che su CardTrader
+                results = await searchCardInDatabaseForPopup(titleInfo, title);
+                console.log(`🔍 [Popup] Risultati trovati: ${results ? results.length : 0}`);
             }
         }
         
@@ -1230,11 +1201,104 @@ async function handleAutoSearchCurrentPage(sendResponse) {
         });
         
     } catch (error) {
-        console.error('❌ [CardTrader] Errore nella ricerca automatica:', error);
+        console.error('❌ [Popup] Errore nella ricerca automatica:', error);
         sendResponse({
             success: false,
             error: error.message
         });
+    }
+}
+
+// Funzione specifica per il popup che cerca su Cardmarket
+async function searchCardInDatabaseForPopup(titleInfo, originalTitle = '') {
+    try {
+        // Aspetta che Supabase sia inizializzato se non lo è già
+        let supabaseClient = window.supabaseClient;
+        
+        if (!supabaseClient) {
+            console.log('⏳ [Popup] Supabase non inizializzato, aspetto...');
+            
+            // Aspetta fino a 5 secondi che Supabase sia inizializzato
+            let attempts = 0;
+            const maxAttempts = 50; // 50 tentativi * 100ms = 5 secondi
+            
+            while (!supabaseClient && attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                supabaseClient = window.supabaseClient;
+                attempts++;
+                
+                if (attempts % 10 === 0) {
+                    console.log(`⏳ [Popup] Tentativo ${attempts}/${maxAttempts} - Aspetto Supabase...`);
+                }
+            }
+            
+            if (!supabaseClient) {
+                console.error('❌ [Popup] Supabase client non disponibile dopo 5 secondi di attesa');
+                return [];
+            } else {
+                console.log('✅ [Popup] Supabase inizializzato, procedo con la ricerca');
+            }
+        }
+        
+        console.log('🔍 [Popup] Cercando su Cardmarket con criteri:', JSON.stringify(titleInfo, null, 2));
+        
+        // Cerca nel database come per CardTrader
+        const results = await performSearch(supabaseClient, titleInfo, originalTitle);
+        
+        // Modifica i risultati per usare link Cardmarket invece di CardTrader
+        if (results && results.length > 0) {
+            return results.map(result => ({
+                ...result,
+                cardmarketUrl: generateCardmarketLink(result, titleInfo, originalTitle)
+            }));
+        }
+        
+        return results;
+        
+    } catch (error) {
+        console.error('❌ [Popup] Errore nella ricerca:', error);
+        return [];
+    }
+}
+
+// Genera link per Cardmarket
+function generateCardmarketLink(result, titleInfo, originalTitle) {
+    try {
+        // Costruisci una query di ricerca per Cardmarket
+        let searchQuery = '';
+        
+        // Usa il nome del Pokemon
+        if (result.name_en) {
+            searchQuery += result.name_en;
+        } else if (result.pokemon_name) {
+            searchQuery += result.pokemon_name;
+        } else if (titleInfo.pokemonName) {
+            searchQuery += titleInfo.pokemonName;
+        }
+        
+        // Aggiungi l'espansione se disponibile
+        if (result.expansion_name_en) {
+            searchQuery += ` ${result.expansion_name_en}`;
+        } else if (result.expansion_code) {
+            searchQuery += ` ${result.expansion_code}`;
+        }
+        
+        // Aggiungi il numero collezionista se disponibile
+        if (result.collector_number) {
+            searchQuery += ` ${result.collector_number}`;
+        }
+        
+        // Codifica la query per l'URL
+        const encodedQuery = encodeURIComponent(searchQuery.trim());
+        
+        // Genera il link Cardmarket
+        return `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodedQuery}`;
+        
+    } catch (error) {
+        console.error('❌ [Popup] Errore nella generazione link Cardmarket:', error);
+        // Fallback: ricerca generica per Pokemon
+        const pokemonName = titleInfo.pokemonName || 'pokemon';
+        return `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(pokemonName)}`;
     }
 }
 
