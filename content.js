@@ -9,6 +9,7 @@ let isProcessing = false;
 let cardCache = new Map(); // Cache per i risultati delle ricerche
 let observerCache = new WeakSet(); // Cache per elementi già processati
 let debounceTimer = null; // Debounce per evitare troppe ricerche
+let successfulMatches = new Set(); // Traccia match riusciti per evitare riprocessamento
 
 // Inizializza le variabili globali se non esistono
 if (typeof window.supabaseClient === 'undefined') {
@@ -19,6 +20,9 @@ if (typeof window.supabaseClient === 'undefined') {
 async function initializeExtension() {
     try {
         console.log('🃏 Pokemon Card Trader Linker - Inizializzazione rapida...');
+        
+        // Pulisci i match riusciti quando cambia la pagina
+        successfulMatches.clear();
         
         // Avvia immediatamente l'osservatore per inserimento veloce
         startObserver();
@@ -59,6 +63,40 @@ async function initializeExtension() {
         
         console.log('✅ Estensione inizializzata rapidamente');
         
+        // Aggiungi listener per cambi di URL (SPA navigation)
+        let currentUrl = window.location.href;
+        const urlObserver = new MutationObserver(() => {
+            if (window.location.href !== currentUrl) {
+                console.log('🔄 [CardTrader] URL cambiato, pulendo match riusciti...');
+                currentUrl = window.location.href;
+                successfulMatches.clear();
+                cardCache.clear();
+                observerCache = new WeakSet();
+                processingElements.clear();
+                
+                // Rimuovi tutti i pulsanti esistenti
+                const existingButtons = document.querySelectorAll('.pokemon-linker-button');
+                existingButtons.forEach(button => button.remove());
+                
+                // Rimuovi attributi di processamento
+                const processedElements = document.querySelectorAll('[data-pokemon-linker-processed]');
+                processedElements.forEach(element => {
+                    element.removeAttribute('data-pokemon-linker-processed');
+                });
+                
+                // Riavvia l'osservatore dopo un breve delay
+                setTimeout(() => {
+                    startObserver();
+                }, 500);
+            }
+        });
+        
+        // Osserva cambiamenti nel DOM che potrebbero indicare navigazione SPA
+        urlObserver.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+        
     } catch (error) {
         console.error('❌ Errore nell\'inizializzazione:', error);
         startObserver();
@@ -68,6 +106,9 @@ async function initializeExtension() {
 // Inizializzazione ultra-rapida che si attiva immediatamente
 function initializeUltraFast() {
     console.log('⚡ [CardTrader] Inizializzazione ultra-rapida...');
+    
+    // Pulisci i match riusciti quando cambia la pagina
+    successfulMatches.clear();
     
     // Avvia immediatamente l'osservatore
     startObserver();
@@ -102,8 +143,6 @@ function initializeUltraFast() {
     }, 200);
 }
 
-
-
 // Avvia l'osservatore per rilevare nuove inserzioni con inserimento immediato
 function startObserver() {
     try {
@@ -136,7 +175,9 @@ function startObserver() {
                 // Processamento immediato per nuovi elementi
                 console.log(`⚡ [CardTrader] Processamento immediato di ${pendingListings.length} nuove inserzioni`);
                 
-                pendingListings.forEach(listing => {
+                // Processa solo i primi 3 elementi immediatamente per evitare sovraccarico
+                const immediateListings = pendingListings.slice(0, 3);
+                immediateListings.forEach(listing => {
                     processListingImmediate(listing);
                 });
                 
@@ -149,16 +190,20 @@ function startObserver() {
                     console.log(`🔄 [CardTrader] Elaborazione successiva di ${pendingListings.length} inserzioni`);
                     
                     // Processa in batch per migliorare le performance
-                    const batchSize = 5;
+                    const batchSize = 3; // Ridotto da 5 a 3
                     for (let i = 0; i < pendingListings.length; i += batchSize) {
                         const batch = pendingListings.slice(i, i + batchSize);
                         setTimeout(() => {
                             batch.forEach(listing => {
-                                processListing(listing);
+                                // Controlla se abbiamo già un match riuscito per questo elemento
+                                const cacheKey = generateCacheKey(extractTitleFromListing(listing) || '');
+                                if (!successfulMatches.has(cacheKey)) {
+                                    processListing(listing);
+                                }
                             });
-                        }, i * 30); // Spazia le elaborazioni
+                        }, i * 50); // Aumentato da 30 a 50ms
                     }
-                }, 50); // Debounce ridotto a 50ms
+                }, 100); // Aumentato da 50 a 100ms
             }
         });
         
@@ -168,12 +213,16 @@ function startObserver() {
                 subtree: true
             });
             
-            // Processamento periodico per elementi che potrebbero essere sfuggiti
+            // Processamento periodico ridotto per elementi che potrebbero essere sfuggiti
             setInterval(() => {
                 if (isEnabled && !isProcessing) {
-                    processExistingListings();
+                    // Controlla solo se non ci sono pulsanti presenti
+                    const existingButtons = document.querySelectorAll('.pokemon-linker-button');
+                    if (existingButtons.length === 0) {
+                        processExistingListings();
+                    }
                 }
-            }, 3000); // Controlla ogni 3 secondi
+            }, 5000); // Aumentato da 3 a 5 secondi
             
             console.log('✅ [CardTrader] Osservatore con inserimento immediato avviato');
         } else {
@@ -199,20 +248,24 @@ function processExistingListingsImmediate() {
     const listings = findListings();
     console.log(`⚡ [CardTrader] Trovate ${listings.length} inserzioni per processamento immediato`);
     
-    // Processa immediatamente i primi 10 elementi
-    const immediateListings = listings.slice(0, 10);
+    // Processa immediatamente solo i primi 5 elementi
+    const immediateListings = listings.slice(0, 5);
     immediateListings.forEach(listing => {
         processListingImmediate(listing);
     });
     
-    // Processa il resto con un leggero delay
-    if (listings.length > 10) {
+    // Processa il resto con un delay maggiore
+    if (listings.length > 5) {
         setTimeout(() => {
-            const remainingListings = listings.slice(10);
+            const remainingListings = listings.slice(5);
             remainingListings.forEach(listing => {
-                processListing(listing);
+                // Controlla se abbiamo già un match riuscito per questo elemento
+                const cacheKey = generateCacheKey(extractTitleFromListing(listing) || '');
+                if (!successfulMatches.has(cacheKey)) {
+                    processListing(listing);
+                }
             });
-        }, 100);
+        }, 200); // Aumentato da 100 a 200ms
     }
 }
 
@@ -226,6 +279,13 @@ function processListingImmediate(listingElement) {
         // Estrai il titolo immediatamente
         const title = extractTitleFromListing(listingElement);
         if (!title || title.trim().length < 3) {
+            return;
+        }
+        
+        // Controlla se abbiamo già un match riuscito per questo titolo
+        const cacheKey = generateCacheKey(title);
+        if (successfulMatches.has(cacheKey)) {
+            console.log(`🚫 [CardTrader] Match già riuscito per: "${title}", saltando`);
             return;
         }
         
@@ -258,13 +318,23 @@ function processExistingListings() {
     const listings = findListings();
     console.log(`🔍 Trovate ${listings.length} inserzioni da processare`);
     
-    listings.forEach(listing => {
-        processListing(listing);
+    // Limita il numero di inserzioni processate per volta
+    const limitedListings = listings.slice(0, 10);
+    
+    limitedListings.forEach(listing => {
+        // Controlla se abbiamo già un match riuscito per questo elemento
+        const title = extractTitleFromListing(listing);
+        if (title) {
+            const cacheKey = generateCacheKey(title);
+            if (!successfulMatches.has(cacheKey)) {
+                processListing(listing);
+            }
+        }
     });
 }
 
 // Processa le nuove inserzioni
-// Debounce per evitare processamenti multipli rapidi
+// Debounce per evitare comportamenti multipli rapidi
 let processNewListingsTimeout = null;
 
 function processNewListings(container) {
@@ -280,7 +350,7 @@ function processNewListings(container) {
         clearTimeout(processNewListingsTimeout);
     }
     
-    // Debounce di 100ms per evitare processamenti multipli
+    // Debounce di 150ms per evitare comportamenti multipli
     processNewListingsTimeout = setTimeout(() => {
         const listings = findListingsInContainer(container);
         
@@ -294,10 +364,20 @@ function processNewListings(container) {
         
         console.log(`🔍 [CardTrader] Processando ${unprocessedListings.length} nuove inserzioni (${listings.length} totali)`);
         
-        unprocessedListings.forEach(listing => {
-            processListing(listing);
+        // Limita il numero di inserzioni processate per volta
+        const limitedListings = unprocessedListings.slice(0, 5);
+        
+        limitedListings.forEach(listing => {
+            // Controlla se abbiamo già un match riuscito per questo elemento
+            const title = extractTitleFromListing(listing);
+            if (title) {
+                const cacheKey = generateCacheKey(title);
+                if (!successfulMatches.has(cacheKey)) {
+                    processListing(listing);
+                }
+            }
         });
-    }, 100);
+    }, 150); // Aumentato da 100 a 150ms
 }
 
 // Trova tutte le inserzioni nella pagina
@@ -511,6 +591,8 @@ async function processListing(listingElement) {
             addCardTraderLinks(listingElement, cachedResults.results, cachedResults.titleInfo);
             observerCache.add(listingElement);
             listingElement.setAttribute('data-pokemon-linker-processed', 'true');
+            // Marca come match riuscito anche per i risultati in cache
+            successfulMatches.add(cacheKey);
             return;
         }
         
@@ -561,6 +643,9 @@ async function processListing(listingElement) {
         
         if (results && results.length > 0) {
             console.log(`✅ [CardTrader] Trovati ${results.length} risultati`);
+            
+            // Marca come match riuscito per evitare riprocessamento
+            successfulMatches.add(cacheKey);
             
             // Salva in cache per future ricerche
             cardCache.set(cacheKey, { results, titleInfo });
