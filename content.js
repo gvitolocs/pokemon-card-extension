@@ -1459,28 +1459,6 @@ function patchCardmarketProductPage() {
         console.error('❌ [CardTrader] Errore nel patch pagina prodotto Cardmarket:', error);
     }
 }
-                // Mantieni grigio se non ha trovato risultati
-                console.log(`⚠️ [CardTrader] Nessun risultato trovato, pulsante rimane grigio`);
-                
-                // Effetti hover per pulsante grigio (disabilitato)
-                button.addEventListener('mouseenter', () => {
-                    button.style.background = '#5a6268';
-                    button.style.transform = 'scale(1.02)';
-                    button.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
-                });
-                
-                button.addEventListener('mouseleave', () => {
-                    button.style.background = '#6c757d';
-                    button.style.transform = 'scale(1)';
-                    button.style.boxShadow = 'none';
-                });
-            }
-        });
-        
-    } catch (error) {
-        console.error('❌ [CardTrader] Errore nel patch pagina prodotto Cardmarket:', error);
-    }
-}
 
 // Estrai informazioni dal titolo
 function extractTitleInfo(title) {
