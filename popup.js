@@ -37,6 +37,9 @@ document.addEventListener('DOMContentLoaded', function() {
     initializeCollection();
     loadCurrentPage();
     
+    // Carica sempre le carte salvate all'avvio
+    loadCards();
+    
     // Event listeners
     saveUrlBtn.addEventListener('click', saveCurrentPage);
     manualAddBtn.addEventListener('click', () => addManualCard(manualCardInput, manualCategorySelect));
@@ -104,7 +107,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             const hostname = new URL(tab.url).hostname;
-            const supportedSites = ['ebay.com', 'ebay.it', 'ebay.co.uk', 'ebay.de', 'ebay.fr', 'ebay.es', 'vinted.com', 'cardmarket.com'];
+            const supportedSites = ['ebay.com', 'ebay.it', 'ebay.co.uk', 'ebay.de', 'ebay.fr', 'ebay.es', 'vinted.com', 'vinted.it', 'vinted.fr', 'vinted.de', 'vinted.es', 'vinted.pl', 'vinted.nl', 'vinted.be', 'vinted.at', 'vinted.lu', 'cardmarket.com'];
             const isSupported = supportedSites.some(site => hostname.includes(site));
             
             console.log(`🔍 [Popup] Hostname: ${hostname}, Supportato: ${isSupported}`);
@@ -206,16 +209,24 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 pageSite.innerHTML = `<i class="${siteIcon}"></i> ${siteName}`;
                 
-                // Abilita il pulsante di salvataggio
-                saveUrlBtn.innerHTML = '<i class="fas fa-save"></i> Salva URL';
-                saveUrlBtn.classList.remove('disabled');
-                saveUrlBtn.disabled = false;
+                // Controlla se la pagina è già stata salvata
+                const existingCard = checkIfPageExists(tab.url);
+                if (existingCard) {
+                    showMessage(`Pagina già presente nelle ${getCategoryName(existingCard.category)}`, 'info');
+                    saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Già Salvata';
+                    saveUrlBtn.classList.add('disabled');
+                    saveUrlBtn.disabled = true;
+                } else {
+                    saveUrlBtn.innerHTML = '<i class="fas fa-save"></i> Salva URL';
+                    saveUrlBtn.classList.remove('disabled');
+                    saveUrlBtn.disabled = false;
+                }
             }
             
         } catch (error) {
-            console.error('❌ [Popup] Errore nel caricamento pagina:', error);
+            console.log('❌ [Popup] Errore nel caricamento pagina:', error);
             pageTitle.textContent = 'Errore nel caricamento';
-            pageUrl.textContent = 'Errore';
+            pageUrl.textContent = 'Impossibile caricare le informazioni';
             pageSite.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Errore';
             saveUrlBtn.disabled = true;
             saveUrlBtn.classList.add('disabled');
@@ -230,60 +241,52 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         
         const card = {
-            id: Date.now(),
             name: currentPageData.name,
             info: currentPageData.info,
-            category: 'viewed', // Default per pagine salvate
             listingUrl: currentPageData.listingUrl,
             cardmarketUrl: currentPageData.cardmarketUrl,
-            date: new Date().toLocaleString('it-IT'),
-            type: 'page',
-            added: new Date().toISOString()
+            category: 'viewed',
+            date: new Date().toLocaleDateString('it-IT')
         };
         
         saveCard(card);
         showSaveConfirmation();
-        loadCards();
-        showMessage(`Pagina "${currentPageData.name}" salvata nelle Viste`, 'success');
+        showMessage(`Pagina salvata nelle ${getCategoryName(card.category)}`, 'success');
         
-        // Reset del pulsante
-        saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Salvata!';
+        // Aggiorna il bottone
+        saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Già Salvata';
         saveUrlBtn.classList.add('disabled');
         saveUrlBtn.disabled = true;
-        
-        setTimeout(() => {
-            saveUrlBtn.innerHTML = '<i class="fas fa-save"></i> Salva URL';
-            saveUrlBtn.classList.remove('disabled');
-            saveUrlBtn.disabled = false;
-        }, 2000);
     }
     
     // Aggiunge una carta manualmente
     async function addManualCard(inputElement, categoryElement) {
-        const cardText = inputElement.value.trim();
+        const cardName = inputElement.value.trim();
         const category = categoryElement.value;
         
-        if (!cardText) {
-            showMessage('Inserisci il nome di un Pokemon', 'error');
+        if (!cardName) {
+            showMessage('Inserisci il nome della carta', 'error');
+            return;
+        }
+        
+        if (checkIfCardExists(cardName, 'Carta aggiunta manualmente')) {
+            showMessage('Questa carta è già presente', 'error');
             return;
         }
         
         const card = {
-            id: Date.now(),
-            name: cardText,
-            info: 'Aggiunta manualmente',
-            category: category,
+            name: cardName,
+            info: 'Carta aggiunta manualmente',
             listingUrl: '',
-            cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardText)}`,
-            date: new Date().toLocaleString('it-IT'),
-            type: 'manual',
-            added: new Date().toISOString()
+            cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardName)}`,
+            category: category,
+            date: new Date().toLocaleDateString('it-IT')
         };
         
         saveCard(card);
         inputElement.value = '';
+        showMessage(`Carta aggiunta alle ${getCategoryName(category)}`, 'success');
         loadCards();
-        showMessage(`Pokemon "${cardText}" aggiunto alla ${getCategoryName(category)}`, 'success');
     }
     
     // Gestisce la ricerca
@@ -292,14 +295,14 @@ document.addEventListener('DOMContentLoaded', function() {
         loadCards();
     }
     
-    // Salva una carta nel localStorage
+    // Salva una carta
     function saveCard(card) {
         const cards = getCards();
-        cards.unshift(card); // Aggiungi all'inizio
+        cards.unshift(card);
         localStorage.setItem('pokemonCardNotes', JSON.stringify(cards));
     }
     
-    // Carica le carte dal localStorage
+    // Ottiene tutte le carte
     function getCards() {
         const cards = localStorage.getItem('pokemonCardNotes');
         return cards ? JSON.parse(cards) : [];
@@ -307,6 +310,8 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Carica e mostra le carte
     async function loadCards() {
+        console.log('📚 [Popup] Caricando carte...');
+        
         let cards = getCards();
         
         // Filtra per categoria
@@ -318,9 +323,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentSearch) {
             cards = cards.filter(card => 
                 card.name.toLowerCase().includes(currentSearch) ||
-                card.info.toLowerCase().includes(currentSearch)
+                (card.info && card.info.toLowerCase().includes(currentSearch))
             );
         }
+        
+        console.log(`📚 [Popup] Trovate ${cards.length} carte dopo filtri`);
         
         // Mostra le carte
         if (cards.length === 0) {
@@ -328,22 +335,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="empty-state">
                     <i class="fas fa-book-open"></i>
                     <div>Nessuna pagina trovata</div>
-                    <div style="font-size: 8px; margin-top: 3px;">Prova a cambiare filtro o ricerca</div>
+                    <div>Prova a cambiare filtro o ricerca</div>
                 </div>
             `;
         } else {
-            const cardsHtml = await Promise.all(cards.map(async (card) => {
+            const cardsHtml = await Promise.all(cards.map(async (card, index) => {
                 const pokemonName = extractPokemonName(card.name);
                 const spriteUrl = await getPokemonSprite(pokemonName);
                 
                 return `
-                    <div class="card-item">
+                    <div class="card-item" data-index="${index}">
                         <div class="pokemon-sprite">
                             ${spriteUrl ? `<img src="${spriteUrl}" alt="${pokemonName}" />` : '<i class="fas fa-question"></i>'}
                         </div>
                         <div class="card-content">
                             <div class="card-header">
-                                <div class="card-name">${card.name}</div>
+                                <div class="card-name" onclick="openCardUrl('${card.listingUrl || card.cardmarketUrl}')">${card.name}</div>
                                 <div class="card-category">${getCategoryIcon(card.category)} ${getCategoryName(card.category)}</div>
                             </div>
                             ${card.info ? `<div class="card-info">${card.info}</div>` : ''}
@@ -354,23 +361,129 @@ document.addEventListener('DOMContentLoaded', function() {
             }));
             
             cardsList.innerHTML = cardsHtml.join('');
+            
+            // Aggiungi event listeners per aprire gli URL
+            document.querySelectorAll('.card-item').forEach((item, index) => {
+                item.addEventListener('click', (e) => {
+                    // Non aprire l'URL se si clicca sul nome (che ha già il suo handler)
+                    if (e.target.classList.contains('card-name')) return;
+                    
+                    const card = cards[index];
+                    const url = card.listingUrl || card.cardmarketUrl;
+                    if (url) {
+                        chrome.tabs.create({ url: url });
+                    }
+                });
+            });
         }
     }
     
+    // Funzione globale per aprire URL delle carte
+    window.openCardUrl = function(url) {
+        if (url) {
+            chrome.tabs.create({ url: url });
+        }
+    };
+    
     // Estrae il nome del Pokemon dal titolo
     function extractPokemonName(title) {
-        // Lista dei Pokemon più comuni
+        // Lista estesa dei Pokemon più comuni, inclusi Raikou e varianti di nomi
         const pokemonNames = [
             'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo', 'mew', 'lugia', 'ho-oh',
             'rayquaza', 'groudon', 'kyogre', 'dialga', 'palkia', 'giratina', 'arceus', 'reshiram',
             'zekrom', 'kyurem', 'xerneas', 'yveltal', 'zygarde', 'solgaleo', 'lunala', 'necrozma',
             'zacian', 'zamazenta', 'eternatus', 'calyrex', 'koraidon', 'miraidon', 'eevee', 'vaporeon',
             'jolteon', 'flareon', 'espeon', 'umbreon', 'leafeon', 'glaceon', 'sylveon', 'garchomp',
-            'lucario', 'gengar', 'dragonite', 'tyranitar', 'metagross', 'salamence', 'garchomp'
+            'lucario', 'gengar', 'dragonite', 'tyranitar', 'metagross', 'salamence', 'garchomp',
+            'raikou', 'entei', 'suicune', 'celebi', 'jirachi', 'deoxys', 'darkrai', 'shaymin',
+            'victini', 'keldeo', 'meloetta', 'genesect', 'volcanion', 'marshadow', 'zeraora',
+            'meltan', 'melmetal', 'zarude', 'regieleki', 'regidrago', 'glastrier', 'spectrier',
+            'calyrex', 'enamorus', 'koraidon', 'miraidon', 'walking wake', 'iron leaves'
         ];
         
         const titleLower = title.toLowerCase();
         
+        // Gestione speciale per Pokemon con nomi multipli o varianti
+        const specialCases = {
+            'mr. mime': 'mr-mime',
+            'mr mime': 'mr-mime', 
+            'mrmime': 'mr-mime',
+            'mr. mime galar': 'mr-rime',
+            'mr mime galar': 'mr-rime',
+            'mrmime galar': 'mr-rime',
+            'mr. rime': 'mr-rime',
+            'mr rime': 'mr-rime',
+            'mrrime': 'mr-rime',
+            'mime jr.': 'mime-jr',
+            'mime jr': 'mime-jr',
+            'mimejr': 'mime-jr',
+            'type: null': 'type-null',
+            'type null': 'type-null',
+            'typenull': 'type-null',
+            'porygon-z': 'porygon-z',
+            'porygon z': 'porygon-z',
+            'porygonz': 'porygon-z',
+            'ho-oh': 'ho-oh',
+            'ho oh': 'ho-oh',
+            'hooh': 'ho-oh',
+            'jangmo-o': 'jangmo-o',
+            'jangmo o': 'jangmo-o',
+            'jangmoo': 'jangmo-o',
+            'hakamo-o': 'hakamo-o',
+            'hakamo o': 'hakamo-o',
+            'hakamoo': 'hakamo-o',
+            'kommo-o': 'kommo-o',
+            'kommo o': 'kommo-o',
+            'kommoo': 'kommo-o',
+            'farfetch\'d': 'farfetchd',
+            'farfetchd': 'farfetchd',
+            'sirfetch\'d': 'sirfetchd',
+            'sirfetchd': 'sirfetchd',
+            'flabébé': 'flabebe',
+            'flabebe': 'flabebe',
+            'floette': 'floette',
+            'florges': 'florges',
+            'oricorio': 'oricorio',
+            'oricorio baile': 'oricorio-baile',
+            'oricorio pom-pom': 'oricorio-pom-pom',
+            'oricorio pom pom': 'oricorio-pom-pom',
+            'oricorio pom': 'oricorio-pom-pom',
+            'oricorio pau': 'oricorio-pau',
+            'oricorio sensu': 'oricorio-sensu',
+            'minior': 'minior',
+            'minior red': 'minior-red',
+            'minior blue': 'minior-blue',
+            'minior green': 'minior-green',
+            'minior yellow': 'minior-yellow',
+            'minior orange': 'minior-orange',
+            'minior violet': 'minior-violet',
+            'minior indigo': 'minior-indigo',
+            'mimikyu': 'mimikyu',
+            'mimikyu busted': 'mimikyu-busted',
+            'mimikyu totem': 'mimikyu-totem',
+            'toxtricity': 'toxtricity',
+            'toxtricity amped': 'toxtricity-amped',
+            'toxtricity low key': 'toxtricity-low-key',
+            'toxtricity lowkey': 'toxtricity-low-key',
+            'urshifu': 'urshifu',
+            'urshifu single strike': 'urshifu-single-strike',
+            'urshifu rapid strike': 'urshifu-rapid-strike',
+            'calyrex': 'calyrex',
+            'calyrex ice rider': 'calyrex-ice-rider',
+            'calyrex shadow rider': 'calyrex-shadow-rider',
+            'enamorus': 'enamorus',
+            'enamorus incarnate': 'enamorus-incarnate',
+            'enamorus therian': 'enamorus-therian'
+        };
+        
+        // Controlla prima i casi speciali
+        for (const [variant, pokemonId] of Object.entries(specialCases)) {
+            if (titleLower.includes(variant)) {
+                return pokemonId;
+            }
+        }
+        
+        // Poi controlla la lista normale
         for (const pokemon of pokemonNames) {
             if (titleLower.includes(pokemon)) {
                 return pokemon;
@@ -386,16 +499,35 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'unknown';
     }
     
-    // Ottiene lo sprite del Pokemon dalla PokeAPI
+    // Ottiene lo sprite del Pokemon dalla PokeAPI con fallback migliorato
     async function getPokemonSprite(pokemonName) {
         try {
             if (pokemonName === 'unknown') return null;
             
-            const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${pokemonName.toLowerCase()}`);
-            if (!response.ok) return null;
+            // Prova prima con il nome esatto
+            let response = await fetch(`https://pokeapi.co/api/v2/pokemon/${pokemonName.toLowerCase()}`);
             
-            const data = await response.json();
-            return data.sprites.front_default;
+            if (!response.ok) {
+                // Se fallisce, prova a cercare nella lista completa
+                const searchResponse = await fetch(`https://pokeapi.co/api/v2/pokemon?limit=1000`);
+                if (searchResponse.ok) {
+                    const searchData = await searchResponse.json();
+                    const pokemon = searchData.results.find(p => 
+                        p.name.toLowerCase() === pokemonName.toLowerCase()
+                    );
+                    
+                    if (pokemon) {
+                        response = await fetch(pokemon.url);
+                    }
+                }
+            }
+            
+            if (response && response.ok) {
+                const data = await response.json();
+                return data.sprites.front_default;
+            }
+            
+            return null;
             
         } catch (error) {
             console.log(`❌ [Popup] Errore nel caricamento sprite per ${pokemonName}:`, error);

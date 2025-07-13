@@ -1720,6 +1720,79 @@ function extractTitleInfo(title) {
     console.log(`🔍 [CardTrader] Processando titolo: "${cleanTitle}" (originale: "${title}")`);
     const titleLower = cleanTitle.toLowerCase();
     
+    // Gestione speciale per Pokemon con nomi multipli o varianti
+    const specialCases = {
+        'mr. mime': 'mr-mime',
+        'mr mime': 'mr-mime', 
+        'mrmime': 'mr-mime',
+        'mr. mime galar': 'mr-rime',
+        'mr mime galar': 'mr-rime',
+        'mrmime galar': 'mr-rime',
+        'mr. rime': 'mr-rime',
+        'mr rime': 'mr-rime',
+        'mrrime': 'mr-rime',
+        'mime jr.': 'mime-jr',
+        'mime jr': 'mime-jr',
+        'mimejr': 'mime-jr',
+        'type: null': 'type-null',
+        'type null': 'type-null',
+        'typenull': 'type-null',
+        'porygon-z': 'porygon-z',
+        'porygon z': 'porygon-z',
+        'porygonz': 'porygon-z',
+        'ho-oh': 'ho-oh',
+        'ho oh': 'ho-oh',
+        'hooh': 'ho-oh',
+        'jangmo-o': 'jangmo-o',
+        'jangmo o': 'jangmo-o',
+        'jangmoo': 'jangmo-o',
+        'hakamo-o': 'hakamo-o',
+        'hakamo o': 'hakamo-o',
+        'hakamoo': 'hakamo-o',
+        'kommo-o': 'kommo-o',
+        'kommo o': 'kommo-o',
+        'kommoo': 'kommo-o',
+        'farfetch\'d': 'farfetchd',
+        'farfetchd': 'farfetchd',
+        'sirfetch\'d': 'sirfetchd',
+        'sirfetchd': 'sirfetchd',
+        'flabébé': 'flabebe',
+        'flabebe': 'flabebe',
+        'floette': 'floette',
+        'florges': 'florges',
+        'oricorio': 'oricorio',
+        'oricorio baile': 'oricorio-baile',
+        'oricorio pom-pom': 'oricorio-pom-pom',
+        'oricorio pom pom': 'oricorio-pom-pom',
+        'oricorio pom': 'oricorio-pom-pom',
+        'oricorio pau': 'oricorio-pau',
+        'oricorio sensu': 'oricorio-sensu',
+        'minior': 'minior',
+        'minior red': 'minior-red',
+        'minior blue': 'minior-blue',
+        'minior green': 'minior-green',
+        'minior yellow': 'minior-yellow',
+        'minior orange': 'minior-orange',
+        'minior violet': 'minior-violet',
+        'minior indigo': 'minior-indigo',
+        'mimikyu': 'mimikyu',
+        'mimikyu busted': 'mimikyu-busted',
+        'mimikyu totem': 'mimikyu-totem',
+        'toxtricity': 'toxtricity',
+        'toxtricity amped': 'toxtricity-amped',
+        'toxtricity low key': 'toxtricity-low-key',
+        'toxtricity lowkey': 'toxtricity-low-key',
+        'urshifu': 'urshifu',
+        'urshifu single strike': 'urshifu-single-strike',
+        'urshifu rapid strike': 'urshifu-rapid-strike',
+        'calyrex': 'calyrex',
+        'calyrex ice rider': 'calyrex-ice-rider',
+        'calyrex shadow rider': 'calyrex-shadow-rider',
+        'enamorus': 'enamorus',
+        'enamorus incarnate': 'enamorus-incarnate',
+        'enamorus therian': 'enamorus-therian'
+    };
+
     // Lista completa di tutti i Pokemon (Generazioni 1-9)
     const pokemonNames = [
         // Generazione 1 (Kanto) - 151 Pokemon
@@ -1893,15 +1966,26 @@ function extractTitleInfo(title) {
     let secondPokemonName = null;
     const titleWords = titleLower.split(/\s+/);
     
-    // Prima cerca match esatti, dando priorità ai Pokemon che appaiono prima nel titolo
-    const foundPokemon = [];
-    for (const pokemon of pokemonNames) {
-        const pokemonLower = pokemon.toLowerCase();
-        const index = titleLower.indexOf(pokemonLower);
-        if (index !== -1) {
-            foundPokemon.push({ pokemon, index });
+    // Prima controlla i casi speciali (varianti di nomi)
+    for (const [variant, pokemonId] of Object.entries(specialCases)) {
+        if (titleLower.includes(variant)) {
+            pokemonName = pokemonId;
+            console.log(`🎯 [CardTrader] Caso speciale trovato: "${variant}" → "${pokemonId}"`);
+            break;
         }
     }
+    
+    // Se non ha trovato casi speciali, cerca nella lista normale
+    if (!pokemonName) {
+        // Prima cerca match esatti, dando priorità ai Pokemon che appaiono prima nel titolo
+        const foundPokemon = [];
+        for (const pokemon of pokemonNames) {
+            const pokemonLower = pokemon.toLowerCase();
+            const index = titleLower.indexOf(pokemonLower);
+            if (index !== -1) {
+                foundPokemon.push({ pokemon, index });
+            }
+        }
     
     // Ordina per posizione nel titolo (prima = priorità più alta)
     foundPokemon.sort((a, b) => a.index - b.index);
@@ -1944,6 +2028,7 @@ function extractTitleInfo(title) {
             pokemonName = foundPokemon[0].pokemon;
             console.log(`🎯 [CardTrader] Match esatto trovato: "${pokemonName}" in "${title}"`);
         }
+    }
     }
     
     // Estrazione specifica per Cardmarket: cerca pattern come "Pokemon (SET 123)" o "Pokemon (SET123)"
@@ -2281,16 +2366,42 @@ function extractTitleInfo(title) {
     
     // Cerca espansioni specifiche
     const expansions = [
+        // Base Set e espansioni originali
+        'base set', 'base', 'base set 2', 'base 2', 'base set unlimited', 'unlimited',
+        'jungle', 'jungle set', 'fossil', 'fossil set', 'team rocket', 'team rocket set',
         'gym heroes', 'gym challenge', 'gym leaders', 'gym booster 1 leaders stadium', 'gym booster 1', 'leaders stadium',
-        'v star universe', 'vstar universe', 'dragon frontier', 'dragon frontiers',
-        'delta species', 'secret wonders', 'next destinies', 'boundaries crossed',
-        'plasma storm', 'plasma freeze', 'legendary treasures', 'flashfire',
-        'furious fists', 'phantom forces', 'primal clash', 'roaring skies',
-        'ancient origins', 'breakthrough', 'breakpoint', 'fates collide',
-        'steam siege', 'evolutions', 'sun & moon', 'guardians rising',
-        'burning shadows', 'crimson invasion', 'ultra prism', 'forbidden light',
-        'celestial storm', 'dragon majesty', 'lost thunder', 'team up',
-        'unbroken bonds', 'unified minds', 'hidden fates', 'cosmic eclipse',
+        'neo genesis', 'neo discovery', 'neo revelation', 'neo destiny',
+        'legendary collection', 'expedition base set', 'aquapolis', 'skyridge',
+        'ex ruby & sapphire', 'ex sandstorm', 'ex dragon', 'ex team magma vs team aqua',
+        'ex hidden legends', 'ex fire red & leaf green', 'ex team rocket returns', 'ex deoxys',
+        'ex emerald', 'ex unseen forces', 'ex delta species', 'ex legend maker',
+        'ex holon phantoms', 'ex crystal guardians', 'ex dragon frontiers', 'ex power keepers',
+        'diamond & pearl', 'dp', 'mysterious treasures', 'secret wonders', 'great encounters',
+        'majestic dawn', 'legends awakened', 'stormfront', 'platinum', 'rising rivals',
+        'supreme victors', 'arceus', 'heartgold & soulsilver', 'hgss', 'unleashed',
+        'undaunted', 'triumphant', 'call of legends', 'black & white', 'bw', 'emerging powers',
+        'noble victories', 'next destinies', 'dark explorers', 'dragons exalted',
+        'boundaries crossed', 'plasma storm', 'plasma freeze', 'plasma blast',
+        'legendary treasures', 'xy', 'kalos starter set', 'flashfire', 'furious fists',
+        'phantom forces', 'primal clash', 'roaring skies', 'ancient origins',
+        'breakthrough', 'breakpoint', 'fates collide', 'steam siege', 'evolutions',
+        'sun & moon', 'guardians rising', 'burning shadows', 'crimson invasion',
+        'ultra prism', 'forbidden light', 'celestial storm', 'dragon majesty',
+        'lost thunder', 'team up', 'detective pikachu', 'unbroken bonds',
+        'unified minds', 'hidden fates', 'cosmic eclipse', 'sword & shield',
+        'rebel clash', 'darkness ablaze', 'champions path', 'vivid voltage',
+        'shining fates', 'battle styles', 'chilling reign', 'evolving skies',
+        'fusion strike', 'brilliant stars', 'astral radiance', 'lost origin',
+        'silver tempest', 'scarlet & violet', 'paldea evolved', 'obsidian flames',
+        '151', 'paradox rift', 'temporal forces', 'v star universe', 'vstar universe',
+        'dragon frontier', 'dragon frontiers', 'delta species', 'secret wonders',
+        'next destinies', 'boundaries crossed', 'plasma storm', 'plasma freeze',
+        'legendary treasures', 'flashfire', 'furious fists', 'phantom forces',
+        'primal clash', 'roaring skies', 'ancient origins', 'breakthrough',
+        'breakpoint', 'fates collide', 'steam siege', 'evolutions', 'sun & moon',
+        'guardians rising', 'burning shadows', 'crimson invasion', 'ultra prism',
+        'forbidden light', 'celestial storm', 'dragon majesty', 'lost thunder',
+        'team up', 'unbroken bonds', 'unified minds', 'hidden fates', 'cosmic eclipse',
         'sword & shield', 'rebel clash', 'darkness ablaze', 'champions path',
         'vivid voltage', 'shining fates', 'battle styles', 'chilling reign',
         'evolving skies', 'fusion strike', 'brilliant stars', 'astral radiance',
@@ -2409,12 +2520,16 @@ function extractTitleInfo(title) {
     
     // Se non abbiamo trovato l'espansione dal pattern, cerca nelle espansioni note
     if (!expansion) {
+        console.log(`🔍 [CardTrader] Cercando espansione nel titolo: "${titleLower}"`);
         for (const exp of expansions) {
             if (titleLower.includes(exp.toLowerCase())) {
                 expansion = exp;
                 console.log(`🎯 [CardTrader] Espansione trovata nel testo: "${expansion}"`);
                 break;
             }
+        }
+        if (!expansion) {
+            console.log(`⚠️ [CardTrader] Nessuna espansione trovata nel titolo`);
         }
     } else {
         console.log(`🎯 [CardTrader] Espansione estratta dal pattern Cardmarket: "${expansion}"`);
@@ -2672,6 +2787,34 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                         .not('name_en', 'ilike', '%leafeon%')
                         .not('name_en', 'ilike', '%glaceon%')
                         .not('name_en', 'ilike', '%sylveon%');
+        } else if (titleInfo.pokemonName === 'ho-oh') {
+            // Gestione speciale per Ho-Oh e variazioni
+            query = query.or('name_en.ilike.%ho-oh%,name_en.ilike.%ho oh%,name_en.ilike.%hooh%');
+        } else if (titleInfo.pokemonName === 'porygon-z') {
+            // Gestione speciale per Porygon-Z e variazioni
+            query = query.or('name_en.ilike.%porygon-z%,name_en.ilike.%porygon z%,name_en.ilike.%porygonz%');
+        } else if (titleInfo.pokemonName === 'jangmo-o' || titleInfo.pokemonName === 'hakamo-o' || titleInfo.pokemonName === 'kommo-o') {
+            // Gestione speciale per la famiglia Jangmo-o
+            const baseName = titleInfo.pokemonName.replace('-o', '');
+            query = query.or(`name_en.ilike.%${titleInfo.pokemonName}%,name_en.ilike.%${baseName} o%,name_en.ilike.%${baseName}o%`);
+        } else if (titleInfo.pokemonName === 'type-null') {
+            // Gestione speciale per Type: Null
+            query = query.or('name_en.ilike.%type: null%,name_en.ilike.%type null%,name_en.ilike.%typenull%');
+        } else if (titleInfo.pokemonName === 'mime-jr') {
+            // Gestione speciale per Mime Jr.
+            query = query.or('name_en.ilike.%mime jr.%,name_en.ilike.%mime jr%,name_en.ilike.%mimejr%');
+        } else if (titleInfo.pokemonName === 'mr-rime') {
+            // Gestione speciale per Mr. Rime
+            query = query.or('name_en.ilike.%mr. rime%,name_en.ilike.%mr rime%,name_en.ilike.%mrrime%');
+        } else if (titleInfo.pokemonName === 'farfetchd') {
+            // Gestione speciale per Farfetch'd
+            query = query.or('name_en.ilike.%farfetch\'d%,name_en.ilike.%farfetchd%');
+        } else if (titleInfo.pokemonName === 'sirfetchd') {
+            // Gestione speciale per Sirfetch'd
+            query = query.or('name_en.ilike.%sirfetch\'d%,name_en.ilike.%sirfetchd%');
+        } else if (titleInfo.pokemonName === 'flabebe') {
+            // Gestione speciale per Flabébé
+            query = query.or('name_en.ilike.%flabébé%,name_en.ilike.%flabebe%');
         } else if (titleInfo.isGXCard) {
             // Per carte GX, cerca carte che contengono il Pokemon e GX
             const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
@@ -2688,7 +2831,24 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
         } else {
             // Ricerca fuzzy per altri Pokemon
             const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
-            query = query.or(`name_en.ilike.%${pokemonNameLower}%,name_en.ilike.%${pokemonNameLower}%`);
+            
+            // Gestione speciale per Pokemon con trattini (come mr-mime)
+            if (pokemonNameLower.includes('-')) {
+                const variants = [
+                    pokemonNameLower, // mr-mime
+                    pokemonNameLower.replace('-', ' '), // mr mime
+                    pokemonNameLower.replace('-', '. '), // mr. mime
+                    pokemonNameLower.replace('-', ''), // mrmime
+                ];
+                
+                console.log(`🔍 [CardTrader] Ricerca varianti per ${pokemonNameLower}:`, variants);
+                
+                // Crea una query OR per tutte le varianti
+                const orConditions = variants.map(variant => `name_en.ilike.%${variant}%`).join(',');
+                query = query.or(orConditions);
+            } else {
+                query = query.or(`name_en.ilike.%${pokemonNameLower}%,name_en.ilike.%${pokemonNameLower}%`);
+            }
         }
         
         const { data: cards, error: cardsError } = await query
@@ -3035,6 +3195,8 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
         const collectorNumber = result.collector_number || '';
         const imageUrlLower = (result.image_url || '').toLowerCase();
         
+        console.log(`🔍 [CardTrader] Analizzando carta: "${name}" (${collectorNumber}) - URL: ${result.image_url}`);
+        
         let score = 0;
         let reason = '';
         
@@ -3105,12 +3267,24 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
         const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
         const resultNameLower = name.toLowerCase();
         
-        if (resultNameLower.includes(pokemonNameLower) || pokemonNameLower.includes(resultNameLower)) {
+        // Normalizza i nomi per il confronto (rimuovi spazi, punti, trattini)
+        const normalizedPokemonName = pokemonNameLower.replace(/[\s.-]/g, '');
+        const normalizedResultName = resultNameLower.replace(/[\s.-]/g, '');
+        
+        console.log(`🔍 [CardTrader] Confronto nomi: "${pokemonNameLower}" vs "${resultNameLower}"`);
+        console.log(`🔍 [CardTrader] Normalizzati: "${normalizedPokemonName}" vs "${normalizedResultName}"`);
+        
+        if (normalizedResultName.includes(normalizedPokemonName) || 
+            normalizedPokemonName.includes(normalizedResultName) ||
+            resultNameLower.includes(pokemonNameLower) || 
+            pokemonNameLower.includes(resultNameLower)) {
             score += 1000; // Peso massimo per il nome Pokemon
             reason += 'Nome Pokemon PERFETTO ';
+            console.log(`✅ [CardTrader] Match nome Pokemon: "${name}" -> +1000 punti`);
         } else {
             score -= 2000; // Penalità severa se il nome non corrisponde
             reason += 'Nome Pokemon SBAGLIATO ';
+            console.log(`❌ [CardTrader] Nome Pokemon non match: "${name}" -> -2000 punti`);
         }
         
         // PRIORITÀ 3: Numero collezionista
@@ -3238,6 +3412,7 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
             console.log(`🎯 [CardTrader] BONUS PRIORITÀ ALTA: +300 punti`);
         }
         
+        console.log(`📊 [CardTrader] Punteggio finale per "${name}": ${score} - Motivo: ${reason.trim()}`);
         return { result, score, reason: reason.trim() };
     });
     
