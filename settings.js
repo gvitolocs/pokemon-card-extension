@@ -28,29 +28,31 @@ document.addEventListener('DOMContentLoaded', function() {
     // Carica le impostazioni salvate
     function loadSettings() {
         chrome.storage.sync.get(defaultSettings, function(items) {
-            autoActivateToggle.classList.toggle('active', items.autoActivate);
-            notificationsToggle.classList.toggle('active', items.notifications);
-            newTabToggle.classList.toggle('active', items.newTab);
-            useAdvancedAPIToggle.classList.toggle('active', items.useAdvancedAPI);
+            if (autoActivateToggle) autoActivateToggle.classList.toggle('active', items.autoActivate);
+            if (notificationsToggle) notificationsToggle.classList.toggle('active', items.notifications);
+            if (newTabToggle) newTabToggle.classList.toggle('active', items.newTab);
+            if (useAdvancedAPIToggle) useAdvancedAPIToggle.classList.toggle('active', items.useAdvancedAPI);
 
-            pokemonKeywords.value = Array.isArray(items.pokemonKeywords) 
-                ? items.pokemonKeywords.join('\n') 
-                : items.pokemonKeywords;
+            if (pokemonKeywords) {
+                pokemonKeywords.value = Array.isArray(items.pokemonKeywords) 
+                    ? items.pokemonKeywords.join('\n') 
+                    : items.pokemonKeywords;
+            }
             
-            apiToken.value = items.apiToken || '';
+            if (apiToken) apiToken.value = items.apiToken || '';
         });
     }
 
     // Salva le impostazioni
     function saveSettings() {
         const settings = {
-            autoActivate: autoActivateToggle.classList.contains('active'),
-            notifications: notificationsToggle.classList.contains('active'),
-            newTab: newTabToggle.classList.contains('active'),
-            useAdvancedAPI: useAdvancedAPIToggle.classList.contains('active'),
-            apiToken: apiToken.value.trim(),
+            autoActivate: autoActivateToggle && autoActivateToggle.classList.contains('active'),
+            notifications: notificationsToggle && notificationsToggle.classList.contains('active'),
+            newTab: newTabToggle && newTabToggle.classList.contains('active'),
+            useAdvancedAPI: useAdvancedAPIToggle && useAdvancedAPIToggle.classList.contains('active'),
+            apiToken: apiToken ? apiToken.value.trim() : '',
 
-            pokemonKeywords: pokemonKeywords.value.split('\n').filter(keyword => keyword.trim() !== '')
+            pokemonKeywords: pokemonKeywords ? pokemonKeywords.value.split('\n').filter(keyword => keyword.trim() !== '') : []
         };
 
         chrome.storage.sync.set(settings, function() {
@@ -82,26 +84,34 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Gestione dei toggle
-    autoActivateToggle.addEventListener('click', function() {
-        this.classList.toggle('active');
-    });
+    if (autoActivateToggle) {
+        autoActivateToggle.addEventListener('click', function() {
+            this.classList.toggle('active');
+        });
+    }
 
-    notificationsToggle.addEventListener('click', function() {
-        this.classList.toggle('active');
-    });
+    if (notificationsToggle) {
+        notificationsToggle.addEventListener('click', function() {
+            this.classList.toggle('active');
+        });
+    }
 
-    newTabToggle.addEventListener('click', function() {
-        this.classList.toggle('active');
-    });
+    if (newTabToggle) {
+        newTabToggle.addEventListener('click', function() {
+            this.classList.toggle('active');
+        });
+    }
 
-    useAdvancedAPIToggle.addEventListener('click', function() {
-        this.classList.toggle('active');
-    });
-
-
+    if (useAdvancedAPIToggle) {
+        useAdvancedAPIToggle.addEventListener('click', function() {
+            this.classList.toggle('active');
+        });
+    }
 
     // Salva quando si clicca il pulsante
-    saveBtn.addEventListener('click', saveSettings);
+    if (saveBtn) {
+        saveBtn.addEventListener('click', saveSettings);
+    }
 
     // Salva anche quando si preme Ctrl+S
     document.addEventListener('keydown', function(e) {
