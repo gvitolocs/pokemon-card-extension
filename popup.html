@@ -120,6 +120,20 @@
             word-wrap: break-word;
         }
         
+        .note-info {
+            font-size: 10px;
+            opacity: 0.8;
+            margin-bottom: 2px;
+            color: #FFD700;
+        }
+        
+        .note-price {
+            font-size: 10px;
+            color: #4CAF50;
+            font-weight: bold;
+            margin-bottom: 2px;
+        }
+        
         .note-date {
             font-size: 9px;
             opacity: 0.7;
@@ -197,6 +211,66 @@
         .auto-add-button:hover {
             background: #F57C00;
         }
+        
+        .card-details {
+            margin-bottom: 10px;
+        }
+        
+        .card-name {
+            font-weight: bold;
+            font-size: 12px;
+            margin-bottom: 4px;
+            color: #FFD700;
+        }
+        
+        .card-info {
+            font-size: 10px;
+            opacity: 0.9;
+            margin-bottom: 4px;
+        }
+        
+        .card-price {
+            font-size: 10px;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        
+        .card-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .save-button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 6px 12px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+            flex: 1;
+        }
+        
+        .save-button:hover {
+            background: #45a049;
+        }
+        
+        .view-button {
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            padding: 6px 12px;
+            font-size: 10px;
+            cursor: pointer;
+            transition: background 0.3s;
+            flex: 1;
+        }
+        
+        .view-button:hover {
+            background: #1976D2;
+        }
     </style>
 </head>
 <body>
@@ -212,9 +286,16 @@
     </div>
     
     <div class="auto-add-section" id="autoAddSection" style="display: none;">
-        <div class="auto-add-title">🎯 Carta Trovata Automaticamente</div>
-        <div class="auto-add-text" id="autoAddText"></div>
-        <button id="autoAddButton" class="auto-add-button">➕ Aggiungi Questa Carta</button>
+        <div class="auto-add-title">🎯 Carta Corrente</div>
+        <div class="card-details" id="cardDetails">
+            <div class="card-name" id="cardName"></div>
+            <div class="card-info" id="cardInfo"></div>
+            <div class="card-price" id="cardPrice"></div>
+        </div>
+        <div class="card-actions">
+            <button id="saveCardButton" class="save-button">💾 Salva Carta</button>
+            <button id="viewCardButton" class="view-button">👁️ Visualizza</button>
+        </div>
     </div>
     
     <div class="notes-section">

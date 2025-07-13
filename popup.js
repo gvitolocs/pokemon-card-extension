@@ -1,12 +1,17 @@
 // Popup script per Blocco Note Carte Pokemon
+let currentCardData = null;
+
 document.addEventListener('DOMContentLoaded', function() {
     const cardInput = document.getElementById('cardInput');
     const addButton = document.getElementById('addButton');
     const clearButton = document.getElementById('clearButton');
     const notesContent = document.getElementById('notesContent');
     const autoAddSection = document.getElementById('autoAddSection');
-    const autoAddText = document.getElementById('autoAddText');
-    const autoAddButton = document.getElementById('autoAddButton');
+    const cardName = document.getElementById('cardName');
+    const cardInfo = document.getElementById('cardInfo');
+    const cardPrice = document.getElementById('cardPrice');
+    const saveCardButton = document.getElementById('saveCardButton');
+    const viewCardButton = document.getElementById('viewCardButton');
     
     // Inizializza il blocco note
     initializeNotepad();
@@ -19,7 +24,8 @@ document.addEventListener('DOMContentLoaded', function() {
             addCard();
         }
     });
-    autoAddButton.addEventListener('click', addAutoDetectedCard);
+    saveCardButton.addEventListener('click', saveCurrentCard);
+    viewCardButton.addEventListener('click', viewCurrentCard);
     
     // Inizializza il blocco note
     function initializeNotepad() {
@@ -46,9 +52,9 @@ document.addEventListener('DOMContentLoaded', function() {
         loadNotes();
     }
     
-    // Aggiunge una carta rilevata automaticamente
-    function addAutoDetectedCard() {
-        const cardText = autoAddText.textContent;
+    // Salva la carta corrente
+    function saveCurrentCard() {
+        const cardText = cardName.textContent;
         if (!cardText) {
             return;
         }
@@ -56,13 +62,35 @@ document.addEventListener('DOMContentLoaded', function() {
         const note = {
             id: Date.now(),
             text: cardText,
+            info: cardInfo.textContent,
+            price: cardPrice.textContent,
             date: new Date().toLocaleString('it-IT'),
-            type: 'auto'
+            type: 'current',
+            cardTraderUrl: currentCardData?.cardTraderUrl || ''
         };
         
         saveNote(note);
-        autoAddSection.style.display = 'none';
+        showSaveConfirmation();
         loadNotes();
+    }
+    
+    // Visualizza la carta corrente su CardTrader
+    function viewCurrentCard() {
+        if (currentCardData?.cardTraderUrl) {
+            chrome.tabs.create({ url: currentCardData.cardTraderUrl });
+        }
+    }
+    
+    // Mostra conferma di salvataggio
+    function showSaveConfirmation() {
+        const originalText = saveCardButton.textContent;
+        saveCardButton.textContent = '✅ Salvata!';
+        saveCardButton.style.background = '#4CAF50';
+        
+        setTimeout(() => {
+            saveCardButton.textContent = originalText;
+            saveCardButton.style.background = '#4CAF50';
+        }, 2000);
     }
     
     // Salva una nota nel localStorage
@@ -89,12 +117,20 @@ document.addEventListener('DOMContentLoaded', function() {
         
         let html = '';
         notes.forEach(note => {
+            const cardInfoHtml = note.info ? `<div class="note-info">${note.info}</div>` : '';
+            const cardPriceHtml = note.price ? `<div class="note-price">${note.price}</div>` : '';
+            const cardTraderLink = note.cardTraderUrl ? 
+                `<a href="${note.cardTraderUrl}" target="_blank" class="note-link">🔗 CardTrader</a>` :
+                `<a href="https://cardtrader.com/search?q=${encodeURIComponent(note.text)}" target="_blank" class="note-link">🔍 Cerca su CardTrader</a>`;
+            
             html += `
                 <div class="note-item">
                     <div class="note-text">${note.text}</div>
+                    ${cardInfoHtml}
+                    ${cardPriceHtml}
                     <div class="note-date">${note.date}</div>
                     <div class="note-actions">
-                        <a href="https://cardtrader.com/search?q=${encodeURIComponent(note.text)}" target="_blank" class="note-link">🔍 Cerca su CardTrader</a>
+                        ${cardTraderLink}
                         <button class="delete-button" onclick="deleteNote(${note.id})">🗑️</button>
                     </div>
                 </div>
@@ -143,9 +179,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 if (response && response.titleInfo && response.results) {
                     const bestMatch = response.results[0];
-                    const cardText = `${bestMatch.name_en || bestMatch.pokemon_name || 'N/A'} ${bestMatch.expansion_code ? '[' + bestMatch.expansion_code + ']' : ''} ${bestMatch.collector_number ? '#' + bestMatch.collector_number : ''}`.trim();
+                    const cardNameText = bestMatch.name_en || bestMatch.pokemon_name || 'N/A';
+                    const cardInfoText = `${bestMatch.expansion_name_en || bestMatch.expansion_code || ''} ${bestMatch.collector_number ? '#' + bestMatch.collector_number : ''}`.trim();
                     
-                    autoAddText.textContent = cardText;
+                    // Salva i dati della carta corrente
+                    currentCardData = {
+                        name: cardNameText,
+                        info: cardInfoText,
+                        cardTraderUrl: `https://cardtrader.com/cards/${bestMatch.blueprint_id}`
+                    };
+                    
+                    // Popola i campi
+                    cardName.textContent = cardNameText;
+                    cardInfo.textContent = cardInfoText;
+                    cardPrice.textContent = 'Prezzo: N/A'; // Per ora, potrebbe essere aggiunto in futuro
+                    
                     autoAddSection.style.display = 'block';
                 }
             }
