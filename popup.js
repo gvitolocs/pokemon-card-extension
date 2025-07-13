@@ -1,22 +1,21 @@
-// Blocco Note Carte Pokemon - Versione Completamente Riscritta
-let currentCardData = null;
+// Blocco Note Pokemon - Versione Moderna con PokeAPI
+let currentPageData = null;
 let currentFilter = 'all';
 let currentSearch = '';
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 [Popup] Inizializzazione blocco note...');
+    console.log('🚀 [Popup] Inizializzazione blocco note Pokemon...');
     
     // Elementi DOM
     const tabs = document.querySelectorAll('.tab');
     const tabContents = document.querySelectorAll('.tab-content');
     
-    // Auto-detection
-    const autoDetection = document.getElementById('autoDetection');
-    const autoCardName = document.getElementById('autoCardName');
-    const autoCardInfo = document.getElementById('autoCardInfo');
-    const autoCardUrl = document.getElementById('autoCardUrl');
-    const autoSaveBtn = document.getElementById('autoSaveBtn');
-    const autoViewBtn = document.getElementById('autoViewBtn');
+    // Salva URL
+    const saveUrlSection = document.getElementById('saveUrlSection');
+    const pageTitle = document.getElementById('pageTitle');
+    const pageUrl = document.getElementById('pageUrl');
+    const pageSite = document.getElementById('pageSite');
+    const saveUrlBtn = document.getElementById('saveUrlBtn');
     
     // Manual add
     const manualCardInput = document.getElementById('manualCardInput');
@@ -36,11 +35,10 @@ document.addEventListener('DOMContentLoaded', function() {
     // Inizializza
     initializeTabs();
     initializeCollection();
-    checkForAutoDetection();
+    loadCurrentPage();
     
     // Event listeners
-    autoSaveBtn.addEventListener('click', saveAutoDetectedCard);
-    autoViewBtn.addEventListener('click', viewAutoDetectedCard);
+    saveUrlBtn.addEventListener('click', saveCurrentPage);
     manualAddBtn.addEventListener('click', () => addManualCard(manualCardInput, manualCategorySelect));
     manualAddBtn2.addEventListener('click', () => addManualCard(manualCardInput2, manualCategorySelect2));
     exportBtn.addEventListener('click', exportCards);
@@ -93,10 +91,10 @@ document.addEventListener('DOMContentLoaded', function() {
         loadCards();
     }
     
-    // Controlla se c'è una carta da rilevare automaticamente
-    async function checkForAutoDetection() {
+    // Carica informazioni della pagina corrente
+    async function loadCurrentPage() {
         try {
-            console.log('🔍 [Popup] Controllando rilevamento automatico...');
+            console.log('🔍 [Popup] Caricando informazioni pagina corrente...');
             
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
             
@@ -106,17 +104,21 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             const hostname = new URL(tab.url).hostname;
-            const supportedSites = ['ebay.com', 'vinted.com', 'cardmarket.com'];
+            const supportedSites = ['ebay.com', 'ebay.it', 'ebay.co.uk', 'ebay.de', 'ebay.fr', 'ebay.es', 'vinted.com', 'cardmarket.com'];
             const isSupported = supportedSites.some(site => hostname.includes(site));
             
+            console.log(`🔍 [Popup] Hostname: ${hostname}, Supportato: ${isSupported}`);
+            
             if (!isSupported) {
-                console.log('🚫 [Popup] Sito non supportato:', hostname);
+                pageTitle.textContent = 'Sito non supportato';
+                pageUrl.textContent = tab.url;
+                pageSite.innerHTML = '<i class="fas fa-external-link-alt"></i> Altro sito';
+                saveUrlBtn.disabled = true;
+                saveUrlBtn.classList.add('disabled');
                 return;
             }
             
-            console.log(`✅ [Popup] Sito supportato: ${hostname}`);
-            
-            // Chiedi al content script di estrarre il titolo
+            // Chiedi al content script di estrarre le informazioni
             const response = await new Promise((resolve, reject) => {
                 chrome.tabs.sendMessage(tab.id, { 
                     action: 'autoSearchCurrentPage'
@@ -124,136 +126,152 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (chrome.runtime.lastError) {
                         console.log(`❌ [Popup] Errore runtime:`, chrome.runtime.lastError);
                         resolve(null);
-                    } else if (response && response.success && response.results && response.results.length > 0) {
-                        console.log(`✅ [Popup] Risposta ricevuta con ${response.results.length} risultati`);
-                        resolve(response);
                     } else {
-                        console.log(`⚠️ [Popup] Nessun risultato trovato`);
-                        resolve(null);
+                        console.log(`✅ [Popup] Risposta ricevuta`);
+                        resolve(response);
                     }
                 });
             });
             
             if (response && response.pageInfo) {
                 const pageInfo = response.pageInfo;
-                const cardNameText = pageInfo.pageTitle || pageInfo.title || 'Pagina corrente';
-                
-                // Salva i dati della carta corrente
-                currentCardData = {
-                    name: cardNameText,
+                currentPageData = {
+                    name: pageInfo.pageTitle || pageInfo.title || 'Pagina corrente',
                     info: `Pagina ${pageInfo.hostname}`,
                     listingUrl: pageInfo.url,
-                    cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardNameText)}`
+                    cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(pageInfo.pageTitle || pageInfo.title)}`
                 };
                 
                 // Popola i campi
-                autoCardName.textContent = cardNameText;
-                autoCardInfo.textContent = `Pagina ${pageInfo.hostname}`;
+                pageTitle.textContent = currentPageData.name;
+                pageUrl.textContent = pageInfo.url;
                 
-                // Mostra l'URL della pagina con icona del sito
+                // Mostra l'icona del sito
                 let siteName, siteIcon;
-                if (pageInfo.hostname.includes('ebay')) {
+                if (hostname.includes('ebay')) {
                     siteName = 'eBay';
                     siteIcon = 'fas fa-shopping-cart';
-                } else if (pageInfo.hostname.includes('vinted')) {
+                } else if (hostname.includes('vinted')) {
                     siteName = 'Vinted';
                     siteIcon = 'fas fa-tshirt';
-                } else if (pageInfo.hostname.includes('cardmarket')) {
+                } else if (hostname.includes('cardmarket')) {
                     siteName = 'Cardmarket';
                     siteIcon = 'fas fa-cards-blank';
                 } else {
                     siteName = 'Sito';
                     siteIcon = 'fas fa-external-link-alt';
                 }
-                autoCardUrl.innerHTML = `<a href="${pageInfo.url}" target="_blank"><i class="${siteIcon}"></i> ${siteName}</a>`;
+                pageSite.innerHTML = `<i class="${siteIcon}"></i> ${siteName}`;
                 
                 // Controlla se la pagina è già stata salvata
                 const existingCard = checkIfPageExists(pageInfo.url);
                 if (existingCard) {
                     showMessage(`Pagina già presente nelle ${getCategoryName(existingCard.category)}`, 'info');
-                    autoSaveBtn.innerHTML = '<i class="fas fa-check"></i> Già Salvata';
-                    autoSaveBtn.classList.add('disabled');
-                    autoSaveBtn.disabled = true;
+                    saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Già Salvata';
+                    saveUrlBtn.classList.add('disabled');
+                    saveUrlBtn.disabled = true;
                 } else {
-                    autoSaveBtn.innerHTML = '<i class="fas fa-save"></i> Salva';
-                    autoSaveBtn.classList.remove('disabled');
-                    autoSaveBtn.disabled = false;
+                    saveUrlBtn.innerHTML = '<i class="fas fa-save"></i> Salva URL';
+                    saveUrlBtn.classList.remove('disabled');
+                    saveUrlBtn.disabled = false;
                 }
                 
-                // Mostra la sezione con animazione
-                console.log('✅ [Popup] Mostrando sezione auto-detection');
-                autoDetection.classList.add('show');
-                
             } else {
-                console.log('⚠️ [Popup] Nessuna carta rilevata');
-                autoDetection.classList.remove('show');
+                console.log('⚠️ [Popup] Content script non ha risposto, uso fallback');
+                // Fallback: usa le informazioni del tab
+                currentPageData = {
+                    name: tab.title || 'Pagina eBay',
+                    info: `Pagina ${hostname}`,
+                    listingUrl: tab.url,
+                    cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(tab.title || 'pokemon')}`
+                };
+                
+                pageTitle.textContent = currentPageData.name;
+                pageUrl.textContent = tab.url;
+                
+                // Mostra l'icona del sito
+                let siteName, siteIcon;
+                if (hostname.includes('ebay')) {
+                    siteName = 'eBay';
+                    siteIcon = 'fas fa-shopping-cart';
+                } else if (hostname.includes('vinted')) {
+                    siteName = 'Vinted';
+                    siteIcon = 'fas fa-tshirt';
+                } else if (hostname.includes('cardmarket')) {
+                    siteName = 'Cardmarket';
+                    siteIcon = 'fas fa-cards-blank';
+                } else {
+                    siteName = 'Sito';
+                    siteIcon = 'fas fa-external-link-alt';
+                }
+                pageSite.innerHTML = `<i class="${siteIcon}"></i> ${siteName}`;
+                
+                // Abilita il pulsante di salvataggio
+                saveUrlBtn.innerHTML = '<i class="fas fa-save"></i> Salva URL';
+                saveUrlBtn.classList.remove('disabled');
+                saveUrlBtn.disabled = false;
             }
             
         } catch (error) {
-            console.error('❌ [Popup] Errore nel controllo automatico:', error);
-            autoDetection.classList.remove('show');
+            console.error('❌ [Popup] Errore nel caricamento pagina:', error);
+            pageTitle.textContent = 'Errore nel caricamento';
+            pageUrl.textContent = 'Errore';
+            pageSite.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Errore';
+            saveUrlBtn.disabled = true;
+            saveUrlBtn.classList.add('disabled');
         }
     }
     
-    // Salva la carta rilevata automaticamente
-    function saveAutoDetectedCard() {
-        if (!currentCardData) {
-            showMessage('Nessuna carta da salvare', 'error');
+    // Salva la pagina corrente
+    function saveCurrentPage() {
+        if (!currentPageData) {
+            showMessage('Nessuna pagina da salvare', 'error');
             return;
         }
         
         const card = {
             id: Date.now(),
-            name: currentCardData.name,
-            info: currentCardData.info,
-            category: 'viewed', // Default per carte rilevate automaticamente
-            listingUrl: currentCardData.listingUrl,
-            cardmarketUrl: currentCardData.cardmarketUrl,
+            name: currentPageData.name,
+            info: currentPageData.info,
+            category: 'viewed', // Default per pagine salvate
+            listingUrl: currentPageData.listingUrl,
+            cardmarketUrl: currentPageData.cardmarketUrl,
             date: new Date().toLocaleString('it-IT'),
-            type: 'auto',
+            type: 'page',
             added: new Date().toISOString()
         };
         
         saveCard(card);
         showSaveConfirmation();
         loadCards();
-        showMessage(`Pagina "${currentCardData.name}" salvata nelle Viste`, 'success');
+        showMessage(`Pagina "${currentPageData.name}" salvata nelle Viste`, 'success');
         
         // Reset del pulsante
-        autoSaveBtn.innerHTML = '<i class="fas fa-check"></i> Salvata!';
-        autoSaveBtn.classList.add('disabled');
-        autoSaveBtn.disabled = true;
+        saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Salvata!';
+        saveUrlBtn.classList.add('disabled');
+        saveUrlBtn.disabled = true;
         
         setTimeout(() => {
-            autoSaveBtn.innerHTML = '<i class="fas fa-save"></i> Salva';
-            autoSaveBtn.classList.remove('disabled');
-            autoSaveBtn.disabled = false;
+            saveUrlBtn.innerHTML = '<i class="fas fa-save"></i> Salva URL';
+            saveUrlBtn.classList.remove('disabled');
+            saveUrlBtn.disabled = false;
         }, 2000);
     }
     
-    // Visualizza la carta rilevata su Cardmarket
-    function viewAutoDetectedCard() {
-        if (currentCardData?.cardmarketUrl) {
-            chrome.tabs.create({ url: currentCardData.cardmarketUrl });
-        } else {
-            showMessage('Link Cardmarket non disponibile', 'error');
-        }
-    }
-    
     // Aggiunge una carta manualmente
-    function addManualCard(inputElement, categoryElement) {
+    async function addManualCard(inputElement, categoryElement) {
         const cardText = inputElement.value.trim();
         const category = categoryElement.value;
         
         if (!cardText) {
-            showMessage('Inserisci il nome di una carta', 'error');
+            showMessage('Inserisci il nome di un Pokemon', 'error');
             return;
         }
         
         const card = {
             id: Date.now(),
             name: cardText,
-            info: '',
+            info: 'Aggiunta manualmente',
             category: category,
             listingUrl: '',
             cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(cardText)}`,
@@ -265,7 +283,7 @@ document.addEventListener('DOMContentLoaded', function() {
         saveCard(card);
         inputElement.value = '';
         loadCards();
-        showMessage(`Carta "${cardText}" aggiunta alla ${getCategoryName(category)}`, 'success');
+        showMessage(`Pokemon "${cardText}" aggiunto alla ${getCategoryName(category)}`, 'success');
     }
     
     // Gestisce la ricerca
@@ -288,7 +306,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // Carica e mostra le carte
-    function loadCards() {
+    async function loadCards() {
         let cards = getCards();
         
         // Filtra per categoria
@@ -309,21 +327,79 @@ document.addEventListener('DOMContentLoaded', function() {
             cardsList.innerHTML = `
                 <div class="empty-state">
                     <i class="fas fa-book-open"></i>
-                    <div>Nessuna carta trovata</div>
-                    <div style="font-size: 9px; margin-top: 4px;">Prova a cambiare filtro o ricerca</div>
+                    <div>Nessuna pagina trovata</div>
+                    <div style="font-size: 8px; margin-top: 3px;">Prova a cambiare filtro o ricerca</div>
                 </div>
             `;
         } else {
-            cardsList.innerHTML = cards.map(card => `
-                <div class="card-item">
-                    <div class="card-item-header">
-                        <div class="card-item-name">${card.name}</div>
-                        <div class="card-item-category">${getCategoryIcon(card.category)} ${getCategoryName(card.category)}</div>
+            const cardsHtml = await Promise.all(cards.map(async (card) => {
+                const pokemonName = extractPokemonName(card.name);
+                const spriteUrl = await getPokemonSprite(pokemonName);
+                
+                return `
+                    <div class="card-item">
+                        <div class="pokemon-sprite">
+                            ${spriteUrl ? `<img src="${spriteUrl}" alt="${pokemonName}" />` : '<i class="fas fa-question"></i>'}
+                        </div>
+                        <div class="card-content">
+                            <div class="card-header">
+                                <div class="card-name">${card.name}</div>
+                                <div class="card-category">${getCategoryIcon(card.category)} ${getCategoryName(card.category)}</div>
+                            </div>
+                            ${card.info ? `<div class="card-info">${card.info}</div>` : ''}
+                            <div class="card-date">${card.date}</div>
+                        </div>
                     </div>
-                    ${card.info ? `<div class="card-item-info">${card.info}</div>` : ''}
-                    <div class="card-item-date">${card.date}</div>
-                </div>
-            `).join('');
+                `;
+            }));
+            
+            cardsList.innerHTML = cardsHtml.join('');
+        }
+    }
+    
+    // Estrae il nome del Pokemon dal titolo
+    function extractPokemonName(title) {
+        // Lista dei Pokemon più comuni
+        const pokemonNames = [
+            'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo', 'mew', 'lugia', 'ho-oh',
+            'rayquaza', 'groudon', 'kyogre', 'dialga', 'palkia', 'giratina', 'arceus', 'reshiram',
+            'zekrom', 'kyurem', 'xerneas', 'yveltal', 'zygarde', 'solgaleo', 'lunala', 'necrozma',
+            'zacian', 'zamazenta', 'eternatus', 'calyrex', 'koraidon', 'miraidon', 'eevee', 'vaporeon',
+            'jolteon', 'flareon', 'espeon', 'umbreon', 'leafeon', 'glaceon', 'sylveon', 'garchomp',
+            'lucario', 'gengar', 'dragonite', 'tyranitar', 'metagross', 'salamence', 'garchomp'
+        ];
+        
+        const titleLower = title.toLowerCase();
+        
+        for (const pokemon of pokemonNames) {
+            if (titleLower.includes(pokemon)) {
+                return pokemon;
+            }
+        }
+        
+        // Se non trova un Pokemon specifico, prova a estrarre la prima parola
+        const words = titleLower.split(/\s+/);
+        if (words.length > 0 && words[0].length > 2) {
+            return words[0];
+        }
+        
+        return 'unknown';
+    }
+    
+    // Ottiene lo sprite del Pokemon dalla PokeAPI
+    async function getPokemonSprite(pokemonName) {
+        try {
+            if (pokemonName === 'unknown') return null;
+            
+            const response = await fetch(`https://pokeapi.co/api/v2/pokemon/${pokemonName.toLowerCase()}`);
+            if (!response.ok) return null;
+            
+            const data = await response.json();
+            return data.sprites.front_default;
+            
+        } catch (error) {
+            console.log(`❌ [Popup] Errore nel caricamento sprite per ${pokemonName}:`, error);
+            return null;
         }
     }
     
@@ -331,7 +407,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function exportCards() {
         const cards = getCards();
         if (cards.length === 0) {
-            showMessage('Nessuna carta da esportare', 'error');
+            showMessage('Nessuna pagina da esportare', 'error');
             return;
         }
         
@@ -341,19 +417,19 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const link = document.createElement('a');
         link.href = url;
-        link.download = `pokemon-cards-${new Date().toISOString().split('T')[0]}.json`;
+        link.download = `pokemon-pages-${new Date().toISOString().split('T')[0]}.json`;
         link.click();
         
         URL.revokeObjectURL(url);
-        showMessage(`${cards.length} carte esportate con successo`, 'success');
+        showMessage(`${cards.length} pagine esportate con successo`, 'success');
     }
     
     // Svuota tutte le carte
     function clearAllCards() {
-        if (confirm('Sei sicuro di voler eliminare tutte le carte?')) {
+        if (confirm('Sei sicuro di voler eliminare tutte le pagine?')) {
             localStorage.removeItem('pokemonCardNotes');
             loadCards();
-            showMessage('Tutte le carte sono state eliminate', 'success');
+            showMessage('Tutte le pagine sono state eliminate', 'success');
         }
     }
     
@@ -411,13 +487,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Mostra conferma di salvataggio
     function showSaveConfirmation() {
-        const originalText = autoSaveBtn.innerHTML;
-        autoSaveBtn.innerHTML = '<i class="fas fa-check"></i> Salvata!';
-        autoSaveBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+        const originalText = saveUrlBtn.innerHTML;
+        saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Salvata!';
+        saveUrlBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
         
         setTimeout(() => {
-            autoSaveBtn.innerHTML = originalText;
-            autoSaveBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+            saveUrlBtn.innerHTML = originalText;
+            saveUrlBtn.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
         }, 2000);
     }
     
@@ -441,5 +517,5 @@ document.addEventListener('DOMContentLoaded', function() {
         return icons[category] || '📝';
     }
     
-    console.log('✅ [Popup] Blocco note inizializzato con successo');
+    console.log('✅ [Popup] Blocco note Pokemon inizializzato con successo');
 }); 
