@@ -495,12 +495,14 @@ function getListingSelectors() {
         ];
     } else if (hostname.includes('cardmarket')) {
         return [
-            '.page-title-container', // container principale
-            '.page-title-container .flex-grow-1 h1', // h1 specifico
-            'h1', // pagina prodotto
-            '.product-title', // listing
+            // Selettori più specifici per evitare duplicati
+            '.page-title-container .flex-grow-1 h1', // h1 specifico della pagina prodotto
             '.col-12 .d-flex .flex-grow-1 h1', // struttura tipica Cardmarket
-            '.col-12 .product-title'
+            // Rimuovi selettori troppo generici che causano duplicati
+            // '.page-title-container', // troppo generico
+            // 'h1', // troppo generico
+            // '.product-title', // troppo generico
+            // '.col-12 .product-title' // troppo generico
         ];
     }
     
@@ -516,17 +518,23 @@ async function processListing(listingElement) {
     
     try {
         // Controllo immediato: se il pulsante è già presente, salta
-        if (listingElement.hasAttribute('data-pokemon-linker-button-added') || 
-            listingElement.querySelector('.pokemon-linker-button')) {
-            console.log('🚫 [CardTrader] Pulsante già presente, saltando');
+        if (listingElement.hasAttribute('data-pokemon-linker-button-added')) {
+            console.log('🚫 [CardTrader] Pulsante già presente (attributo), saltando');
             return;
         }
         
         // Evita di processare elementi già processati o in fase di processamento
         if (observerCache.has(listingElement) || 
             listingElement.hasAttribute('data-pokemon-linker-processed') ||
+            listingElement.hasAttribute('data-pokemon-linker-button-added') ||
             processingElements.has(listingElement)) {
             console.log('🚫 [CardTrader] Elemento già processato, saltando');
+            return;
+        }
+        
+        // Controllo aggiuntivo: se l'elemento ha già un pulsante CardTrader, salta
+        if (listingElement.querySelector('.pokemon-linker-button')) {
+            console.log('🚫 [CardTrader] Elemento ha già un pulsante CardTrader, saltando');
             return;
         }
         
@@ -537,6 +545,23 @@ async function processListing(listingElement) {
             if (existingButtons.length > 0) {
                 console.log(`🚫 [CardTrader] Già presenti ${existingButtons.length} pulsanti su Cardmarket, saltando`);
                 return;
+            }
+            
+            // Controllo aggiuntivo: se siamo su una pagina prodotto, processa solo l'h1 principale
+            const isProductPage = window.location.pathname.includes('/en/Pokemon/') || 
+                                 window.location.pathname.includes('/it/Pokemon/') ||
+                                 window.location.pathname.includes('/de/Pokemon/') ||
+                                 window.location.pathname.includes('/fr/Pokemon/');
+            
+            if (isProductPage) {
+                // Su pagine prodotto, processa solo l'h1 principale, non altri elementi
+                const isMainH1 = listingElement.matches('.page-title-container .flex-grow-1 h1') || 
+                                listingElement.matches('.col-12 .d-flex .flex-grow-1 h1');
+                
+                if (!isMainH1) {
+                    console.log(`🚫 [CardTrader] Non è l'h1 principale su pagina prodotto Cardmarket, saltando`);
+                    return;
+                }
             }
         }
         
@@ -616,6 +641,9 @@ async function processListing(listingElement) {
         
         if (inserted) {
             console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${titleInfo.pokemonName}`);
+            
+            // Marca l'elemento come processato
+            listingElement.setAttribute('data-pokemon-linker-button-added', 'true');
             
                     // Cerca nel database
         console.log(`🔍 [CardTrader] Avvio ricerca per: "${title}"`);
@@ -1300,6 +1328,11 @@ function patchVintedProductPage() {
 // Patch per pagine prodotto Cardmarket
 function patchCardmarketProductPage() {
     if (!window.location.hostname.includes('cardmarket')) return;
+    
+    // DISABILITATO: L'observer si occupa già di tutto per Cardmarket
+    // Questo evita duplicati e conflitti con l'observer
+    console.log('🚫 [CardTrader] Patch Cardmarket disabilitato - l\'observer gestisce tutto');
+    return;
     
     try {
         // Cerca il titolo del prodotto
