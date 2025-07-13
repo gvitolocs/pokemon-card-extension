@@ -1876,9 +1876,9 @@ function extractTitleInfo(title) {
         // Altri trainer importanti
         'red', 'blue', 'green', 'leaf', 'yellow', 'crystal', 'ethan', 'lyra', 'kris',
         'brendan', 'may', 'ruby', 'sapphire', 'emerald', 'lucas', 'dawn', 'diamond', 'pearl', 'platinum',
-        'hilbert', 'hilda', 'nate', 'rosa', 'black', 'white', 'black 2', 'white 2',
+        'hilbert', 'hilda', 'nate', 'rosa', 'black 2', 'white 2',
         'calem', 'serena', 'x', 'y', 'elio', 'selene', 'sun', 'moon', 'ultra sun', 'ultra moon',
-        'victor', 'gloria', 'sword', 'shield', 'florian', 'juliana', 'scarlet', 'violet'
+        'victor', 'gloria', 'florian', 'juliana'
     ];
     
     let trainerName = null;
