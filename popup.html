@@ -12,17 +12,17 @@
         }
         
         body {
-            width: 400px;
-            min-height: 500px;
+            width: 380px;
+            min-height: 480px;
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            font-size: 13px;
+            font-size: 12px;
             overflow-x: hidden;
         }
         
         .container {
-            padding: 15px;
+            padding: 12px;
             height: 100vh;
             display: flex;
             flex-direction: column;
@@ -30,17 +30,21 @@
         
         .header {
             text-align: center;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            backdrop-filter: blur(10px);
         }
         
         .logo {
-            font-size: 16px;
+            font-size: 14px;
             font-weight: bold;
-            margin-bottom: 5px;
+            margin-bottom: 4px;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
         }
         
         .logo i {
@@ -48,7 +52,7 @@
         }
         
         .subtitle {
-            font-size: 10px;
+            font-size: 9px;
             opacity: 0.8;
         }
         
@@ -56,17 +60,17 @@
             display: flex;
             background: rgba(255, 255, 255, 0.1);
             border-radius: 8px;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
             overflow: hidden;
         }
         
         .tab {
             flex: 1;
-            padding: 8px;
+            padding: 6px;
             text-align: center;
             cursor: pointer;
             transition: all 0.3s;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 500;
         }
         
@@ -87,134 +91,97 @@
             display: block;
         }
         
-        /* Sezione Auto-Detection */
-        .auto-detection {
+        /* Sezione Salva URL */
+        .save-url-section {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             padding: 12px;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
             border: 2px solid rgba(76, 175, 80, 0.3);
-            display: none;
+            backdrop-filter: blur(10px);
         }
         
-        .auto-detection.show {
-            display: block;
-            animation: fadeIn 0.3s ease-in;
-        }
-        
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(-10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        
-        .auto-title {
+        .save-url-title {
             font-weight: bold;
             margin-bottom: 8px;
             color: #4CAF50;
-            font-size: 12px;
+            font-size: 11px;
             display: flex;
             align-items: center;
             gap: 6px;
         }
         
-        .card-details {
-            margin-bottom: 10px;
+        .page-info {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            padding: 8px;
+            margin-bottom: 8px;
         }
         
-        .card-name {
+        .page-title {
             font-weight: bold;
-            font-size: 13px;
+            font-size: 11px;
             margin-bottom: 4px;
             color: #FFD700;
+            word-break: break-word;
         }
         
-        .card-info {
-            font-size: 10px;
-            opacity: 0.9;
-            margin-bottom: 4px;
-        }
-        
-        .card-price {
-            font-size: 10px;
-            color: #4CAF50;
-            font-weight: bold;
-            margin-bottom: 4px;
-        }
-        
-        .card-url {
+        .page-url {
             font-size: 9px;
             opacity: 0.7;
-            margin-bottom: 8px;
             word-break: break-all;
+            margin-bottom: 4px;
         }
         
-        .card-url a {
+        .page-site {
+            font-size: 9px;
             color: #81C784;
-            text-decoration: none;
-        }
-        
-        .card-url a:hover {
-            color: #4CAF50;
-        }
-        
-        .auto-actions {
             display: flex;
-            gap: 6px;
+            align-items: center;
+            gap: 4px;
         }
         
-        .auto-save-btn, .auto-view-btn {
-            flex: 1;
-            padding: 6px 10px;
+        .save-url-btn {
+            width: 100%;
+            padding: 8px;
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+            color: white;
             border: none;
-            border-radius: 5px;
-            font-size: 10px;
+            border-radius: 6px;
+            font-size: 11px;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 4px;
+            gap: 6px;
         }
         
-        .auto-save-btn {
-            background: linear-gradient(45deg, #4CAF50, #45a049);
-            color: white;
-        }
-        
-        .auto-save-btn:hover {
+        .save-url-btn:hover {
             transform: translateY(-1px);
             box-shadow: 0 2px 8px rgba(76, 175, 80, 0.3);
         }
         
-        .auto-view-btn {
-            background: linear-gradient(45deg, #2196F3, #1976D2);
-            color: white;
-        }
-        
-        .auto-view-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
-        }
-        
-        .auto-save-btn.disabled {
+        .save-url-btn.disabled {
             background: #9E9E9E;
             cursor: not-allowed;
         }
         
         /* Sezione Aggiungi Manuale */
-        .manual-add {
+        .manual-section {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             padding: 12px;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
+            backdrop-filter: blur(10px);
         }
         
         .manual-title {
             font-weight: bold;
             margin-bottom: 8px;
             color: #FF9800;
-            font-size: 12px;
+            font-size: 11px;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -226,10 +193,10 @@
         
         .input-field {
             width: 100%;
-            padding: 8px;
+            padding: 6px 8px;
             border: none;
             border-radius: 5px;
-            font-size: 11px;
+            font-size: 10px;
             background: rgba(255, 255, 255, 0.9);
             color: #333;
         }
@@ -241,19 +208,19 @@
         
         .manual-add-btn {
             width: 100%;
-            padding: 8px;
+            padding: 6px;
             background: linear-gradient(45deg, #FF9800, #F57C00);
             color: white;
             border: none;
             border-radius: 5px;
-            font-size: 11px;
+            font-size: 10px;
             font-weight: bold;
             cursor: pointer;
             transition: all 0.3s;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
+            gap: 4px;
         }
         
         .manual-add-btn:hover {
@@ -262,24 +229,25 @@
         }
         
         /* Sezione Collezione */
-        .collection {
+        .collection-section {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
             padding: 12px;
-            margin-bottom: 15px;
+            margin-bottom: 12px;
+            backdrop-filter: blur(10px);
         }
         
         .collection-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
         
         .collection-title {
             font-weight: bold;
             color: #E91E63;
-            font-size: 12px;
+            font-size: 11px;
             display: flex;
             align-items: center;
             gap: 6px;
@@ -291,10 +259,10 @@
         }
         
         .action-btn {
-            padding: 4px 8px;
+            padding: 4px 6px;
             border: none;
             border-radius: 4px;
-            font-size: 9px;
+            font-size: 8px;
             cursor: pointer;
             transition: all 0.3s;
             display: flex;
@@ -319,10 +287,10 @@
         
         .search-input {
             width: 100%;
-            padding: 6px 8px 6px 25px;
+            padding: 6px 8px 6px 24px;
             border: none;
             border-radius: 5px;
-            font-size: 10px;
+            font-size: 9px;
             background: rgba(255, 255, 255, 0.9);
             color: #333;
         }
@@ -333,21 +301,21 @@
             top: 50%;
             transform: translateY(-50%);
             color: #666;
-            font-size: 10px;
+            font-size: 9px;
         }
         
         .category-filter {
             display: flex;
-            gap: 4px;
+            gap: 3px;
             margin-bottom: 8px;
             flex-wrap: wrap;
         }
         
         .category-btn {
-            padding: 4px 8px;
+            padding: 3px 6px;
             border: none;
-            border-radius: 4px;
-            font-size: 9px;
+            border-radius: 3px;
+            font-size: 8px;
             cursor: pointer;
             transition: all 0.3s;
             background: rgba(255, 255, 255, 0.1);
@@ -360,7 +328,7 @@
         }
         
         .cards-list {
-            max-height: 200px;
+            max-height: 180px;
             overflow-y: auto;
         }
         
@@ -370,37 +338,65 @@
             padding: 8px;
             margin-bottom: 6px;
             border-left: 3px solid #4CAF50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
-        .card-item-header {
+        .pokemon-sprite {
+            width: 32px;
+            height: 32px;
+            border-radius: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
+        
+        .pokemon-sprite img {
+            width: 24px;
+            height: 24px;
+            image-rendering: pixelated;
+        }
+        
+        .card-content {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .card-header {
             display: flex;
             justify-content: space-between;
             align-items: flex-start;
-            margin-bottom: 4px;
-        }
-        
-        .card-item-name {
-            font-weight: bold;
-            font-size: 11px;
-            color: #FFD700;
-            flex: 1;
-        }
-        
-        .card-item-category {
-            font-size: 8px;
-            padding: 2px 4px;
-            border-radius: 3px;
-            background: rgba(255, 255, 255, 0.2);
-        }
-        
-        .card-item-info {
-            font-size: 9px;
-            opacity: 0.8;
             margin-bottom: 3px;
         }
         
-        .card-item-date {
+        .card-name {
+            font-weight: bold;
+            font-size: 10px;
+            color: #FFD700;
+            flex: 1;
+            word-break: break-word;
+        }
+        
+        .card-category {
+            font-size: 7px;
+            padding: 1px 3px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.2);
+            white-space: nowrap;
+        }
+        
+        .card-info {
             font-size: 8px;
+            opacity: 0.8;
+            margin-bottom: 2px;
+            word-break: break-word;
+        }
+        
+        .card-date {
+            font-size: 7px;
             opacity: 0.6;
         }
         
@@ -411,20 +407,20 @@
         }
         
         .empty-state i {
-            font-size: 24px;
-            margin-bottom: 8px;
+            font-size: 20px;
+            margin-bottom: 6px;
             color: #FFD700;
         }
         
         /* Messaggi */
         .message {
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 10px;
-            font-size: 10px;
+            padding: 6px 10px;
+            border-radius: 5px;
+            margin-bottom: 8px;
+            font-size: 9px;
             display: flex;
             align-items: center;
-            gap: 6px;
+            gap: 5px;
         }
         
         .message.success {
@@ -441,6 +437,25 @@
             background: rgba(33, 150, 243, 0.2);
             border: 1px solid #2196F3;
         }
+        
+        /* Scrollbar personalizzata */
+        .cards-list::-webkit-scrollbar {
+            width: 4px;
+        }
+        
+        .cards-list::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+        }
+        
+        .cards-list::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 2px;
+        }
+        
+        .cards-list::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.5);
+        }
     </style>
 </head>
 <body>
@@ -448,14 +463,14 @@
         <div class="header">
             <div class="logo">
                 <i class="fas fa-book-open"></i>
-                Blocco Note Carte
+                Blocco Note Pokemon
             </div>
-            <div class="subtitle">Pokemon Card Trader Linker</div>
+            <div class="subtitle">Salva e organizza le tue pagine preferite</div>
         </div>
         
         <div class="tabs">
-            <div class="tab active" data-tab="auto">
-                <i class="fas fa-magic"></i> Auto
+            <div class="tab active" data-tab="save">
+                <i class="fas fa-save"></i> Salva
             </div>
             <div class="tab" data-tab="manual">
                 <i class="fas fa-plus"></i> Manuale
@@ -465,37 +480,31 @@
             </div>
         </div>
         
-        <!-- Tab Auto-Detection -->
-        <div class="tab-content active" id="auto-tab">
-            <div class="auto-detection" id="autoDetection">
-                <div class="auto-title">
-                    <i class="fas fa-magic"></i>
-                    Pagina Rilevata
+        <!-- Tab Salva URL -->
+        <div class="tab-content active" id="save-tab">
+            <div class="save-url-section" id="saveUrlSection">
+                <div class="save-url-title">
+                    <i class="fas fa-link"></i>
+                    Salva Pagina Corrente
                 </div>
-                <div class="card-details">
-                    <div class="card-name" id="autoCardName"></div>
-                    <div class="card-info" id="autoCardInfo"></div>
-                    <div class="card-url" id="autoCardUrl"></div>
+                <div class="page-info" id="pageInfo">
+                    <div class="page-title" id="pageTitle">Caricamento...</div>
+                    <div class="page-url" id="pageUrl"></div>
+                    <div class="page-site" id="pageSite"></div>
                 </div>
-                <div class="auto-actions">
-                    <button id="autoSaveBtn" class="auto-save-btn">
-                        <i class="fas fa-save"></i>
-                        Salva
-                    </button>
-                    <button id="autoViewBtn" class="auto-view-btn">
-                        <i class="fas fa-external-link-alt"></i>
-                        Cardmarket
-                    </button>
-                </div>
+                <button id="saveUrlBtn" class="save-url-btn">
+                    <i class="fas fa-save"></i>
+                    Salva URL
+                </button>
             </div>
             
-            <div class="manual-add">
+            <div class="manual-section">
                 <div class="manual-title">
                     <i class="fas fa-plus-circle"></i>
                     Aggiungi Manualmente
                 </div>
                 <div class="input-group">
-                    <input type="text" id="manualCardInput" class="input-field" placeholder="Es: Leafeon sv8a, Charizard XY..." />
+                    <input type="text" id="manualCardInput" class="input-field" placeholder="Es: Charizard, Pikachu..." />
                 </div>
                 <div class="input-group">
                     <select id="manualCategorySelect" class="input-field">
@@ -513,13 +522,13 @@
         
         <!-- Tab Manuale -->
         <div class="tab-content" id="manual-tab">
-            <div class="manual-add">
+            <div class="manual-section">
                 <div class="manual-title">
                     <i class="fas fa-plus-circle"></i>
                     Aggiungi Carta
                 </div>
                 <div class="input-group">
-                    <input type="text" id="manualCardInput2" class="input-field" placeholder="Es: Leafeon sv8a, Charizard XY..." />
+                    <input type="text" id="manualCardInput2" class="input-field" placeholder="Es: Charizard, Pikachu..." />
                 </div>
                 <div class="input-group">
                     <select id="manualCategorySelect2" class="input-field">
@@ -537,11 +546,11 @@
         
         <!-- Tab Collezione -->
         <div class="tab-content" id="collection-tab">
-            <div class="collection">
+            <div class="collection-section">
                 <div class="collection-header">
                     <div class="collection-title">
                         <i class="fas fa-bookmark"></i>
-                        Le Mie Carte
+                        Le Mie Pagine
                     </div>
                     <div class="collection-actions">
                         <button class="action-btn export-btn" id="exportBtn">
@@ -557,7 +566,7 @@
                 
                 <div class="search-box">
                     <i class="fas fa-search search-icon"></i>
-                    <input type="text" id="searchInput" class="search-input" placeholder="Cerca nelle tue carte..." />
+                    <input type="text" id="searchInput" class="search-input" placeholder="Cerca nelle tue pagine..." />
                 </div>
                 
                 <div class="category-filter">
@@ -570,8 +579,8 @@
                 <div class="cards-list" id="cardsList">
                     <div class="empty-state">
                         <i class="fas fa-book-open"></i>
-                        <div>Nessuna carta salvata</div>
-                        <div style="font-size: 9px; margin-top: 4px;">Inizia aggiungendo la tua prima carta!</div>
+                        <div>Nessuna pagina salvata</div>
+                        <div style="font-size: 8px; margin-top: 3px;">Inizia salvando la tua prima pagina!</div>
                     </div>
                 </div>
             </div>
