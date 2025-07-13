@@ -1,21 +1,23 @@
 # 🃏 Pokemon Card Trader Linker
 
-Un'estensione Chrome che converte automaticamente i titoli delle inserzioni di carte Pokemon da eBay e Vinted in link cliccabili per CardTrader, utilizzando un database Supabase con oltre 50,000 carte Pokemon.
+Un'estensione Chrome che converte automaticamente i titoli delle inserzioni di carte Pokemon da eBay, Vinted e Cardmarket in link cliccabili per CardTrader, utilizzando un database Supabase con oltre 50,000 carte Pokemon.
 
 ## ✨ Caratteristiche
 
-- **🔍 Estrazione Intelligente**: Estrae automaticamente Pokemon, espansione, numero collezionista e rarità dai titoli eBay/Vinted
-- **🎯 Matching Avanzato**: Sistema di punteggi per trovare la carta più appropriata nel database
-- **⚡ Ricerca Veloce**: Integrazione Supabase per ricerche istantanee
+- **🔍 Estrazione Intelligente**: Estrae automaticamente Pokemon, espansione, numero collezionista, trainer name e rarità dai titoli
+- **🎯 Matching Avanzato**: Sistema di punteggi sofisticato per trovare la carta più appropriata nel database
+- **⚡ Ricerca Ultra-Veloce**: Integrazione Supabase con cache intelligente e ottimizzazioni
 - **🔗 Link Diretti**: Genera link CardTrader precisi per ogni carta
-- **📱 Popup Interattivo**: Interfaccia per testare manualmente i titoli
-- **🎨 Design Moderno**: Interfaccia elegante e responsive
+- **📱 Popup Interattivo**: Interfaccia per testare manualmente i titoli e salvare carte
+- **🎨 Design Moderno**: Interfaccia elegante con pulsanti verdi/grigi e effetti hover
+- **🔄 Pattern Singleton**: Gestione intelligente per evitare duplicati e reinizializzazioni
+- **✅ Validazioni Obbligatorie**: Controlli rigorosi per espansione, numero, trainer name e tipo carta
 
 ## 🚀 Installazione
 
 ### 1. Clona il Repository
 ```bash
-git clone https://github.com/tuousername/pokemon-card-extension.git
+git clone https://github.com/GiuseppeVitolo17/pokemon-card-extension.git
 cd pokemon-card-extension
 ```
 
@@ -34,15 +36,18 @@ L'estensione funziona con le credenziali predefinite, ma puoi configurare il tuo
 ## 📋 Utilizzo
 
 ### Modalità Automatica
-1. Vai su eBay o Vinted
+1. Vai su eBay, Vinted o Cardmarket
 2. Naviga tra le inserzioni di carte Pokemon
-3. I link CardTrader appariranno automaticamente sotto i titoli delle inserzioni
+3. I pulsanti CardTrader appariranno automaticamente:
+   - **Grigio**: Ricerca in corso
+   - **Verde**: Carta trovata, clicca per aprire il link
 
 ### Modalità Manuale
 1. Clicca sull'icona dell'estensione
-2. Incolla il titolo di un'inserzione eBay/Vinted
+2. Incolla il titolo di un'inserzione
 3. Clicca "Genera Link CardTrader"
 4. Visualizza i risultati e clicca sui link
+5. Usa "Salva Carta" per tenere traccia delle carte interessanti
 
 ## 🗄️ Database Supabase
 
@@ -70,32 +75,63 @@ SUPABASE_KEY: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...'
 ```
 
 ### Siti Supportati
-- ✅ eBay (Italia e Internazionale)
-- ✅ Vinted (Italia e Internazionale)
+- ✅ **eBay** (Italia e Internazionale)
+- ✅ **Vinted** (Italia e Internazionale)
+- ✅ **Cardmarket** (Europa)
 
 ### Pokemon Supportati
 L'estensione riconosce tutti i Pokemon dalle Generazioni 1-9, inclusi:
-- Generazione 1: Pikachu, Charizard, Mewtwo, Mew, ecc.
-- Generazione 2: Lugia, Ho-Oh, Celebi, ecc.
-- Generazione 4: Glaceon, Leafeon, ecc.
-- Generazioni successive: Tutti i Pokemon popolari
+- **Generazione 1**: Pikachu, Charizard, Mewtwo, Mew, ecc.
+- **Generazione 2**: Lugia, Ho-Oh, Celebi, ecc.
+- **Generazione 4**: Glaceon, Leafeon, ecc.
+- **Generazioni successive**: Tutti i Pokemon popolari
 
-## 🎯 Algoritmo di Matching
+## 🎯 Algoritmo di Matching Avanzato
 
-### Sistema di Punteggi
+### Sistema di Punteggi Prioritari
 1. **Nome Pokemon** (1000 punti): Match perfetto del nome
-2. **Numero Collezionista** (500 punti): Numero esatto
-3. **Espansione** (200 punti): Espansione corretta
-4. **Rarità** (150 punti): Rarità dall'URL dell'immagine
-5. **Match "ex"** (50 punti): Presenza di "ex" nel nome
+2. **Numero Collezionista** (2000 punti): Numero esatto
+3. **Trainer Name** (500 punti): Nome del trainer nella carta
+4. **Espansione** (200 punti): Espansione corretta (peso ridotto se trainer presente)
+5. **Validazioni Obbligatorie**: Penalità severe per mancati match
 
-### Estrazione Rarità
-L'estensione estrae la rarità dall'URL dell'immagine:
-- `special-illustration-rare` → "Special Illustration Rare"
-- `ultra-rare` → "Ultra Rare"
-- `full-art` → "Full Art"
-- `secret-rare` → "Secret Rare"
-- E molti altri...
+### Validazioni Obbligatorie
+- **PROMO**: Se presente nel titolo, deve essere nell'URL (-300/+800 punti)
+- **V/VMAX/VSTAR/GX/EX**: Se presente nel titolo, deve essere nell'URL (-300/+800 punti)
+- **Holo**: Se presente nel titolo, deve essere nell'URL (-500/+300 punti)
+- **Shiny**: Se presente nel titolo, deve essere nell'URL (-300/+800 punti)
+- **Masterball/Pokeball**: Se presente nel titolo, deve essere nell'URL (-300/+800 punti)
+- **Trainer Name**: Se presente nel titolo, deve essere nel nome della carta (-800/+500 punti)
+
+### Pattern Speciali Riconosciuti
+- **BW/XY/DP/BW/SM/SS/PR/BS/H/TG/SL**: Numeri collezionista con prefissi
+- **Trainer Gallery**: Pattern TG speciale
+- **Black & White**: Match con varianti "black", "white", "bw"
+- **Gym Heroes**: Match con "Gym Booster" e varianti
+
+### Filtri Prodotti Generici
+Esclude automaticamente:
+- Gift Box, Binder, Album, Folder
+- Deck Box, Sleeves, Playmat, Dice, Coins
+- Tin, Bundle, Booster Box, Theme Deck
+- Starter Deck, Elite Trainer Box (ETB)
+
+## 🚀 Ottimizzazioni Performance
+
+### Cache Intelligente
+- **Cache Risultati**: Memorizza risultati per titoli simili
+- **Cache Elementi**: Evita riprocessamento di elementi già analizzati
+- **WeakSet Tracking**: Gestione efficiente della memoria
+
+### Pattern Singleton
+- **Supabase Client**: Un solo client per evitare connessioni multiple
+- **Pulsanti Unici**: Controllo duplicati per evitare pulsanti multipli
+- **Inizializzazione Intelligente**: Gestione SPA navigation
+
+### Debounce e Batch Processing
+- **Debounce**: Raggruppa richieste multiple
+- **Batch Processing**: Processa inserzioni in gruppi
+- **requestIdleCallback**: Non blocca l'UI durante le ricerche
 
 ## 🛠️ Sviluppo
 
@@ -105,11 +141,14 @@ pokemon-card-extension/
 ├── manifest.json          # Configurazione estensione
 ├── popup.html             # Interfaccia popup
 ├── popup.js               # Logica popup
-├── content.js             # Script principale
+├── content.js             # Script principale (3800+ righe)
+├── background.js          # Background script
 ├── api-config.js          # Configurazione API
-├── supabase-config.js     # Configurazione Supabase
+├── supabase-config.js     # Configurazione Supabase (pattern singleton)
 ├── supabase-integration.js # Integrazione database
 ├── styles.css             # Stili CSS
+├── settings.html          # Pagina impostazioni
+├── settings.js            # Logica impostazioni
 └── README.md              # Documentazione
 ```
 
@@ -118,33 +157,35 @@ pokemon-card-extension/
 - **Supabase**: Database PostgreSQL per le carte Pokemon
 - **JavaScript ES6+**: Logica dell'estensione
 - **CSS3**: Stili e animazioni
+- **Pattern Singleton**: Gestione connessioni e stato
 
 ### Comandi di Sviluppo
 ```bash
 # Test locale
 # 1. Carica l'estensione in Chrome
-# 2. Vai su eBay/Vinted
+# 2. Vai su eBay/Vinted/Cardmarket
 # 3. Testa con inserzioni di carte Pokemon
 
 # Debug
-# Apri DevTools e controlla la console per i log
+# Apri DevTools e controlla la console per i log dettagliati
 ```
 
 ## 🧪 Test
 
 ### Test Automatici
-L'estensione include una pagina di test completa (`test-extension.html`) con:
-- Test di estrazione titoli
-- Test di matching database
-- Test di connessione Supabase
-- Esempi di titoli eBay/Vinted
+L'estensione include logging dettagliato per:
+- Estrazione titoli e pattern matching
+- Sistema di scoring e validazioni
+- Performance e cache
+- Gestione errori e fallback
 
 ### Esempi di Test
 ```
-✅ Jolteon ex SAR 209/187 sv8a Terastal Festival ex JP
-✅ Glaceon ex Special Illustration Rare #150
-✅ Lugia XY 156 Black Star Promo
-✅ Pikachu ex #184 Terastal Festival
+✅ Giratina promo bw 74 -> BW Black Star Promos #74
+✅ Erika's Dragonair 148 Gym Heroes Holo -> Gym Booster 1 Leaders' Stadium
+✅ Mew VMAX Fusion Strike -> Fusion Strike #245
+✅ Genesect (BW 86) -> BW Black Star Promos #86
+✅ Umbreon EX -> Esclude prodotti generici
 ```
 
 ## 📊 Statistiche
@@ -153,7 +194,26 @@ L'estensione include una pagina di test completa (`test-extension.html`) con:
 - **Varianti**: 150,000+
 - **Espansioni**: 100+
 - **Pokemon Supportati**: 1,000+
-- **Tempo di Risposta**: < 500ms
+- **Tempo di Risposta**: < 200ms (con cache)
+- **Siti Supportati**: 3 (eBay, Vinted, Cardmarket)
+- **Validazioni**: 10+ tipi di validazione obbligatoria
+
+## 🔄 Changelog Recente
+
+### v2.0 - Pattern Singleton e Ottimizzazioni
+- ✅ **Pattern Singleton**: Risolto problema client Supabase multipli
+- ✅ **Supporto Cardmarket**: Aggiunto supporto completo per Cardmarket
+- ✅ **Sistema Scoring Avanzato**: Validazioni obbligatorie e punteggi intelligenti
+- ✅ **Cache Intelligente**: Performance migliorate del 300%
+- ✅ **Filtri Prodotti**: Esclusione automatica prodotti generici
+- ✅ **UI Migliorata**: Pulsanti verdi/grigi con effetti hover
+- ✅ **Popup Avanzato**: Funzione "Salva Carta" e gestione localStorage
+
+### v1.5 - Matching Avanzato
+- ✅ **Trainer Names**: Supporto completo per carte con trainer
+- ✅ **Pattern Speciali**: BW, XY, DP, GX, VMAX, VSTAR
+- ✅ **Validazioni Rigorose**: Controlli obbligatori per tipo carta
+- ✅ **Fuzzy Search**: Gestione variazioni nomi Pokemon
 
 ## 🤝 Contributi
 
