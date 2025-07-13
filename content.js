@@ -2642,6 +2642,46 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
         let score = 0;
         let reason = '';
         
+        // PRIORITÀ 0: Escludi prodotti generici (Gift Box, Binder, Album, etc.)
+        const genericProducts = [
+            'gift box', 'gift-box', 'giftbox',
+            'binder', 'album', 'folder',
+            'deck box', 'deck-box', 'deckbox',
+            'sleeves', 'sleeve',
+            'playmat', 'play-mat', 'play mat',
+            'dice', 'die',
+            'coin', 'coins',
+            'box set', 'box-set', 'boxset',
+            'tin', 'tins',
+            'collection', 'collections',
+            'bundle', 'bundles',
+            'booster box', 'booster-box', 'boosterbox',
+            'theme deck', 'theme-deck', 'themedeck',
+            'starter deck', 'starter-deck', 'starterdeck',
+            'preconstructed deck', 'preconstructed-deck',
+            'promo box', 'promo-box', 'promobox',
+            'elite trainer box', 'elite-trainer-box', 'elitetrainerbox',
+            'etb', 'etbs'
+        ];
+        
+        const nameAndUrlLower = (name + ' ' + imageUrlLower).toLowerCase();
+        let isGenericProduct = false;
+        
+        for (const generic of genericProducts) {
+            if (nameAndUrlLower.includes(generic)) {
+                score -= 2000; // Penalità MASSIMA per prodotti generici
+                reason += `Prodotto generico (${generic}) - ESCLUSO `;
+                console.log(`❌ [CardTrader] Prodotto generico rilevato: "${generic}" in "${name}" -> -2000 punti`);
+                isGenericProduct = true;
+                break;
+            }
+        }
+        
+        // Se è un prodotto generico, salta tutte le altre validazioni
+        if (isGenericProduct) {
+            return { result, score, reason: reason.trim() };
+        }
+        
         // PRIORITÀ 1: Espansione (peso ridotto se c'è trainer name)
         let expansionScore = 0;
         let expansionReason = '';
@@ -2794,8 +2834,42 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
     // Ordina per punteggio
     scoredResults.sort((a, b) => b.score - a.score);
     
-    // Filtra risultati con punteggi troppo bassi
-    const goodResults = scoredResults.filter(item => item.score > -100);
+    // Filtra risultati con punteggi troppo bassi e prodotti generici
+    const goodResults = scoredResults.filter(item => {
+        // Escludi prodotti generici completamente
+        const nameAndUrl = (item.result.name_en || item.result.pokemon_name || '') + ' ' + (item.result.image_url || '');
+        const nameAndUrlLower = nameAndUrl.toLowerCase();
+        
+        const genericProducts = [
+            'gift box', 'gift-box', 'giftbox',
+            'binder', 'album', 'folder',
+            'deck box', 'deck-box', 'deckbox',
+            'sleeves', 'sleeve',
+            'playmat', 'play-mat', 'play mat',
+            'dice', 'die',
+            'coin', 'coins',
+            'box set', 'box-set', 'boxset',
+            'tin', 'tins',
+            'collection', 'collections',
+            'bundle', 'bundles',
+            'booster box', 'booster-box', 'boosterbox',
+            'theme deck', 'theme-deck', 'themedeck',
+            'starter deck', 'starter-deck', 'starterdeck',
+            'preconstructed deck', 'preconstructed-deck',
+            'promo box', 'promo-box', 'promobox',
+            'elite trainer box', 'elite-trainer-box', 'elitetrainerbox',
+            'etb', 'etbs'
+        ];
+        
+        for (const generic of genericProducts) {
+            if (nameAndUrlLower.includes(generic)) {
+                console.log(`🚫 [CardTrader] Escluso prodotto generico: "${generic}" in "${item.result.name_en || item.result.pokemon_name}"`);
+                return false;
+            }
+        }
+        
+        return item.score > -100;
+    });
     
     console.log(`✅ [CardTrader] Risultati finali: ${goodResults.length} carte con punteggi validi`);
     
