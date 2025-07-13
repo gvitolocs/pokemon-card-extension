@@ -134,6 +134,11 @@
             margin-bottom: 2px;
         }
         
+        .note-url {
+            font-size: 10px;
+            margin-bottom: 2px;
+        }
+        
         .note-date {
             font-size: 9px;
             opacity: 0.7;
@@ -235,6 +240,22 @@
             font-weight: bold;
         }
         
+        .card-url {
+            font-size: 9px;
+            opacity: 0.7;
+            margin-bottom: 4px;
+            word-break: break-all;
+        }
+        
+        .card-url a {
+            color: #81C784;
+            text-decoration: none;
+        }
+        
+        .card-url a:hover {
+            text-decoration: underline;
+        }
+        
         .card-actions {
             display: flex;
             gap: 8px;
@@ -291,6 +312,7 @@
             <div class="card-name" id="cardName"></div>
             <div class="card-info" id="cardInfo"></div>
             <div class="card-price" id="cardPrice"></div>
+            <div class="card-url" id="cardUrl"></div>
         </div>
         <div class="card-actions">
             <button id="saveCardButton" class="save-button">💾 Salva Carta</button>

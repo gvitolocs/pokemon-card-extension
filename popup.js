@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const cardName = document.getElementById('cardName');
     const cardInfo = document.getElementById('cardInfo');
     const cardPrice = document.getElementById('cardPrice');
+    const cardUrl = document.getElementById('cardUrl');
     const saveCardButton = document.getElementById('saveCardButton');
     const viewCardButton = document.getElementById('viewCardButton');
     
@@ -64,6 +65,7 @@ document.addEventListener('DOMContentLoaded', function() {
             text: cardText,
             info: cardInfo.textContent,
             price: cardPrice.textContent,
+            listingUrl: currentCardData?.listingUrl || '',
             date: new Date().toLocaleString('it-IT'),
             type: 'current',
             cardTraderUrl: currentCardData?.cardTraderUrl || ''
@@ -119,6 +121,7 @@ document.addEventListener('DOMContentLoaded', function() {
         notes.forEach(note => {
             const cardInfoHtml = note.info ? `<div class="note-info">${note.info}</div>` : '';
             const cardPriceHtml = note.price ? `<div class="note-price">${note.price}</div>` : '';
+            const listingUrlHtml = note.listingUrl ? `<div class="note-url"><a href="${note.listingUrl}" target="_blank" class="note-link">🔗 Inserzione</a></div>` : '';
             const cardTraderLink = note.cardTraderUrl ? 
                 `<a href="${note.cardTraderUrl}" target="_blank" class="note-link">🔗 CardTrader</a>` :
                 `<a href="https://cardtrader.com/search?q=${encodeURIComponent(note.text)}" target="_blank" class="note-link">🔍 Cerca su CardTrader</a>`;
@@ -128,6 +131,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="note-text">${note.text}</div>
                     ${cardInfoHtml}
                     ${cardPriceHtml}
+                    ${listingUrlHtml}
                     <div class="note-date">${note.date}</div>
                     <div class="note-actions">
                         ${cardTraderLink}
@@ -161,7 +165,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
             
-            if (tab && (tab.url.includes('ebay') || tab.url.includes('vinted'))) {
+            if (tab && (tab.url.includes('ebay') || tab.url.includes('vinted') || tab.url.includes('cardmarket'))) {
                 // Chiedi al content script di estrarre il titolo
                 const response = await new Promise((resolve, reject) => {
                     chrome.tabs.sendMessage(tab.id, { 
@@ -186,13 +190,21 @@ document.addEventListener('DOMContentLoaded', function() {
                     currentCardData = {
                         name: cardNameText,
                         info: cardInfoText,
-                        cardTraderUrl: `https://cardtrader.com/cards/${bestMatch.blueprint_id}`
+                        cardTraderUrl: `https://cardtrader.com/cards/${bestMatch.blueprint_id}`,
+                        listingUrl: tab.url
                     };
                     
                     // Popola i campi
                     cardName.textContent = cardNameText;
                     cardInfo.textContent = cardInfoText;
                     cardPrice.textContent = 'Prezzo: N/A'; // Per ora, potrebbe essere aggiunto in futuro
+                    
+                    // Mostra l'URL dell'inserzione
+                    const hostname = new URL(tab.url).hostname;
+                    const siteName = hostname.includes('ebay') ? 'eBay' : 
+                                   hostname.includes('vinted') ? 'Vinted' : 
+                                   hostname.includes('cardmarket') ? 'Cardmarket' : 'Sito';
+                    cardUrl.innerHTML = `<a href="${tab.url}" target="_blank">🔗 ${siteName}</a>`;
                     
                     autoAddSection.style.display = 'block';
                 }
