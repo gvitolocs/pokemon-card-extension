@@ -2305,11 +2305,32 @@ function extractTitleInfo(title) {
 // Cerca carte nel database
 async function searchCardInDatabase(titleInfo, originalTitle = '') {
     try {
-        const supabaseClient = window.supabaseClient;
+        // Aspetta che Supabase sia inizializzato se non lo è già
+        let supabaseClient = window.supabaseClient;
         
         if (!supabaseClient) {
-            console.error('❌ [CardTrader] Supabase client non disponibile');
-            return [];
+            console.log('⏳ [CardTrader] Supabase non inizializzato, aspetto...');
+            
+            // Aspetta fino a 5 secondi che Supabase sia inizializzato
+            let attempts = 0;
+            const maxAttempts = 50; // 50 tentativi * 100ms = 5 secondi
+            
+            while (!supabaseClient && attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, 100));
+                supabaseClient = window.supabaseClient;
+                attempts++;
+                
+                if (attempts % 10 === 0) {
+                    console.log(`⏳ [CardTrader] Tentativo ${attempts}/${maxAttempts} - Aspetto Supabase...`);
+                }
+            }
+            
+            if (!supabaseClient) {
+                console.error('❌ [CardTrader] Supabase client non disponibile dopo 5 secondi di attesa');
+                return [];
+            } else {
+                console.log('✅ [CardTrader] Supabase inizializzato, procedo con la ricerca');
+            }
         }
         
         // Ottimizzazione: usa requestIdleCallback se disponibile per non bloccare l'UI
