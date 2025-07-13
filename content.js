@@ -2743,6 +2743,17 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
             console.log(`🎯 [CardTrader] Holo trovato in: "${result.image_url}" -> +300 punti`);
         }
         
+        // PRIORITÀ 6: Validazione obbligatoria per EX
+        if (originalTitle.toLowerCase().includes(' ex ') && !imageUrlLower.includes('ex')) {
+            score -= 500; // Penalità MASSIMA per EX mancante
+            reason += 'EX richiesto ma mancante nell\'URL ';
+            console.log(`❌ [CardTrader] EX richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+        } else if (originalTitle.toLowerCase().includes(' ex ') && imageUrlLower.includes('ex')) {
+            score += 300; // Bonus MASSIMO per EX presente
+            reason += 'EX nell\'URL CORRETTO ';
+            console.log(`🎯 [CardTrader] EX trovato in: "${result.image_url}" -> +300 punti`);
+        }
+        
         // Bonus per match esatto del numero
         if (result.exact_number_match) {
             score += 500; // Bonus extra per match esatto
