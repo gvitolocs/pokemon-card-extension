@@ -1325,11 +1325,6 @@ function patchVintedProductPage() {
 function patchCardmarketProductPage() {
     if (!window.location.hostname.includes('cardmarket')) return;
     
-    // DUPLICATE CHECK: Non inserire se già presente un pulsante CT
-    if (document.querySelector('.pokemon-linker-button')) {
-        console.log('🚫 [CardTrader] Pulsante CT già presente, skip inserimento');
-        return;
-    }
     try {
         // Cerca il titolo del prodotto
         const titleSelectors = [
@@ -1441,6 +1436,7 @@ function patchCardmarketProductPage() {
             }
         }
         
+        // Esegui sempre la ricerca database se il pulsante esiste (nuovo o già presente)
         console.log('🔍 [CardTrader] Avvio ricerca database per:', titleInfo.pokemonName);
         searchCardInDatabase(titleInfo, title).then(results => {
             if (results && results.length > 0) {
