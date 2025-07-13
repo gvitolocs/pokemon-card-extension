@@ -39,6 +39,8 @@ async function initializeExtension() {
         }
         
         // Inizializza Supabase in background
+        // NOTA: Su Vinted questa funzione viene chiamata più volte a causa della navigazione SPA
+        // Il pattern singleton in supabase-config.js garantisce che venga creato un solo client
         if (typeof initializeSupabase === 'function') {
             initializeSupabase().then(supabaseReady => {
                 if (supabaseReady) {
@@ -64,6 +66,9 @@ async function initializeExtension() {
         console.log('✅ Estensione inizializzata rapidamente');
         
         // Aggiungi listener per cambi di URL (SPA navigation)
+        // PROBLEMA VINTED: La navigazione SPA causa reinizializzazioni multiple dell'estensione
+        // Ogni cambio di URL interno su Vinted attiva nuovamente il content script
+        // Questo è il motivo principale per cui serviva il pattern singleton per Supabase
         let currentUrl = window.location.href;
         const urlObserver = new MutationObserver(() => {
             if (window.location.href !== currentUrl) {
