@@ -2772,6 +2772,11 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                     expansionScore = 80;
                     expansionReason = 'Gym Heroes corrisponde a Gym Booster ';
                     console.log(`🎯 [CardTrader] Match speciale Gym Heroes -> Gym Booster: +80 punti`);
+                } else if (titleInfo.expansion === 'black & white' && (expansion.includes('black') || expansion.includes('white'))) {
+                    // Bonus speciale per Black & White che può apparire in vari formati
+                    expansionScore = 70;
+                    expansionReason = 'Black & White corrisponde a varianti Black/White ';
+                    console.log(`🎯 [CardTrader] Match speciale Black & White -> ${expansion}: +70 punti`);
                 } else {
                     if (similarity < 0.3) {
                         expansionScore = -200;
@@ -2990,9 +2995,17 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                         console.log(`🎯 [CardTrader] NUMERO ISOLATO: +200 punti`);
                     }
                 } else {
-                    score -= 800; // Penalità MASSIMA se il numero non è nell'URL
-                    reason += `Numero ${collectorNumberStr} richiesto ma non nell\'URL `;
-                    console.log(`❌ [CardTrader] Numero ${collectorNumberStr} richiesto ma non trovato in: "${result.image_url}" -> -800 punti`);
+                    // Penalità ridotta per numeri mancanti - potrebbe essere un formato diverso nell'URL
+                    // Se l'espansione corrisponde, riduci ulteriormente la penalità
+                    if (expansionScore > 0) {
+                        score -= 50; // Penalità minima se l'espansione corrisponde
+                        reason += `Numero ${collectorNumberStr} richiesto ma non nell\'URL (espansione OK) `;
+                        console.log(`⚠️ [CardTrader] Numero ${collectorNumberStr} richiesto ma non trovato in: "${result.image_url}" -> -50 punti (espansione OK)`);
+                    } else {
+                        score -= 200; // Penalità normale se l'espansione non corrisponde
+                        reason += `Numero ${collectorNumberStr} richiesto ma non nell\'URL (formato diverso?) `;
+                        console.log(`⚠️ [CardTrader] Numero ${collectorNumberStr} richiesto ma non trovato in: "${result.image_url}" -> -200 punti`);
+                    }
                 }
             }
             
