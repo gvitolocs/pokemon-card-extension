@@ -1345,20 +1345,55 @@ function patchVintedProductPage() {
                 }
                 
                 // Inserisci dopo il titolo (con controllo per evitare errori DOM)
+                console.log(`🔍 [CardTrader] Tentativo inserimento link container...`);
+                console.log(`🔍 [CardTrader] titleElement:`, titleElement);
+                console.log(`🔍 [CardTrader] titleElement.parentNode:`, titleElement.parentNode);
+                console.log(`🔍 [CardTrader] linkContainer:`, linkContainer);
+                
                 if (titleElement.parentNode && !titleElement.parentNode.contains(linkContainer)) {
+                    console.log(`✅ [CardTrader] Inserimento normale nel parentNode`);
                     titleElement.parentNode.insertBefore(linkContainer, titleElement.nextSibling);
                 } else {
                     console.log('⚠️ [CardTrader] Impossibile inserire link container, fallback...');
+                    console.log(`🔍 [CardTrader] titleElement.parentNode:`, titleElement.parentNode);
+                    console.log(`🔍 [CardTrader] titleElement.parentNode.parentNode:`, titleElement.parentNode?.parentNode);
+                    
                     // Fallback sicuro: inserisci dopo l'elemento padre del titolo
                     if (titleElement.parentNode && titleElement.parentNode.parentNode) {
+                        console.log(`✅ [CardTrader] Fallback 1: inserimento nel parentNode del parentNode`);
                         titleElement.parentNode.parentNode.insertBefore(linkContainer, titleElement.parentNode.nextSibling);
                     } else {
                         // Ultimo fallback: inserisci alla fine del body
+                        console.log(`✅ [CardTrader] Fallback 2: inserimento nel body`);
                         document.body.appendChild(linkContainer);
                     }
                 }
                 
                 console.log(`✅ [CardTrader] Aggiunti ${maxLinks} link CardTrader alla pagina prodotto`);
+                
+                // Verifica se i pulsanti sono stati inseriti correttamente
+                const insertedButtons = document.querySelectorAll('.pokemon-linker-button');
+                console.log(`🔍 [CardTrader] Pulsanti CT trovati nella pagina: ${insertedButtons.length}`);
+                
+                // Aggiorna i pulsanti inseriti con i risultati
+                if (results && results.length > 0) {
+                    insertedButtons.forEach((button, index) => {
+                        if (index < maxLinks) {
+                            // Cambia il colore in verde
+                            button.style.background = '#28a745';
+                            console.log(`✅ [CardTrader] Pulsante ${index + 1} diventato verde`);
+                            
+                            // Aggiungi event listener per il click
+                            const result = results[index];
+                            button.addEventListener('click', (e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                const cardTraderUrl = generateCardTraderLink(result.blueprint_id);
+                                window.open(cardTraderUrl, '_blank');
+                            });
+                        }
+                    });
+                }
             }
         });
         
