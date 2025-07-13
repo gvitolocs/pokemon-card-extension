@@ -94,6 +94,16 @@ function cleanupProcessedAttributes() {
         
         console.log('🧹 [CardTrader] Puliti attributi processati da elementi non rilevanti');
     }
+    
+    // Pulisci anche gli attributi dei pulsanti per evitare duplicati
+    const buttonElements = document.querySelectorAll('[data-pokemon-linker-button-added]');
+    buttonElements.forEach(element => {
+        element.removeAttribute('data-pokemon-linker-button-added');
+    });
+    
+    if (buttonElements.length > 0) {
+        console.log(`🧹 [CardTrader] Puliti ${buttonElements.length} attributi pulsanti`);
+    }
 }
 
 // Avvia l'osservatore per rilevare nuove inserzioni
@@ -507,7 +517,13 @@ function extractTitleFromListing(listingElement) {
 // Aggiungi i link CardTrader
 function addCardTraderLinks(listingElement, results, titleInfo) {
     try {
-        // Rimuovi pulsanti esistenti
+        // Controlla se il pulsante è già stato aggiunto per questo elemento
+        if (listingElement.hasAttribute('data-pokemon-linker-button-added')) {
+            console.log(`🔄 [CardTrader] Pulsante già presente per ${titleInfo.pokemonName}, saltando...`);
+            return;
+        }
+        
+        // Rimuovi pulsanti esistenti (per sicurezza)
         const existingButtons = listingElement.querySelectorAll('.pokemon-linker-button');
         existingButtons.forEach(button => button.remove());
         
@@ -523,7 +539,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             margin-top: 8px;
             margin-left: 8px;
             padding: 4px 8px;
-            background: #007bff;
+            background: #28a745;
             color: white;
             border: none;
             border-radius: 3px;
@@ -544,17 +560,23 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         
         // Effetti hover
         button.addEventListener('mouseenter', () => {
-            button.style.background = '#0056b3';
+            button.style.background = '#218838';
         });
         
         button.addEventListener('mouseleave', () => {
-            button.style.background = '#007bff';
+            button.style.background = '#28a745';
         });
         
         // Inserisci il pulsante
-        insertLinkContainer(listingElement, button);
+        const inserted = insertLinkContainer(listingElement, button);
         
-        console.log(`✅ [CardTrader] Aggiunto pulsante CT per ${bestResult.name_en || bestResult.pokemon_name}`);
+        if (inserted) {
+            // Marca l'elemento come già processato
+            listingElement.setAttribute('data-pokemon-linker-button-added', 'true');
+            console.log(`✅ [CardTrader] Aggiunto pulsante CT per ${bestResult.name_en || bestResult.pokemon_name}`);
+        } else {
+            console.log(`⚠️ [CardTrader] Impossibile inserire pulsante per ${bestResult.name_en || bestResult.pokemon_name}`);
+        }
         
     } catch (error) {
         console.error('❌ [CardTrader] Errore nell\'aggiunta pulsante:', error);
@@ -580,7 +602,7 @@ function insertLinkContainer(listingElement, button) {
                 // Verifica che il pulsante non sia già presente
                 if (!element.parentNode.querySelector('.pokemon-linker-button')) {
                     element.parentNode.insertBefore(button, element.nextSibling);
-                    return;
+                    return true;
                 }
             }
         }
@@ -588,6 +610,7 @@ function insertLinkContainer(listingElement, button) {
         // Fallback: inserisci alla fine dell'elemento se non è già presente
         if (!listingElement.querySelector('.pokemon-linker-button')) {
             listingElement.appendChild(button);
+            return true;
         }
         
     } else if (hostname.includes('ebay')) {
@@ -604,7 +627,7 @@ function insertLinkContainer(listingElement, button) {
                 // Verifica che il pulsante non sia già presente
                 if (!element.parentNode.querySelector('.pokemon-linker-button')) {
                     element.parentNode.insertBefore(button, element.nextSibling);
-                    return;
+                    return true;
                 }
             }
         }
@@ -612,6 +635,7 @@ function insertLinkContainer(listingElement, button) {
         // Fallback: inserisci alla fine dell'elemento se non è già presente
         if (!listingElement.querySelector('.pokemon-linker-button')) {
             listingElement.appendChild(button);
+            return true;
         }
     } else if (hostname.includes('cardmarket')) {
         // Per Cardmarket, inserisci dopo il titolo
@@ -629,7 +653,7 @@ function insertLinkContainer(listingElement, button) {
                 // Verifica che il pulsante non sia già presente
                 if (!element.parentNode.querySelector('.pokemon-linker-button')) {
                     element.parentNode.insertBefore(button, element.nextSibling);
-                    return;
+                    return true;
                 }
             }
         }
@@ -637,8 +661,11 @@ function insertLinkContainer(listingElement, button) {
         // Fallback: inserisci alla fine dell'elemento se non è già presente
         if (!listingElement.querySelector('.pokemon-linker-button')) {
             listingElement.appendChild(button);
+            return true;
         }
     }
+    
+    return false;
 }
 
 // Gestisci la ricerca dal popup
