@@ -226,6 +226,18 @@
             color: #4CAF50;
         }
         
+        .card-category-selector {
+            margin-bottom: 12px;
+        }
+        
+        .card-category-selector label {
+            display: block;
+            font-size: 11px;
+            margin-bottom: 5px;
+            color: #FFD700;
+            font-weight: 500;
+        }
+        
         .card-actions {
             display: flex;
             gap: 8px;
@@ -655,6 +667,18 @@
             align-items: center;
             gap: 6px;
         }
+        
+        .info-message {
+            background: rgba(33, 150, 243, 0.2);
+            border: 1px solid #2196F3;
+            border-radius: 6px;
+            padding: 8px 12px;
+            margin-bottom: 10px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
     </style>
 </head>
 <body>
@@ -723,6 +747,14 @@
                     <div class="card-info" id="cardInfo"></div>
                     <div class="card-price" id="cardPrice"></div>
                     <div class="card-url" id="cardUrl"></div>
+                </div>
+                <div class="card-category-selector">
+                    <label for="autoCategorySelect">Categoria:</label>
+                    <select id="autoCategorySelect" class="add-input">
+                        <option value="viewed">👁️ Viste</option>
+                        <option value="wishlist">🎯 Wishlist</option>
+                        <option value="favorite">⭐ Preferite</option>
+                    </select>
                 </div>
                 <div class="card-actions">
                     <button id="saveCardButton" class="save-button">

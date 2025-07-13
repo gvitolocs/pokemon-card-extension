@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('searchInput');
     const exportDataBtn = document.getElementById('exportDataBtn');
     const importDataBtn = document.getElementById('importDataBtn');
+    const autoCategorySelect = document.getElementById('autoCategorySelect');
     
     // Tabs
     const tabs = document.querySelectorAll('.tab');
@@ -169,10 +170,13 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
         
+        const selectedCategory = autoCategorySelect.value;
+        const categoryName = getCategoryName(selectedCategory);
+        
         const note = {
             id: Date.now(),
             text: cardText,
-            category: 'viewed',
+            category: selectedCategory,
             info: cardInfo.textContent,
             price: cardPrice.textContent,
             listingUrl: currentCardData?.listingUrl || '',
@@ -186,7 +190,10 @@ document.addEventListener('DOMContentLoaded', function() {
         showSaveConfirmation();
         loadNotes();
         updateStats();
-        showMessage(`Carta "${cardText}" salvata`, 'success');
+        showMessage(`Carta "${cardText}" salvata nelle ${categoryName}`, 'success');
+        
+        // Reset del selettore di categoria per la prossima carta
+        autoCategorySelect.value = 'viewed';
     }
     
     // Visualizza la carta corrente su CardTrader
@@ -431,12 +438,41 @@ document.addEventListener('DOMContentLoaded', function() {
         return icons[category] || '📝';
     }
     
+    // Controlla se una carta esiste già
+    function checkIfCardExists(cardName, cardInfo) {
+        const notes = getNotes();
+        return notes.find(note => 
+            note.text.toLowerCase() === cardName.toLowerCase() &&
+            note.info === cardInfo
+        );
+    }
+    
     // Mostra un messaggio
     function showMessage(text, type = 'success') {
         const messageDiv = document.createElement('div');
-        messageDiv.className = type === 'success' ? 'success-message' : 'error-message';
+        let iconClass, messageClass;
+        
+        switch (type) {
+            case 'success':
+                iconClass = 'check-circle';
+                messageClass = 'success-message';
+                break;
+            case 'error':
+                iconClass = 'exclamation-circle';
+                messageClass = 'error-message';
+                break;
+            case 'info':
+                iconClass = 'info-circle';
+                messageClass = 'info-message';
+                break;
+            default:
+                iconClass = 'check-circle';
+                messageClass = 'success-message';
+        }
+        
+        messageDiv.className = messageClass;
         messageDiv.innerHTML = `
-            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-circle'}"></i>
+            <i class="fas fa-${iconClass}"></i>
             ${text}
         `;
         
@@ -514,16 +550,67 @@ document.addEventListener('DOMContentLoaded', function() {
                     // Popola i campi
                     cardName.textContent = cardNameText;
                     cardInfo.textContent = cardInfoText;
-                    cardPrice.textContent = 'Prezzo: N/A'; // Per ora, potrebbe essere aggiunto in futuro
                     
-                    // Mostra l'URL dell'inserzione
+                    // Prova a estrarre il prezzo dalla pagina
+                    let priceText = 'Prezzo: N/A';
+                    try {
+                        if (tab.url.includes('ebay')) {
+                            // Per eBay, potremmo estrarre il prezzo dal content script
+                            priceText = 'Prezzo: Controlla inserzione';
+                        } else if (tab.url.includes('vinted')) {
+                            priceText = 'Prezzo: Controlla inserzione';
+                        } else if (tab.url.includes('cardmarket')) {
+                            priceText = 'Prezzo: Controlla inserzione';
+                        }
+                    } catch (error) {
+                        console.log('Errore nell\'estrazione del prezzo:', error);
+                    }
+                    cardPrice.textContent = priceText;
+                    
+                    // Mostra l'URL dell'inserzione con icona del sito
                     const hostname = new URL(tab.url).hostname;
-                    const siteName = hostname.includes('ebay') ? 'eBay' : 
-                                   hostname.includes('vinted') ? 'Vinted' : 
-                                   hostname.includes('cardmarket') ? 'Cardmarket' : 'Sito';
-                    cardUrl.innerHTML = `<a href="${tab.url}" target="_blank"><i class="fas fa-external-link-alt"></i> ${siteName}</a>`;
+                    let siteName, siteIcon;
+                    if (hostname.includes('ebay')) {
+                        siteName = 'eBay';
+                        siteIcon = 'fas fa-shopping-cart';
+                    } else if (hostname.includes('vinted')) {
+                        siteName = 'Vinted';
+                        siteIcon = 'fas fa-tshirt';
+                    } else if (hostname.includes('cardmarket')) {
+                        siteName = 'Cardmarket';
+                        siteIcon = 'fas fa-cards-blank';
+                    } else {
+                        siteName = 'Sito';
+                        siteIcon = 'fas fa-external-link-alt';
+                    }
+                    cardUrl.innerHTML = `<a href="${tab.url}" target="_blank"><i class="${siteIcon}"></i> ${siteName}</a>`;
                     
+                    // Controlla se la carta è già stata salvata
+                    const existingCard = checkIfCardExists(cardNameText, cardInfoText);
+                    if (existingCard) {
+                        // Mostra messaggio che la carta è già salvata
+                        showMessage(`Carta "${cardNameText}" già presente nelle ${getCategoryName(existingCard.category)}`, 'info');
+                        // Cambia il testo del pulsante
+                        saveCardButton.innerHTML = '<i class="fas fa-check"></i> Già Salvata';
+                        saveCardButton.style.background = 'linear-gradient(45deg, #FF9800, #F57C00)';
+                        saveCardButton.disabled = true;
+                    } else {
+                        // Reset del pulsante
+                        saveCardButton.innerHTML = '<i class="fas fa-save"></i> Salva Carta';
+                        saveCardButton.style.background = 'linear-gradient(45deg, #4CAF50, #45a049)';
+                        saveCardButton.disabled = false;
+                    }
+                    
+                    // Mostra la sezione con animazione
                     autoAddSection.style.display = 'block';
+                    autoAddSection.classList.add('fade-in');
+                    
+                    // Suggerisci categoria basata sul sito
+                    if (hostname.includes('ebay') || hostname.includes('vinted')) {
+                        autoCategorySelect.value = 'wishlist'; // Probabilmente stai guardando per comprare
+                    } else {
+                        autoCategorySelect.value = 'viewed'; // Default per altri siti
+                    }
                 }
             }
         } catch (error) {
