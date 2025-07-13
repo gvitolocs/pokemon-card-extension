@@ -619,7 +619,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             color: white;
             border: none;
             border-radius: 8px;
-            font-size: 15px;
+            font-size: 17px;
             cursor: pointer;
             font-weight: bold;
             min-width: 100px;
@@ -1182,23 +1182,23 @@ function patchCardmarketProductPage() {
                 const button = document.createElement('button');
                 button.className = 'pokemon-linker-button';
                 button.innerHTML = 'CardTrader';
-                button.style.cssText = `
-                    margin: 0;
-                    padding: 6px 12px;
-                    background: #28a745;
-                    color: white;
-                    border: none;
-                    border-radius: 6px;
-                    font-size: 13px;
-                    cursor: pointer;
-                    font-weight: bold;
-                    min-width: 90px;
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    transition: all 0.2s ease;
-                    text-decoration: none;
-                `;
+                                    button.style.cssText = `
+                        margin: 0;
+                        padding: 6px 12px;
+                        background: #28a745;
+                        color: white;
+                        border: none;
+                        border-radius: 6px;
+                        font-size: 15px;
+                        cursor: pointer;
+                        font-weight: bold;
+                        min-width: 90px;
+                        display: inline-flex;
+                        align-items: center;
+                        justify-content: center;
+                        transition: all 0.2s ease;
+                        text-decoration: none;
+                    `;
                 
                 // Apri direttamente il link CardTrader quando si clicca
                 button.addEventListener('click', (e) => {
