@@ -1394,14 +1394,18 @@ function patchCardmarketProductPage() {
         
         // Cerca il link "Contact Support" e sostituiscilo con il pulsante CardTrader
         const supportLink = document.querySelector('a[href*="support/tickets/new"]');
+        let buttonInserted = false; // Flag per tracciare se il pulsante è stato inserito
+        
         if (supportLink && supportLink.parentNode) {
             // Prima di sostituire, controlla se il pulsante CardTrader è già presente
             if (supportLink.parentNode.querySelector('.pokemon-linker-button')) {
-                // Se già presente, non fare nulla
+                // Se già presente, non fare nulla ma segna che il pulsante esiste
                 console.log('🚫 [CardTrader] Pulsante CT già presente, non reinserisco');
+                buttonInserted = true; // Il pulsante esiste già
             } else {
                 supportLink.parentNode.replaceChild(button, supportLink);
                 console.log(`✅ [CardTrader] Sostituito link supporto con pulsante CT su Cardmarket (loading)`);
+                buttonInserted = true;
             }
         } else {
             // Cerca il contenitore del link di supporto e inserisci il pulsante lì solo se non già presente
@@ -1410,30 +1414,51 @@ function patchCardmarketProductPage() {
                 if (!supportContainer.querySelector('.pokemon-linker-button')) {
                     supportContainer.appendChild(button);
                     console.log(`✅ [CardTrader] Inserito pulsante CT nel contenitore supporto su Cardmarket (loading)`);
+                    buttonInserted = true;
                 } else {
                     console.log('🚫 [CardTrader] Pulsante CT già presente nel contenitore, non reinserisco');
+                    buttonInserted = true; // Il pulsante esiste già
                 }
             } else {
                 // Fallback: inserisci direttamente nell'h1 solo se non già presente
                 if (!titleElement.querySelector('.pokemon-linker-button')) {
                     titleElement.appendChild(button);
                     console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (loading fallback)`);
+                    buttonInserted = true;
                 } else {
                     console.log('🚫 [CardTrader] Pulsante CT già presente nell\'h1, non reinserisco');
+                    buttonInserted = true; // Il pulsante esiste già
                 }
             }
         }
 
         
-        // Cerca nel database
+        // Cerca nel database SOLO se il pulsante è stato inserito o esiste già
+        if (!buttonInserted) {
+            console.log('❌ [CardTrader] Pulsante CT non inserito, saltando ricerca database');
+            return;
+        }
+        
+        // Ottieni il riferimento al pulsante (quello appena creato o quello esistente)
+        let targetButton = button; // Usa il pulsante appena creato se inserito
+        if (!button.parentNode) {
+            // Se il pulsante non è stato inserito, cerca quello esistente
+            targetButton = document.querySelector('.pokemon-linker-button');
+            if (!targetButton) {
+                console.log('❌ [CardTrader] Pulsante CT non trovato nella pagina, saltando ricerca database');
+                return;
+            }
+        }
+        
+        console.log('🔍 [CardTrader] Avvio ricerca database per:', titleInfo.pokemonName);
         searchCardInDatabase(titleInfo, title).then(results => {
             if (results && results.length > 0) {
                 // Cambia il colore in verde quando ha trovato il link
-                button.style.background = '#28a745';
+                targetButton.style.background = '#28a745';
                 console.log(`✅ [CardTrader] Link trovato, pulsante diventato verde`);
                 
                 // Apri direttamente il link CardTrader quando si clicca
-                button.addEventListener('click', (e) => {
+                targetButton.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
                     const bestResult = results[0];
@@ -1442,16 +1467,16 @@ function patchCardmarketProductPage() {
                 });
                 
                 // Effetti hover migliorati (verde)
-                button.addEventListener('mouseenter', () => {
-                    button.style.background = '#218838';
-                    button.style.transform = 'scale(1.02)';
-                    button.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
+                targetButton.addEventListener('mouseenter', () => {
+                    targetButton.style.background = '#218838';
+                    targetButton.style.transform = 'scale(1.02)';
+                    targetButton.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
                 });
                 
-                button.addEventListener('mouseleave', () => {
-                    button.style.background = '#28a745';
-                    button.style.transform = 'scale(1)';
-                    button.style.boxShadow = 'none';
+                targetButton.addEventListener('mouseleave', () => {
+                    targetButton.style.background = '#28a745';
+                    targetButton.style.transform = 'scale(1)';
+                    targetButton.style.boxShadow = 'none';
                 });
                 
             } else {
@@ -1459,16 +1484,16 @@ function patchCardmarketProductPage() {
                 console.log(`⚠️ [CardTrader] Nessun risultato trovato, pulsante rimane grigio`);
                 
                 // Effetti hover per pulsante grigio (disabilitato)
-                button.addEventListener('mouseenter', () => {
-                    button.style.background = '#5a6268';
-                    button.style.transform = 'scale(1.02)';
-                    button.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
+                targetButton.addEventListener('mouseenter', () => {
+                    targetButton.style.background = '#5a6268';
+                    targetButton.style.transform = 'scale(1.02)';
+                    targetButton.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
                 });
                 
-                button.addEventListener('mouseleave', () => {
-                    button.style.background = '#6c757d';
-                    button.style.transform = 'scale(1)';
-                    button.style.boxShadow = 'none';
+                targetButton.addEventListener('mouseleave', () => {
+                    targetButton.style.background = '#6c757d';
+                    targetButton.style.transform = 'scale(1)';
+                    targetButton.style.boxShadow = 'none';
                 });
             }
         });
