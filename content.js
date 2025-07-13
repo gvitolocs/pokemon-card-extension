@@ -2743,15 +2743,35 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
             console.log(`🎯 [CardTrader] Holo trovato in: "${result.image_url}" -> +300 punti`);
         }
         
-        // PRIORITÀ 6: Validazione obbligatoria per EX
-        if (originalTitle.toLowerCase().includes(' ex ') && !imageUrlLower.includes('ex')) {
-            score -= 500; // Penalità MASSIMA per EX mancante
-            reason += 'EX richiesto ma mancante nell\'URL ';
-            console.log(`❌ [CardTrader] EX richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
-        } else if (originalTitle.toLowerCase().includes(' ex ') && imageUrlLower.includes('ex')) {
-            score += 300; // Bonus MASSIMO per EX presente
-            reason += 'EX nell\'URL CORRETTO ';
-            console.log(`🎯 [CardTrader] EX trovato in: "${result.image_url}" -> +300 punti`);
+        // PRIORITÀ 6: Validazione obbligatoria per tipi di carte speciali
+        const cardTypes = [
+            { title: ' ex ', url: 'ex', name: 'EX' },
+            { title: ' v ', url: 'v', name: 'V' },
+            { title: ' vmax ', url: 'vmax', name: 'VMAX' },
+            { title: ' vstar ', url: 'vstar', name: 'VSTAR' },
+            { title: ' gx ', url: 'gx', name: 'GX' },
+            { title: ' break ', url: 'break', name: 'BREAK' },
+            { title: ' prime ', url: 'prime', name: 'Prime' },
+            { title: ' lv.x ', url: 'lv.x', name: 'LV.X' },
+            { title: ' lvx ', url: 'lvx', name: 'LVX' },
+            { title: ' star ', url: 'star', name: 'Star' },
+            { title: ' delta ', url: 'delta', name: 'Delta' },
+            { title: ' crystal ', url: 'crystal', name: 'Crystal' },
+            { title: ' shining ', url: 'shining', name: 'Shining' },
+            { title: ' gold star ', url: 'gold-star', name: 'Gold Star' },
+            { title: ' goldstar ', url: 'goldstar', name: 'Gold Star' }
+        ];
+        
+        for (const cardType of cardTypes) {
+            if (originalTitle.toLowerCase().includes(cardType.title) && !imageUrlLower.includes(cardType.url)) {
+                score -= 500; // Penalità MASSIMA per tipo mancante
+                reason += `${cardType.name} richiesto ma mancante nell'URL `;
+                console.log(`❌ [CardTrader] ${cardType.name} richiesto ma non trovato in: "${result.image_url}" -> -500 punti`);
+            } else if (originalTitle.toLowerCase().includes(cardType.title) && imageUrlLower.includes(cardType.url)) {
+                score += 300; // Bonus MASSIMO per tipo presente
+                reason += `${cardType.name} nell'URL CORRETTO `;
+                console.log(`🎯 [CardTrader] ${cardType.name} trovato in: "${result.image_url}" -> +300 punti`);
+            }
         }
         
         // Bonus per match esatto del numero
