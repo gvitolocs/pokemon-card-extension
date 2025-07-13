@@ -8,7 +8,7 @@ Un'estensione Chrome che converte automaticamente i titoli delle inserzioni di c
 - **🎯 Matching Avanzato**: Sistema di punteggi sofisticato per trovare la carta più appropriata nel database
 - **⚡ Ricerca Ultra-Veloce**: Integrazione Supabase con cache intelligente e ottimizzazioni
 - **🔗 Link Diretti**: Genera link CardTrader precisi per ogni carta
-- **📱 Popup Interattivo**: Interfaccia per testare manualmente i titoli e salvare carte
+- **📱 Popup Interattivo**: Blocco note moderno per gestire le tue carte Pokemon
 - **🎨 Design Moderno**: Interfaccia elegante con pulsanti verdi/grigi e effetti hover
 - **🔄 Pattern Singleton**: Gestione intelligente per evitare duplicati e reinizializzazioni
 - **✅ Validazioni Obbligatorie**: Controlli rigorosi per espansione, numero, trainer name e tipo carta
@@ -48,6 +48,46 @@ L'estensione funziona con le credenziali predefinite, ma puoi configurare il tuo
 3. Clicca "Genera Link CardTrader"
 4. Visualizza i risultati e clicca sui link
 5. Usa "Salva Carta" per tenere traccia delle carte interessanti
+
+## 📝 **Blocco Note Moderno**
+
+Il popup dell'estensione include un blocco note completo e moderno per gestire le tue carte Pokemon:
+
+### **🎨 Interfaccia Moderna**
+- **Design Responsivo**: UI elegante con animazioni e effetti hover
+- **Sistema di Tab**: Organizzazione in 3 sezioni principali
+- **Icone FontAwesome**: Interfaccia intuitiva e professionale
+- **Tema Scuro/Chiaro**: Personalizzazione dell'aspetto
+
+### **➕ Tab Aggiungi**
+- **Input Manuale**: Aggiungi carte digitando il nome
+- **Categorie**: Organizza in Wishlist, Viste, Preferite
+- **Rilevamento Automatico**: Rileva carte su eBay, Vinted, Cardmarket
+- **Salvataggio Rapido**: Un click per salvare la carta corrente
+
+### **📚 Tab Collezione**
+- **Statistiche in Tempo Reale**: Contatore totale, wishlist, viste
+- **Ricerca Avanzata**: Trova carte per nome o informazioni
+- **Filtri per Categoria**: Visualizza solo le categorie desiderate
+- **Gestione Completa**: Modifica, elimina, esporta singole carte
+- **Link Diretti**: Accesso rapido a CardTrader e inserzioni originali
+
+### **⚙️ Tab Impostazioni**
+- **Rilevamento Automatico**: Attiva/disattiva il rilevamento
+- **Notifiche Prezzo**: (Futuro) Avvisi per variazioni di prezzo
+- **Tema Scuro**: Cambia l'aspetto dell'interfaccia
+- **Backup Completo**: Esporta/importa tutti i dati
+
+### **🚀 Funzionalità Avanzate**
+- **Categorie Intelligenti**: 
+  - 🎯 **Wishlist**: Carte che vuoi acquistare
+  - 👁️ **Viste**: Carte che hai visualizzato
+  - ⭐ **Preferite**: Carte che ti piacciono di più
+- **Esportazione Dati**: Backup completo in formato JSON
+- **Importazione Dati**: Ripristina da backup precedenti
+- **Messaggi di Feedback**: Conferme e notifiche per ogni azione
+- **Animazioni Fluide**: Transizioni e effetti visivi
+- **Persistenza Dati**: Salvataggio automatico in localStorage
 
 ## 🗄️ Database Supabase
 
@@ -199,6 +239,17 @@ L'estensione include logging dettagliato per:
 - **Validazioni**: 10+ tipi di validazione obbligatoria
 
 ## 🔄 Changelog Recente
+
+### v2.1 - Blocco Note Moderno
+- ✅ **Interfaccia Completamente Ridisegnata**: Design moderno con FontAwesome
+- ✅ **Sistema di Tab**: Organizzazione in Aggiungi, Collezione, Impostazioni
+- ✅ **Categorie Intelligenti**: Wishlist, Viste, Preferite con icone
+- ✅ **Ricerca e Filtri**: Trova carte per nome e filtra per categoria
+- ✅ **Statistiche in Tempo Reale**: Contatori per totale, wishlist, viste
+- ✅ **Backup Completo**: Esporta/importa tutti i dati in JSON
+- ✅ **Tema Scuro**: Opzione per cambiare l'aspetto dell'interfaccia
+- ✅ **Messaggi di Feedback**: Conferme e notifiche per ogni azione
+- ✅ **Animazioni Fluide**: Transizioni e effetti hover moderni
 
 ### v2.0 - Pattern Singleton e Ottimizzazioni
 - ✅ **Pattern Singleton**: Risolto problema client Supabase multipli
