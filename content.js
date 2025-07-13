@@ -1396,38 +1396,29 @@ function patchCardmarketProductPage() {
         const supportLink = document.querySelector('a[href*="support/tickets/new"]');
         let buttonInserted = false; // Flag per tracciare se il pulsante è stato inserito
         
-        if (supportLink && supportLink.parentNode) {
-            // Prima di sostituire, controlla se il pulsante CardTrader è già presente
-            if (supportLink.parentNode.querySelector('.pokemon-linker-button')) {
-                // Se già presente, non fare nulla ma segna che il pulsante esiste
-                console.log('🚫 [CardTrader] Pulsante CT già presente, non reinserisco');
-                buttonInserted = true; // Il pulsante esiste già
-            } else {
+        // Prima controlla se il pulsante CT è già presente da qualche parte nella pagina
+        const existingButton = document.querySelector('.pokemon-linker-button');
+        if (existingButton) {
+            console.log('🚫 [CardTrader] Pulsante CT già presente, non reinserisco');
+            buttonInserted = true; // Il pulsante esiste già
+        } else {
+            // Il pulsante non esiste, procedi con l'inserimento
+            if (supportLink && supportLink.parentNode) {
                 supportLink.parentNode.replaceChild(button, supportLink);
                 console.log(`✅ [CardTrader] Sostituito link supporto con pulsante CT su Cardmarket (loading)`);
                 buttonInserted = true;
-            }
-        } else {
-            // Cerca il contenitore del link di supporto e inserisci il pulsante lì solo se non già presente
-            const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
-            if (supportContainer) {
-                if (!supportContainer.querySelector('.pokemon-linker-button')) {
+            } else {
+                // Cerca il contenitore del link di supporto e inserisci il pulsante lì
+                const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
+                if (supportContainer) {
                     supportContainer.appendChild(button);
                     console.log(`✅ [CardTrader] Inserito pulsante CT nel contenitore supporto su Cardmarket (loading)`);
                     buttonInserted = true;
                 } else {
-                    console.log('🚫 [CardTrader] Pulsante CT già presente nel contenitore, non reinserisco');
-                    buttonInserted = true; // Il pulsante esiste già
-                }
-            } else {
-                // Fallback: inserisci direttamente nell'h1 solo se non già presente
-                if (!titleElement.querySelector('.pokemon-linker-button')) {
+                    // Fallback: inserisci direttamente nell'h1
                     titleElement.appendChild(button);
                     console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (loading fallback)`);
                     buttonInserted = true;
-                } else {
-                    console.log('🚫 [CardTrader] Pulsante CT già presente nell\'h1, non reinserisco');
-                    buttonInserted = true; // Il pulsante esiste già
                 }
             }
         }
