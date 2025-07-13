@@ -1198,6 +1198,7 @@ function patchCardmarketProductPage() {
                         justify-content: center;
                         transition: all 0.2s ease;
                         text-decoration: none;
+                        text-align: center;
                     `;
                 
                 // Apri direttamente il link CardTrader quando si clicca
@@ -1221,17 +1222,24 @@ function patchCardmarketProductPage() {
                     button.style.boxShadow = 'none';
                 });
                 
-                // Cerca il link "Contact Support" e sostituiscilo con il pulsante CardTrader
-                const supportLink = document.querySelector('a[href*="support/tickets/new"]');
-                if (supportLink && supportLink.parentNode) {
-                    // Sostituisci il link di supporto con il pulsante CardTrader
-                    supportLink.parentNode.replaceChild(button, supportLink);
-                    console.log(`✅ [CardTrader] Sostituito link supporto con pulsante CT su Cardmarket`);
-                } else {
-                    // Fallback: inserisci direttamente nell'h1
-                    titleElement.appendChild(button);
-                    console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (fallback)`);
-                }
+                                    // Cerca il link "Contact Support" e sostituiscilo con il pulsante CardTrader
+                    const supportLink = document.querySelector('a[href*="support/tickets/new"]');
+                    if (supportLink && supportLink.parentNode) {
+                        // Sostituisci il link di supporto con il pulsante CardTrader
+                        supportLink.parentNode.replaceChild(button, supportLink);
+                        console.log(`✅ [CardTrader] Sostituito link supporto con pulsante CT su Cardmarket`);
+                    } else {
+                        // Cerca il contenitore del link di supporto e inserisci il pulsante lì
+                        const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
+                        if (supportContainer) {
+                            supportContainer.appendChild(button);
+                            console.log(`✅ [CardTrader] Inserito pulsante CT nel contenitore supporto su Cardmarket`);
+                        } else {
+                            // Fallback: inserisci direttamente nell'h1
+                            titleElement.appendChild(button);
+                            console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (fallback)`);
+                        }
+                    }
                 titleElement.setAttribute('data-pokemon-linker-button-added', 'true');
             }
         });
