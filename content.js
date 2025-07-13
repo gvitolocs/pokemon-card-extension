@@ -1349,7 +1349,13 @@ function patchVintedProductPage() {
                     titleElement.parentNode.insertBefore(linkContainer, titleElement.nextSibling);
                 } else {
                     console.log('⚠️ [CardTrader] Impossibile inserire link container, fallback...');
-                    titleElement.appendChild(linkContainer);
+                    // Fallback sicuro: inserisci dopo l'elemento padre del titolo
+                    if (titleElement.parentNode && titleElement.parentNode.parentNode) {
+                        titleElement.parentNode.parentNode.insertBefore(linkContainer, titleElement.parentNode.nextSibling);
+                    } else {
+                        // Ultimo fallback: inserisci alla fine del body
+                        document.body.appendChild(linkContainer);
+                    }
                 }
                 
                 console.log(`✅ [CardTrader] Aggiunti ${maxLinks} link CardTrader alla pagina prodotto`);
