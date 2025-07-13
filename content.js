@@ -469,8 +469,8 @@ function extractTitleFromListing(listingElement) {
             const element = listingElement.querySelector(selector);
             if (element && element.textContent && element.textContent.trim()) {
                 let title = element.textContent.trim();
-                // Rimuovi eventuali pulsanti CT dal titolo
-                title = title.replace(/\bCT\b/g, '').trim();
+                // Rimuovi eventuali pulsanti CardTrader dal titolo
+                title = title.replace(/\bCardTrader\b/g, '').trim();
                 return title;
             }
         }
@@ -478,8 +478,8 @@ function extractTitleFromListing(listingElement) {
         // Fallback: usa il testo dell'elemento stesso
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
-            // Rimuovi eventuali pulsanti CT dal titolo
-            title = title.replace(/\bCT\b/g, '').trim();
+            // Rimuovi eventuali pulsanti CardTrader dal titolo
+            title = title.replace(/\bCardTrader\b/g, '').trim();
             return title;
         }
         
@@ -497,8 +497,8 @@ function extractTitleFromListing(listingElement) {
             const element = listingElement.querySelector(selector);
             if (element && element.textContent && element.textContent.trim()) {
                 let title = element.textContent.trim();
-                // Rimuovi eventuali pulsanti CT dal titolo
-                title = title.replace(/\bCT\b/g, '').trim();
+                // Rimuovi eventuali pulsanti CardTrader dal titolo
+                title = title.replace(/\bCardTrader\b/g, '').trim();
                 return title;
             }
         }
@@ -506,8 +506,8 @@ function extractTitleFromListing(listingElement) {
         // Fallback: usa il testo dell'elemento stesso
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
-            // Rimuovi eventuali pulsanti CT dal titolo
-            title = title.replace(/\bCT\b/g, '').trim();
+            // Rimuovi eventuali pulsanti CardTrader dal titolo
+            title = title.replace(/\bCardTrader\b/g, '').trim();
             return title;
         }
     } else if (hostname.includes('cardmarket')) {
@@ -533,8 +533,8 @@ function extractTitleFromListing(listingElement) {
                     title = element.textContent.trim();
                     console.log(`🔍 [CardTrader] Cardmarket titolo normale - Titolo estratto: "${title}"`);
                 }
-                // Rimuovi eventuali pulsanti CT dal titolo
-                title = title.replace(/\bCT\b/g, '').trim();
+                // Rimuovi eventuali pulsanti CardTrader dal titolo
+                title = title.replace(/\bCardTrader\b/g, '').trim();
                 console.log(`🔍 [CardTrader] Cardmarket titolo finale: "${title}"`);
                 return title;
             }
@@ -543,7 +543,7 @@ function extractTitleFromListing(listingElement) {
         // Fallback: usa il testo dell'elemento stesso
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
-            title = title.replace(/\bCT\b/g, '').trim();
+            title = title.replace(/\bCardTrader\b/g, '').trim();
             console.log(`🔍 [CardTrader] Cardmarket fallback - Titolo: "${title}"`);
             return title;
         }
@@ -565,29 +565,37 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         // Rimuovi pulsanti esistenti (per sicurezza) e pulisci attributi
         const existingButtons = listingElement.querySelectorAll('.pokemon-linker-button');
         existingButtons.forEach(button => button.remove());
+        
+        // Rimuovi attributi da tutti gli elementi figli
+        const allElements = listingElement.querySelectorAll('*');
+        allElements.forEach(el => {
+            el.removeAttribute('data-pokemon-linker-button-added');
+            el.removeAttribute('data-pokemon-linker-processed');
+        });
         listingElement.removeAttribute('data-pokemon-linker-button-added');
         
         // Prendi il miglior risultato (il primo)
         const bestResult = results[0];
         if (!bestResult) return;
         
-        // Crea il pulsante semplice con "CT"
+        // Crea il pulsante con "CardTrader"
         const button = document.createElement('button');
         button.className = 'pokemon-linker-button';
-        button.innerHTML = 'CT';
+        button.innerHTML = 'CardTrader';
         button.style.cssText = `
             margin-top: 8px;
             margin-left: 8px;
-            padding: 4px 8px;
+            padding: 6px 12px;
             background: #28a745;
             color: white;
             border: none;
-            border-radius: 3px;
-            font-size: 11px;
+            border-radius: 8px;
+            font-size: 10px;
             cursor: pointer;
             font-weight: bold;
-            min-width: 30px;
+            min-width: 80px;
             display: inline-block;
+            transition: all 0.2s ease;
         `;
         
         // Apri direttamente il link CardTrader quando si clicca
@@ -598,13 +606,17 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
             window.open(cardTraderUrl, '_blank');
         });
         
-        // Effetti hover
+        // Effetti hover migliorati
         button.addEventListener('mouseenter', () => {
             button.style.background = '#218838';
+            button.style.transform = 'scale(1.05)';
+            button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
         });
         
         button.addEventListener('mouseleave', () => {
             button.style.background = '#28a745';
+            button.style.transform = 'scale(1)';
+            button.style.boxShadow = 'none';
         });
         
         // Inserisci il pulsante
@@ -613,7 +625,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
         if (inserted) {
             // Marca l'elemento come già processato
             listingElement.setAttribute('data-pokemon-linker-button-added', 'true');
-            console.log(`✅ [CardTrader] Aggiunto pulsante CT per ${bestResult.name_en || bestResult.pokemon_name}`);
+            console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader per ${bestResult.name_en || bestResult.pokemon_name}`);
         } else {
             console.log(`⚠️ [CardTrader] Impossibile inserire pulsante per ${bestResult.name_en || bestResult.pokemon_name}`);
         }
@@ -645,7 +657,7 @@ function insertLinkContainer(listingElement, button) {
                     // Verifica anche che non ci sia già un pulsante con lo stesso testo
                     const existingButtons = parent.querySelectorAll('button');
                     const hasCTButton = Array.from(existingButtons).some(btn => 
-                        btn.textContent.trim() === 'CT' || 
+                        btn.textContent.trim() === 'CardTrader' || 
                         btn.classList.contains('pokemon-linker-button')
                     );
                     
@@ -662,7 +674,7 @@ function insertLinkContainer(listingElement, button) {
             // Verifica anche che non ci sia già un pulsante con lo stesso testo
             const existingButtons = listingElement.querySelectorAll('button');
             const hasCTButton = Array.from(existingButtons).some(btn => 
-                btn.textContent.trim() === 'CT' || 
+                btn.textContent.trim() === 'CardTrader' || 
                 btn.classList.contains('pokemon-linker-button')
             );
             
@@ -689,7 +701,7 @@ function insertLinkContainer(listingElement, button) {
                     // Verifica anche che non ci sia già un pulsante con lo stesso testo
                     const existingButtons = parent.querySelectorAll('button');
                     const hasCTButton = Array.from(existingButtons).some(btn => 
-                        btn.textContent.trim() === 'CT' || 
+                        btn.textContent.trim() === 'CardTrader' || 
                         btn.classList.contains('pokemon-linker-button')
                     );
                     
@@ -706,7 +718,7 @@ function insertLinkContainer(listingElement, button) {
             // Verifica anche che non ci sia già un pulsante con lo stesso testo
             const existingButtons = listingElement.querySelectorAll('button');
             const hasCTButton = Array.from(existingButtons).some(btn => 
-                btn.textContent.trim() === 'CT' || 
+                btn.textContent.trim() === 'CardTrader' || 
                 btn.classList.contains('pokemon-linker-button')
             );
             
@@ -734,7 +746,7 @@ function insertLinkContainer(listingElement, button) {
                     // Verifica anche che non ci sia già un pulsante con lo stesso testo
                     const existingButtons = parent.querySelectorAll('button');
                     const hasCTButton = Array.from(existingButtons).some(btn => 
-                        btn.textContent.trim() === 'CT' || 
+                        btn.textContent.trim() === 'CardTrader' || 
                         btn.classList.contains('pokemon-linker-button')
                     );
                     
@@ -751,7 +763,7 @@ function insertLinkContainer(listingElement, button) {
             // Verifica anche che non ci sia già un pulsante con lo stesso testo
             const existingButtons = listingElement.querySelectorAll('button');
             const hasCTButton = Array.from(existingButtons).some(btn => 
-                btn.textContent.trim() === 'CT' || 
+                btn.textContent.trim() === 'CardTrader' || 
                 btn.classList.contains('pokemon-linker-button')
             );
             
