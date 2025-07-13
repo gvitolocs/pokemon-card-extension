@@ -1375,23 +1375,29 @@ function patchVintedProductPage() {
                 const insertedButtons = document.querySelectorAll('.pokemon-linker-button');
                 console.log(`🔍 [CardTrader] Pulsanti CT trovati nella pagina: ${insertedButtons.length}`);
                 
-                // Aggiorna i pulsanti inseriti con i risultati
+                // Aggiorna SOLO i pulsanti appena inseriti (gli ultimi maxLinks)
                 if (results && results.length > 0) {
-                    insertedButtons.forEach((button, index) => {
-                        if (index < maxLinks) {
-                            // Cambia il colore in verde
-                            button.style.background = '#28a745';
-                            console.log(`✅ [CardTrader] Pulsante ${index + 1} diventato verde`);
-                            
-                            // Aggiungi event listener per il click
-                            const result = results[index];
-                            button.addEventListener('click', (e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                const cardTraderUrl = generateCardTraderLink(result.blueprint_id);
-                                window.open(cardTraderUrl, '_blank');
-                            });
-                        }
+                    // Prendi solo gli ultimi maxLinks pulsanti (quelli appena inseriti)
+                    const recentButtons = Array.from(insertedButtons).slice(-maxLinks);
+                    console.log(`🔍 [CardTrader] Aggiornando ${recentButtons.length} pulsanti recenti`);
+                    
+                    recentButtons.forEach((button, index) => {
+                        // Rimuovi event listener esistenti per evitare duplicati
+                        const newButton = button.cloneNode(true);
+                        button.parentNode.replaceChild(newButton, button);
+                        
+                        // Cambia il colore in verde
+                        newButton.style.background = '#28a745';
+                        console.log(`✅ [CardTrader] Pulsante ${index + 1} diventato verde`);
+                        
+                        // Aggiungi event listener per il click
+                        const result = results[index];
+                        newButton.addEventListener('click', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            const cardTraderUrl = generateCardTraderLink(result.blueprint_id);
+                            window.open(cardTraderUrl, '_blank');
+                        });
                     });
                 }
             }
