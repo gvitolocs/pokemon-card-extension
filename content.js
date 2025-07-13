@@ -955,6 +955,7 @@ function patchCardmarketProductPage() {
 
 // Estrai informazioni dal titolo
 function extractTitleInfo(title) {
+    console.log(`🔍 [CardTrader] Processando titolo: "${title}"`);
     const titleLower = title.toLowerCase();
     
     // Lista completa di tutti i Pokemon (Generazioni 1-9)
@@ -1130,16 +1131,56 @@ function extractTitleInfo(title) {
     let secondPokemonName = null;
     const titleWords = titleLower.split(/\s+/);
     
-    // Prima cerca match esatti
+    // Prima cerca match esatti, dando priorità ai Pokemon che appaiono prima nel titolo
+    const foundPokemon = [];
     for (const pokemon of pokemonNames) {
-        if (titleLower.includes(pokemon.toLowerCase())) {
-            if (!pokemonName) {
-                pokemonName = pokemon;
-                console.log(`🎯 [CardTrader] Match esatto trovato: "${pokemon}" in "${title}"`);
-            } else if (!secondPokemonName) {
-                secondPokemonName = pokemon;
-                console.log(`🎯 [CardTrader] Secondo Pokemon trovato: "${pokemon}" in "${title}"`);
+        const pokemonLower = pokemon.toLowerCase();
+        const index = titleLower.indexOf(pokemonLower);
+        if (index !== -1) {
+            foundPokemon.push({ pokemon, index });
+        }
+    }
+    
+    // Ordina per posizione nel titolo (prima = priorità più alta)
+    foundPokemon.sort((a, b) => a.index - b.index);
+    
+    if (foundPokemon.length > 0) {
+        // Se abbiamo più Pokemon, cerca di identificare quello principale
+        if (foundPokemon.length > 1) {
+            console.log(`🔍 [CardTrader] Trovati ${foundPokemon.length} Pokemon nel titolo:`, foundPokemon.map(p => p.pokemon));
+            
+            // Cerca pattern specifici che indicano il Pokemon principale
+            const mainPokemonPatterns = [
+                /(umbreon|espeon|sylveon|leafeon|glaceon|flareon|jolteon|vaporeon)\s+ex/i,
+                /(mew|mewtwo|rayquaza|charizard|blastoise|venusaur)\s+ex/i,
+                /(pikachu|raichu)\s+ex/i
+            ];
+            
+            for (const pattern of mainPokemonPatterns) {
+                const match = title.match(pattern);
+                if (match) {
+                    const mainPokemon = match[1].toLowerCase();
+                    const found = foundPokemon.find(p => p.pokemon.toLowerCase() === mainPokemon);
+                    if (found) {
+                        pokemonName = found.pokemon;
+                        console.log(`🎯 [CardTrader] Pokemon principale identificato dal pattern: "${pokemonName}"`);
+                        break;
+                    }
+                }
             }
+            
+            // Se non abbiamo trovato un pattern specifico, usa il primo
+            if (!pokemonName) {
+                pokemonName = foundPokemon[0].pokemon;
+                console.log(`🎯 [CardTrader] Usando primo Pokemon trovato: "${pokemonName}"`);
+            }
+            
+            // Il secondo Pokemon è il prossimo nella lista
+            secondPokemonName = foundPokemon[1].pokemon;
+            console.log(`🎯 [CardTrader] Secondo Pokemon: "${secondPokemonName}"`);
+        } else {
+            pokemonName = foundPokemon[0].pokemon;
+            console.log(`🎯 [CardTrader] Match esatto trovato: "${pokemonName}" in "${title}"`);
         }
     }
     
@@ -1158,17 +1199,24 @@ function extractTitleInfo(title) {
         // Se il Pokemon estratto dal pattern corrisponde a un Pokemon valido
         const extractedPokemonLower = extractedPokemon.toLowerCase();
         if (pokemonNames.includes(extractedPokemonLower)) {
-            pokemonName = extractedPokemon;
-            console.log(`✅ [CardTrader] Pokemon confermato dal pattern Cardmarket: "${pokemonName}"`);
+            // Solo se non abbiamo già trovato un Pokemon dal titolo principale
+            if (!pokemonName) {
+                pokemonName = extractedPokemon;
+                console.log(`✅ [CardTrader] Pokemon confermato dal pattern Cardmarket: "${pokemonName}"`);
+            } else {
+                console.log(`⚠️ [CardTrader] Pokemon già trovato nel titolo principale: "${pokemonName}", ignorando pattern Cardmarket: "${extractedPokemon}"`);
+            }
         } else {
             // Cerca un match fuzzy nel caso il nome non sia esatto
-            for (const pokemon of pokemonNames) {
-                if (pokemon.toLowerCase() === extractedPokemonLower || 
-                    pokemon.toLowerCase().includes(extractedPokemonLower) || 
-                    extractedPokemonLower.includes(pokemon.toLowerCase())) {
-                    pokemonName = pokemon;
-                    console.log(`✅ [CardTrader] Pokemon trovato con match fuzzy dal pattern Cardmarket: "${extractedPokemon}" -> "${pokemonName}"`);
-                    break;
+            if (!pokemonName) {
+                for (const pokemon of pokemonNames) {
+                    if (pokemon.toLowerCase() === extractedPokemonLower || 
+                        pokemon.toLowerCase().includes(extractedPokemonLower) || 
+                        extractedPokemonLower.includes(pokemon.toLowerCase())) {
+                        pokemonName = pokemon;
+                        console.log(`✅ [CardTrader] Pokemon trovato con match fuzzy dal pattern Cardmarket: "${extractedPokemon}" -> "${pokemonName}"`);
+                        break;
+                    }
                 }
             }
         }
