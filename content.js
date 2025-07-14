@@ -2744,12 +2744,12 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
         if (titleLower.includes('sar') && titleLower.includes('terastal festival') && titleInfo.collectorNumber) {
             console.log(`🎯 [CardTrader] CASO SPECIALE: Carta SAR Terastal Festival rilevata, numero ${titleInfo.collectorNumber}`);
             
-            // Cerca specificamente la carta SAR con il numero collezionista
+            // Cerca specificamente le carte del Terastal Festival con il numero collezionista
             const sarQuery = supabaseClient
                 .from('cards')
                 .select('*')
                 .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .ilike('name_en', '%sar%')
+                .ilike('expansion_name_en', '%terastal festival%')
                 .not('name_en', 'ilike', '%deck%')
                 .not('name_en', 'ilike', '%booster%')
                 .not('name_en', 'ilike', '%bundle%')
@@ -2769,7 +2769,7 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
             if (sarError) {
                 console.error('❌ [CardTrader] Errore query SAR:', sarError);
             } else if (sarResults && sarResults.length > 0) {
-                console.log(`✅ [CardTrader] Trovate ${sarResults.length} carte SAR per ${titleInfo.pokemonName}`);
+                console.log(`✅ [CardTrader] Trovate ${sarResults.length} carte Terastal Festival per ${titleInfo.pokemonName}:`, sarResults.map(c => c.name_en));
                 
                 // Cerca varianti con il numero specifico
                 const blueprintIds = sarResults.map(card => card.blueprint_id).filter(id => id);
@@ -2782,7 +2782,7 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                         .eq('collector_number', titleInfo.collectorNumber);
                     
                     if (!variantsError && sarVariants && sarVariants.length > 0) {
-                        console.log(`✅ [CardTrader] Trovate ${sarVariants.length} varianti SAR con numero ${titleInfo.collectorNumber}`);
+                        console.log(`✅ [CardTrader] Trovate ${sarVariants.length} varianti Terastal Festival con numero ${titleInfo.collectorNumber}:`, sarVariants);
                         
                         const sarResultsWithVariants = sarVariants.map(variant => {
                             const card = sarResults.find(c => c.blueprint_id === variant.blueprint_id);
@@ -2804,9 +2804,17 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                         if (sarResultsWithVariants.length > 0) {
                             console.log('🎯 [CardTrader] Risultati SAR Terastal Festival trovati:', sarResultsWithVariants);
                             return scoreAndValidateResults(sarResultsWithVariants, titleInfo, originalTitle);
+                        } else {
+                            console.log('⚠️ [CardTrader] Nessun risultato valido dal caso speciale SAR');
                         }
+                    } else {
+                        console.log('⚠️ [CardTrader] Nessuna variante trovata con numero', titleInfo.collectorNumber);
                     }
+                } else {
+                    console.log('⚠️ [CardTrader] Nessun blueprint_id valido dalle carte SAR');
                 }
+            } else {
+                console.log('⚠️ [CardTrader] Nessuna carta Terastal Festival trovata per', titleInfo.pokemonName);
             }
         }
         
