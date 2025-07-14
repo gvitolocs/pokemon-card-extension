@@ -2740,6 +2740,76 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
             return scoreAndValidateResults([mewBubbleResult], titleInfo, originalTitle);
         }
         
+        // PRIORITÀ 0.5: Caso speciale per carte SAR del Terastal Festival
+        if (titleLower.includes('sar') && titleLower.includes('terastal festival') && titleInfo.collectorNumber) {
+            console.log(`🎯 [CardTrader] CASO SPECIALE: Carta SAR Terastal Festival rilevata, numero ${titleInfo.collectorNumber}`);
+            
+            // Cerca specificamente la carta SAR con il numero collezionista
+            const sarQuery = supabaseClient
+                .from('cards')
+                .select('*')
+                .ilike('name_en', `%${titleInfo.pokemonName}%`)
+                .ilike('name_en', '%sar%')
+                .not('name_en', 'ilike', '%deck%')
+                .not('name_en', 'ilike', '%booster%')
+                .not('name_en', 'ilike', '%bundle%')
+                .not('name_en', 'ilike', '%lot%')
+                .not('name_en', 'ilike', '%binder%')
+                .not('name_en', 'ilike', '%album%')
+                .not('name_en', 'ilike', '%sleeve%')
+                .not('name_en', 'ilike', '%dice%')
+                .not('name_en', 'ilike', '%token%')
+                .not('name_en', 'ilike', '%gift box%')
+                .not('name_en', 'ilike', '%box%')
+                .not('name_en', 'ilike', '%tin%')
+                .not('name_en', 'ilike', '%collection%');
+            
+            const { data: sarResults, error: sarError } = await sarQuery;
+            
+            if (sarError) {
+                console.error('❌ [CardTrader] Errore query SAR:', sarError);
+            } else if (sarResults && sarResults.length > 0) {
+                console.log(`✅ [CardTrader] Trovate ${sarResults.length} carte SAR per ${titleInfo.pokemonName}`);
+                
+                // Cerca varianti con il numero specifico
+                const blueprintIds = sarResults.map(card => card.blueprint_id).filter(id => id);
+                
+                if (blueprintIds.length > 0) {
+                    const { data: sarVariants, error: variantsError } = await supabaseClient
+                        .from('card_variants')
+                        .select('*')
+                        .in('blueprint_id', blueprintIds)
+                        .eq('collector_number', titleInfo.collectorNumber);
+                    
+                    if (!variantsError && sarVariants && sarVariants.length > 0) {
+                        console.log(`✅ [CardTrader] Trovate ${sarVariants.length} varianti SAR con numero ${titleInfo.collectorNumber}`);
+                        
+                        const sarResultsWithVariants = sarVariants.map(variant => {
+                            const card = sarResults.find(c => c.blueprint_id === variant.blueprint_id);
+                            if (card) {
+                                return {
+                                    ...variant,
+                                    name_en: card.name_en,
+                                    pokemon_name: card.name_en,
+                                    expansion_name_en: card.expansion_name_en,
+                                    expansion_code: card.expansion_code,
+                                    source: 'sar_terastal_festival_special_case',
+                                    exact_number_match: true,
+                                    special_case: true
+                                };
+                            }
+                            return null;
+                        }).filter(result => result !== null);
+                        
+                        if (sarResultsWithVariants.length > 0) {
+                            console.log('🎯 [CardTrader] Risultati SAR Terastal Festival trovati:', sarResultsWithVariants);
+                            return scoreAndValidateResults(sarResultsWithVariants, titleInfo, originalTitle);
+                        }
+                    }
+                }
+            }
+        }
+        
         // PRIORITÀ 1: Se c'è un trainer name, cerca direttamente le carte di quell'allenatore
         if (titleInfo.trainerName) {
             console.log(`🎯 [CardTrader] RICERCA PRIORITARIA per trainer: ${titleInfo.trainerName} ${titleInfo.pokemonName}`);
@@ -3358,6 +3428,12 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
         if (result.special_case && result.blueprint_id === 274416) {
             console.log('🎯 [CardTrader] CASO SPECIALE: Mew bubble - punteggio massimo');
             return { result, score: 99999, reason: 'Caso speciale Mew bubble - blueprint_id 274416' };
+        }
+        
+        // PRIORITÀ 0.5: Caso speciale per carte SAR del Terastal Festival - punteggio massimo
+        if (result.special_case && result.source === 'sar_terastal_festival_special_case') {
+            console.log('🎯 [CardTrader] CASO SPECIALE: Carta SAR Terastal Festival - punteggio massimo');
+            return { result, score: 99998, reason: 'Caso speciale SAR Terastal Festival' };
         }
         
         // PRIORITÀ 0: Controllo IMMEDIATO per carte jumbo/oversized nell'URL
