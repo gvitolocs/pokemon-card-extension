@@ -2717,6 +2717,10 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
         
         // PRIORITÀ 0: Caso speciale per "Mew bubble" - blueprint_id fisso
         const titleLower = originalTitle.toLowerCase();
+        console.log(`🔍 [CardTrader] Controllo caso speciale Mew bubble in: "${titleLower}"`);
+        console.log(`🔍 [CardTrader] Contiene 'mew': ${titleLower.includes('mew')}`);
+        console.log(`🔍 [CardTrader] Contiene 'bubble': ${titleLower.includes('bubble')}`);
+        
         if (titleLower.includes('mew') && titleLower.includes('bubble')) {
             console.log('🎯 [CardTrader] CASO SPECIALE: Mew bubble rilevato, imposto blueprint_id 274416');
             
@@ -2732,6 +2736,7 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                 special_case: true
             };
             
+            console.log('🎯 [CardTrader] Risultato Mew bubble creato:', mewBubbleResult);
             return scoreAndValidateResults([mewBubbleResult], titleInfo, originalTitle);
         }
         
@@ -3080,7 +3085,12 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
                 expansionLower.includes('black star promos') ||
                 (titleInfo.collectorNumber && titleInfo.cardType === 'black star')) {
                 console.log(`🎯 [CardTrader] Promo SWSH rilevata, saltando filtro espansione`);
-            } else {
+            } 
+            // Logica speciale per carte cinesi: non filtrare per espansione se il titolo contiene "chinese"
+            else if (originalTitle.toLowerCase().includes('chinese') || originalTitle.toLowerCase().includes('ptcg')) {
+                console.log(`🎯 [CardTrader] Carta cinese rilevata, saltando filtro espansione`);
+            }
+            else {
                 allResults = allResults.filter(card => {
                     const cardExpansion = (card.expansion_name_en || card.expansion_code || '').toLowerCase();
                     return cardExpansion.includes(expansionLower) || expansionLower.includes(cardExpansion);
@@ -3853,6 +3863,17 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
     });
     
     console.log(`✅ [CardTrader] Risultati finali: ${goodResults.length} carte con punteggi validi`);
+    
+    // Se non ci sono risultati buoni ma ci sono risultati disponibili, mostra almeno il migliore
+    if (goodResults.length === 0 && scoredResults.length > 0) {
+        console.log(`⚠️ [CardTrader] Nessun risultato perfetto, mostro il migliore disponibile`);
+        
+        // Prendi il risultato con punteggio più alto (anche se negativo)
+        const bestAvailable = scoredResults[0];
+        console.log(`🏆 [CardTrader] Migliore disponibile: ${bestAvailable.result.name_en || bestAvailable.result.pokemon_name} - Punteggio: ${bestAvailable.score} - Motivo: ${bestAvailable.reason}`);
+        
+        return [bestAvailable.result];
+    }
     
     // Log dei primi 3 risultati per debug
     goodResults.slice(0, 3).forEach((item, index) => {
