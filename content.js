@@ -3571,21 +3571,21 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
             
             // Controlla match esatto
             if (dbNumber === requestedNumber) {
-                score += 5000; // Peso MASSIMO per numero perfetto
+                score += 50000; // Peso MASSIMO per numero perfetto (aumentato da 5000 a 50000)
                 reason += 'Numero collezionista PERFETTO (PRIORITÀ MASSIMA) ';
-                console.log(`🎯 [CardTrader] Numero collezionista PERFETTO: "${dbNumber}" = "${requestedNumber}" -> +5000 punti (PRIORITÀ MASSIMA)`);
+                console.log(`🎯 [CardTrader] Numero collezionista PERFETTO: "${dbNumber}" = "${requestedNumber}" -> +50000 punti (PRIORITÀ MASSIMA)`);
             } 
             // Controlla se il numero del database contiene quello richiesto (es: "SWSH291" contiene "291")
             else if (dbNumber.toLowerCase().includes(requestedNumber.toLowerCase())) {
-                score += 4000; // Peso molto alto per numero con prefisso
+                score += 40000; // Peso molto alto per numero con prefisso (aumentato da 4000 a 40000)
                 reason += 'Numero collezionista con prefisso espansione ';
-                console.log(`🎯 [CardTrader] Numero con prefisso: "${dbNumber}" include "${requestedNumber}" -> +4000 punti`);
+                console.log(`🎯 [CardTrader] Numero con prefisso: "${dbNumber}" include "${requestedNumber}" -> +40000 punti`);
             }
             // Controlla se il numero richiesto contiene quello del database (es: "291" in "SWSH291")
             else if (requestedNumber.toLowerCase().includes(dbNumber.toLowerCase())) {
-                score += 3000; // Peso alto per match inverso
+                score += 30000; // Peso alto per match inverso (aumentato da 3000 a 30000)
                 reason += 'Numero collezionista match inverso ';
-                console.log(`🎯 [CardTrader] Match inverso: "${requestedNumber}" include "${dbNumber}" -> +3000 punti`);
+                console.log(`🎯 [CardTrader] Match inverso: "${requestedNumber}" include "${dbNumber}" -> +30000 punti`);
             }
             // Controlla varianti comuni per carte promo
             else {
@@ -3597,9 +3597,9 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
                 for (const reqNum of requestedNumbers) {
                     for (const dbNum of dbNumbers) {
                         if (reqNum === dbNum) {
-                            score += 2000; // Peso alto per match numerico
+                            score += 20000; // Peso alto per match numerico (aumentato da 2000 a 20000)
                             reason += `Match numerico: ${reqNum} `;
-                            console.log(`🎯 [CardTrader] Match numerico: "${reqNum}" trovato in "${dbNumber}" -> +2000 punti`);
+                            console.log(`🎯 [CardTrader] Match numerico: "${reqNum}" trovato in "${dbNumber}" -> +20000 punti`);
                             numberMatch = true;
                             break;
                         }
@@ -3608,9 +3608,9 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
                 }
                 
                 if (!numberMatch) {
-                    score -= 2000; // Penalità MASSIMA se il numero non corrisponde
+                    score -= 50000; // Penalità MASSIMA se il numero non corrisponde (aumentata da -2000 a -50000)
                     reason += 'Numero collezionista SBAGLIATO ';
-                    console.log(`❌ [CardTrader] Numero collezionista SBAGLIATO: "${dbNumber}" ≠ "${requestedNumber}" -> -2000 punti`);
+                    console.log(`❌ [CardTrader] Numero collezionista SBAGLIATO: "${dbNumber}" ≠ "${requestedNumber}" -> -50000 punti`);
                 }
             }
         } else {
@@ -3779,6 +3779,19 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
                 score -= 5000; // Penalità MASSIMA per tipo carta completamente sbagliato
                 reason += 'Carta VSTAR/V/EX quando richiesta LV/promo ';
                 console.log(`❌ [CardTrader] Carta VSTAR/V/EX quando richiesta LV/promo: "${name}" -> -5000 punti`);
+            }
+        }
+        
+        // PENALITÀ MASSIMA: Carte promo quando non richieste specificamente e c'è un numero collezionista
+        if (titleInfo.collectorNumber && !originalTitle.toLowerCase().includes('promo') && !originalTitle.toLowerCase().includes('ar')) {
+            const cardNameLower = name.toLowerCase();
+            const imageUrlLower = (result.image_url || '').toLowerCase();
+            
+            // Se la carta è una promo (nel nome o URL) ma non è richiesta
+            if (cardNameLower.includes('promo') || imageUrlLower.includes('promo') || imageUrlLower.includes('black-star-promos')) {
+                score -= 30000; // Penalità MASSIMA per carta promo non richiesta con numero specifico
+                reason += 'Carta promo non richiesta con numero specifico ';
+                console.log(`❌ [CardTrader] Carta promo non richiesta con numero specifico: "${name}" -> -30000 punti`);
             }
         }
         
