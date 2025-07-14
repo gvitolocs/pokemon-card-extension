@@ -2715,6 +2715,26 @@ async function performSearch(supabaseClient, titleInfo, originalTitle) {
         
         console.log('🔍 [CardTrader] Cercando con criteri:', JSON.stringify(titleInfo, null, 2));
         
+        // PRIORITÀ 0: Caso speciale per "Mew bubble" - blueprint_id fisso
+        const titleLower = originalTitle.toLowerCase();
+        if (titleLower.includes('mew') && titleLower.includes('bubble')) {
+            console.log('🎯 [CardTrader] CASO SPECIALE: Mew bubble rilevato, imposto blueprint_id 274416');
+            
+            // Crea un risultato fittizio con il blueprint_id specifico
+            const mewBubbleResult = {
+                blueprint_id: 274416,
+                name_en: 'Mew Bubble',
+                pokemon_name: 'Mew Bubble',
+                expansion_name_en: 'Special Case',
+                expansion_code: 'SPECIAL',
+                source: 'mew_bubble_special_case',
+                exact_number_match: true,
+                special_case: true
+            };
+            
+            return scoreAndValidateResults([mewBubbleResult], titleInfo, originalTitle);
+        }
+        
         // PRIORITÀ 1: Se c'è un trainer name, cerca direttamente le carte di quell'allenatore
         if (titleInfo.trainerName) {
             console.log(`🎯 [CardTrader] RICERCA PRIORITARIA per trainer: ${titleInfo.trainerName} ${titleInfo.pokemonName}`);
@@ -3323,6 +3343,12 @@ function scoreAndValidateResults(results, titleInfo, originalTitle) {
         
         let score = 0;
         let reason = '';
+        
+        // PRIORITÀ 0: Caso speciale per "Mew bubble" - punteggio massimo
+        if (result.special_case && result.blueprint_id === 274416) {
+            console.log('🎯 [CardTrader] CASO SPECIALE: Mew bubble - punteggio massimo');
+            return { result, score: 99999, reason: 'Caso speciale Mew bubble - blueprint_id 274416' };
+        }
         
         // PRIORITÀ 0: Controllo IMMEDIATO per carte jumbo/oversized nell'URL
         const requiresJumbo = originalTitle.toLowerCase().includes('jumbo') || originalTitle.toLowerCase().includes('oversized') || originalTitle.toLowerCase().includes('oversize') || originalTitle.toLowerCase().includes('giant') || originalTitle.toLowerCase().includes('large');
