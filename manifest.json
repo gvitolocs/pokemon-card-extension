@@ -39,8 +39,18 @@
         "https://www.cardmarket.com/*",
         "https://cardmarket.com/*"
       ],
-      "js": ["standalone-config.js", "supabase.js", "api-config.js", "supabase-config.js", "supabase-integration.js", "content.js"],
-      "css": ["styles.css"]
+      "js": [
+        "supabase.js", 
+        "api-config.js", 
+        "supabase-config.js", 
+        "supabase-integration.js",
+        "core/ExtensionCore.js",
+        "core/CacheManager.js",
+        "ui/ButtonManager.js",
+        "data/TitleExtractor.js",
+        "utils/UrlGenerator.js",
+        "content.js"
+      ]
     }
   ],
   "action": {

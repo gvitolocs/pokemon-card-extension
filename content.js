@@ -11,15 +11,41 @@ let observerCache = new WeakSet(); // Cache per elementi già processati
 let debounceTimer = null; // Debounce per evitare troppe ricerche
 let successfulMatches = new Set(); // Traccia match riusciti per evitare riprocessamento
 
+// Pulsante globale creato una sola volta all'avvio
+let globalButton = null;
+
 // Inizializza le variabili globali se non esistono
 if (typeof window.supabaseClient === 'undefined') {
     window.supabaseClient = null;
 }
 
+// Crea il pulsante globale una sola volta (fuori da tutti i cicli)
+globalButton = document.createElement('button');
+globalButton.innerHTML = 'CardTrader';
+globalButton.style.cssText = `
+    margin-top: 8px;
+    margin-left: 8px;
+    padding: 8px 16px;
+    background: #6c757d;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 17px;
+    cursor: pointer;
+    font-weight: bold;
+    min-width: 100px;
+    display: inline-block;
+    transition: all 0.2s ease;
+`;
+
+console.log('✅ Pulsante globale CardTrader creato UNA SOLA VOLTA all\'avvio');
+
 // Inizializza l'estensione
 async function initializeExtension() {
     try {
         console.log('🃏 Pokemon Card Trader Linker - Inizializzazione rapida...');
+        
+
         
         // Pulisci i match riusciti quando cambia la pagina
         successfulMatches.clear();
@@ -79,9 +105,7 @@ async function initializeExtension() {
                 observerCache = new WeakSet();
                 processingElements.clear();
                 
-                // Rimuovi tutti i pulsanti esistenti
-                const existingButtons = document.querySelectorAll('.pokemon-linker-button');
-                existingButtons.forEach(button => button.remove());
+                
                 
                 // Rimuovi attributi di processamento
                 const processedElements = document.querySelectorAll('[data-pokemon-linker-processed]');
@@ -126,26 +150,24 @@ function initializeUltraFast() {
         });
     }
     
-    // Backup: controlla ogni 50ms se ci sono nuovi elementi
-    const checkInterval = setInterval(() => {
-        if (document.body && !document.querySelector('.pokemon-linker-button')) {
-            console.log('⚡ [CardTrader] Controllo periodico - avvio osservatore...');
-            startObserver();
-        }
+            // Backup: controlla ogni 50ms se ci sono nuovi elementi
+        const checkInterval = setInterval(() => {
+            if (document.body) {
+                console.log('⚡ [CardTrader] Controllo periodico - avvio osservatore...');
+                startObserver();
+            }
+            
+            // Ferma il controllo dopo 5 secondi
+            setTimeout(() => {
+                clearInterval(checkInterval);
+            }, 5000);
+        }, 50);
         
-        // Ferma il controllo dopo 5 secondi
+        // Backup finale: se dopo 200ms non è ancora partito, forza l'avvio
         setTimeout(() => {
-            clearInterval(checkInterval);
-        }, 5000);
-    }, 50);
-    
-    // Backup finale: se dopo 200ms non è ancora partito, forza l'avvio
-    setTimeout(() => {
-        if (!document.querySelector('.pokemon-linker-button')) {
             console.log('⚡ [CardTrader] Forzatura finale avvio osservatore...');
             startObserver();
-        }
-    }, 200);
+        }, 200);
 }
 
 // Avvia l'osservatore per rilevare nuove inserzioni con inserimento immediato
@@ -221,11 +243,7 @@ function startObserver() {
             // Processamento periodico ridotto per elementi che potrebbero essere sfuggiti
             setInterval(() => {
                 if (isEnabled && !isProcessing) {
-                    // Controlla solo se non ci sono pulsanti presenti
-                    const existingButtons = document.querySelectorAll('.pokemon-linker-button');
-                    if (existingButtons.length === 0) {
-                        processExistingListings();
-                    }
+                    processExistingListings();
                 }
             }, 5000); // Aumentato da 3 a 5 secondi
             
@@ -294,8 +312,8 @@ function processListingImmediate(listingElement) {
             return;
         }
         
-        // Crea un pulsante di caricamento immediato
-        const loadingButton = createLoadingButton('Caricamento...');
+        // Crea un pulsante di caricamento immediato (clona il pulsante globale)
+        const loadingButton = globalButton.cloneNode(true);
         insertLinkContainer(listingElement, loadingButton);
         
         // Marca come processato per evitare duplicati
@@ -362,8 +380,6 @@ function processNewListings(container) {
         // Filtra elementi già processati o in fase di processamento
         const unprocessedListings = listings.filter(listing => 
             !listing.hasAttribute('data-pokemon-linker-processed') &&
-            !listing.hasAttribute('data-pokemon-linker-button-added') &&
-            !listing.querySelector('.pokemon-linker-button') &&
             !processingElements.has(listing)
         );
         
@@ -520,11 +536,9 @@ async function processListing(listingElement) {
     try {
         // CONTROLLO DUPLICAZIONE ROBUSTO: Verifica tutti i possibili indicatori di duplicazione
         const isAlreadyProcessed = 
-            listingElement.hasAttribute('data-pokemon-linker-button-added') ||
             listingElement.hasAttribute('data-pokemon-linker-processed') ||
             observerCache.has(listingElement) ||
-            processingElements.has(listingElement) ||
-            listingElement.querySelector('.pokemon-linker-button');
+            processingElements.has(listingElement);
         
         // Controllo aggiuntivo per evitare processamento multiplo recente
         const lastProcessedTime = listingElement.getAttribute('data-pokemon-linker-last-processed');
@@ -643,14 +657,31 @@ async function processListing(listingElement) {
         console.log(`🔍 [CardTrader] TitleInfo completo:`, titleInfo);
         
         // Crea subito il pulsante grigio (loading)
-        const button = createLoadingButton(titleInfo.pokemonName);
+        const button = document.createElement('button');
+        button.innerHTML = 'CardTrader';
+        button.style.cssText = `
+            margin-top: 8px;
+            margin-left: 8px;
+            padding: 8px 16px;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 17px;
+            cursor: pointer;
+            font-weight: bold;
+            min-width: 100px;
+            display: inline-block;
+            transition: all 0.2s ease;
+        `;
+        
+        // Inserisci il pulsante subito (grigio)
         const inserted = insertLinkContainer(listingElement, button);
         
         if (inserted) {
             console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${titleInfo.pokemonName}`);
             
-            // Marca l'elemento come processato
-            listingElement.setAttribute('data-pokemon-linker-button-added', 'true');
+
             
                     // Cerca nel database
         console.log(`🔍 [CardTrader] Avvio ricerca per: "${title}"`);
@@ -861,16 +892,10 @@ function extractTitleFromListing(listingElement) {
 // Aggiungi i link CardTrader
 function addCardTraderLinks(listingElement, results, titleInfo) {
     try {
-        // Rimuovi solo i pulsanti CardTrader esistenti in questo elemento specifico
-        const existingButtons = listingElement.querySelectorAll('.pokemon-linker-button');
-        if (existingButtons.length > 0) {
-            console.log(`🧹 [CardTrader] Rimossi ${existingButtons.length} pulsanti esistenti da questo elemento`);
-            existingButtons.forEach(button => button.remove());
-        }
+
         
         // Crea il pulsante con "CardTrader" (grigio di default)
         const button = document.createElement('button');
-        button.className = 'pokemon-linker-button';
         button.innerHTML = 'CardTrader';
         button.style.cssText = `
             margin-top: 8px;
@@ -951,28 +976,7 @@ function addCardTraderLinks(listingElement, results, titleInfo) {
     }
 }
 
-// Crea un pulsante di loading (grigio)
-function createLoadingButton(pokemonName) {
-    const button = document.createElement('button');
-    button.className = 'pokemon-linker-button';
-    button.innerHTML = 'CardTrader';
-    button.style.cssText = `
-        margin-top: 8px;
-        margin-left: 8px;
-        padding: 8px 16px;
-        background: #6c757d;
-        color: white;
-        border: none;
-        border-radius: 8px;
-        font-size: 17px;
-        cursor: pointer;
-        font-weight: bold;
-        min-width: 100px;
-        display: inline-block;
-        transition: all 0.2s ease;
-    `;
-    return button;
-}
+
 
 // Inserisci il pulsante CT
 function insertLinkContainer(listingElement, button) {
@@ -1264,16 +1268,10 @@ function patchEbayProductPage() {
             return;
         }
         
-        // Controlla se il pulsante CT è già presente
-        const existingButton = document.querySelector('.pokemon-linker-button');
-        if (existingButton) {
-            console.log('🚫 [CardTrader] Pulsante CT già presente su eBay, non reinserisco');
-            return;
-        }
+
         
         // Crea subito il pulsante grigio (loading)
         const button = document.createElement('button');
-        button.className = 'pokemon-linker-button';
         button.innerHTML = 'CardTrader';
         button.style.cssText = `
             margin: 16px 0;
@@ -1472,35 +1470,7 @@ function patchVintedProductPage() {
                 
                 console.log(`✅ [CardTrader] Aggiunti ${maxLinks} link CardTrader alla pagina prodotto`);
                 
-                // Verifica se i pulsanti sono stati inseriti correttamente
-                const insertedButtons = document.querySelectorAll('.pokemon-linker-button');
-                console.log(`🔍 [CardTrader] Pulsanti CT trovati nella pagina: ${insertedButtons.length}`);
-                
-                // Aggiorna SOLO i pulsanti appena inseriti (gli ultimi maxLinks)
-                if (results && results.length > 0) {
-                    // Prendi solo gli ultimi maxLinks pulsanti (quelli appena inseriti)
-                    const recentButtons = Array.from(insertedButtons).slice(-maxLinks);
-                    console.log(`🔍 [CardTrader] Aggiornando ${recentButtons.length} pulsanti recenti`);
-                    
-                    recentButtons.forEach((button, index) => {
-                        // Rimuovi event listener esistenti per evitare duplicati
-                        const newButton = button.cloneNode(true);
-                        button.parentNode.replaceChild(newButton, button);
-                        
-                        // Cambia il colore in verde
-                        newButton.style.background = '#28a745';
-                        console.log(`✅ [CardTrader] Pulsante ${index + 1} diventato verde`);
-                        
-                        // Aggiungi event listener per il click
-                        const result = results[index];
-                        newButton.addEventListener('click', (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const cardTraderUrl = generateCardTraderLink(result.blueprint_id);
-                            window.open(cardTraderUrl, '_blank');
-                        });
-                    });
-                }
+
             }
         });
         
@@ -1554,7 +1524,6 @@ function patchCardmarketProductPage() {
         
         // Crea subito il pulsante grigio (loading)
         const button = document.createElement('button');
-        button.className = 'pokemon-linker-button';
         button.innerHTML = 'CardTrader';
         button.style.cssText = `
             margin: 0;
@@ -1579,50 +1548,29 @@ function patchCardmarketProductPage() {
         const supportLink = document.querySelector('a[href*="support/tickets/new"]');
         let buttonInserted = false; // Flag per tracciare se il pulsante è stato inserito
         
-        // Prima controlla se il pulsante CT è già presente da qualche parte nella pagina
-        const existingButton = document.querySelector('.pokemon-linker-button');
-        if (existingButton) {
-            console.log('🚫 [CardTrader] Pulsante CT già presente, non reinserisco');
-            buttonInserted = true; // Il pulsante esiste già
+        // Inserisci il pulsante
+        if (supportLink && supportLink.parentNode) {
+            supportLink.parentNode.replaceChild(button, supportLink);
+            console.log(`✅ [CardTrader] Sostituito link supporto con pulsante CT su Cardmarket (loading)`);
+            buttonInserted = true;
         } else {
-            // Il pulsante non esiste, procedi con l'inserimento
-            if (supportLink && supportLink.parentNode) {
-                supportLink.parentNode.replaceChild(button, supportLink);
-                console.log(`✅ [CardTrader] Sostituito link supporto con pulsante CT su Cardmarket (loading)`);
+            // Cerca il contenitore del link di supporto e inserisci il pulsante lì
+            const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
+            if (supportContainer) {
+                supportContainer.appendChild(button);
+                console.log(`✅ [CardTrader] Inserito pulsante CT nel contenitore supporto su Cardmarket (loading)`);
                 buttonInserted = true;
             } else {
-                // Cerca il contenitore del link di supporto e inserisci il pulsante lì
-                const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
-                if (supportContainer) {
-                    supportContainer.appendChild(button);
-                    console.log(`✅ [CardTrader] Inserito pulsante CT nel contenitore supporto su Cardmarket (loading)`);
-                    buttonInserted = true;
-                } else {
-                    // Fallback: inserisci direttamente nell'h1
-                    titleElement.appendChild(button);
-                    console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (loading fallback)`);
-                    buttonInserted = true;
-                }
+                // Fallback: inserisci direttamente nell'h1
+                titleElement.appendChild(button);
+                console.log(`✅ [CardTrader] Aggiunto pulsante CT alla pagina prodotto Cardmarket (loading fallback)`);
+                buttonInserted = true;
             }
         }
 
         
-        // Cerca nel database SOLO se il pulsante è stato inserito o esiste già
-        if (!buttonInserted) {
-            console.log('❌ [CardTrader] Pulsante CT non inserito, saltando ricerca database');
-            return;
-        }
-        
-        // Ottieni il riferimento al pulsante (quello appena creato o quello esistente)
-        let targetButton = button; // Usa il pulsante appena creato se inserito
-        if (!button.parentNode) {
-            // Se il pulsante non è stato inserito, cerca quello esistente
-            targetButton = document.querySelector('.pokemon-linker-button');
-            if (!targetButton) {
-                console.log('❌ [CardTrader] Pulsante CT non trovato nella pagina, saltando ricerca database');
-                return;
-            }
-        }
+        // Ottieni il riferimento al pulsante
+        let targetButton = button;
         
         // Esegui sempre la ricerca database se il pulsante esiste (nuovo o già presente)
         console.log('🔍 [CardTrader] Avvio ricerca database per:', titleInfo.pokemonName);
