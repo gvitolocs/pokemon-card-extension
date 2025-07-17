@@ -1,0 +1,114 @@
+# CHANGES LOG - Pokemon Card Extension
+# File: changes_log_001.txt
+# Data: 2024-12-19
+# Modifiche: 1-10
+
+## MODIFICA #1 - 2024-12-19
+**File:** manifest.json
+**Tipo:** Aggiornamento percorsi file
+**Descrizione:** Aggiornati tutti i percorsi dei file spostati nelle cartelle config/, icons/, ui-pages/
+**Dettagli:**
+- background.js → config/background.js
+- supabase.js → config/supabase.js
+- api-config.js → config/api-config.js
+- supabase-config.js → config/supabase-config.js
+- supabase-integration.js → config/supabase-integration.js
+- icon-default.png → icons/icon-default.png
+- popup.html → ui-pages/popup.html
+- web_accessible_resources → config/supabase-integration.js
+
+## MODIFICA #2 - 2024-12-19
+**File:** content.js
+**Tipo:** Correzione errori di sintassi
+**Descrizione:** Risolto errore "Unexpected token 'else'" alla riga 771
+**Dettagli:**
+- Corretta struttura delle parentesi graffe nella funzione processListing
+- Rimossa parentesi graffa extra che causava errore di sintassi
+- Aggiunta parentesi graffa mancante nella funzione addCardTraderLinks
+
+## MODIFICA #3 - 2024-12-19
+**File:** content.js
+**Tipo:** Semplificazione funzione processListing
+**Descrizione:** Semplificata e pulita la funzione processListing per eliminare errori di sintassi
+**Dettagli:**
+- Rimossa complessità eccessiva che causava errori
+- Mantenuta funzionalità core per trovare carte e aggiornare pulsanti
+- Migliorata gestione degli errori e logging
+
+## MODIFICA #4 - 2024-12-19
+**File:** processors/PromoFilter.js
+**Tipo:** Nuovo file creato
+**Descrizione:** Creato modulo separato per gestione filtri carte promo
+**Dettagli:**
+- Classe PromoFilter per identificare carte promo
+- Metodi per rilevamento promo per titolo, espansione, numero collezionista
+- Filtri intelligenti per rimuovere/mantenere promo in base alle richieste
+- Sistema di punteggi per carte promo
+- Aggiunto al manifest.json per caricamento
+
+## MODIFICA #5 - 2024-12-19
+**File:** content.js
+**Tipo:** Rimozione espansioni prioritarie problematiche
+**Descrizione:** Rimossi "sv", "bw", "xy" dalle espansioni prioritarie per evitare falsi positivi
+**Dettagli:**
+- Rimossi da priorityExpansions array
+- Evitati falsi positivi per abbreviazioni comuni
+- Mantenute espansioni specifiche e complete
+
+## MODIFICA #6 - 2024-12-19
+**File:** processors/PromoFilter.js
+**Tipo:** Rimozione pattern promo problematici
+**Descrizione:** Rimossi pattern "/xy\d+/i", "/bw\d+/i" dai pattern promo
+**Dettagli:**
+- Rimossi da promoNumberPatterns array
+- Rimossi da promoPatterns array in isPromoByCollectorNumber
+- Evitati falsi positivi per numeri collezionista
+
+## MODIFICA #7 - 2024-12-19
+**File:** content.js
+**Tipo:** Rimozione "hgss" dalle espansioni prioritarie
+**Descrizione:** Rimosso "hgss" dalle espansioni prioritarie per evitare falsi positivi
+**Dettagli:**
+- Rimosso da priorityExpansions array
+- Evitati falsi positivi per abbreviazioni
+
+## MODIFICA #8 - 2024-12-19
+**File:** processors/PromoFilter.js
+**Tipo:** Rimozione pattern "hgss" dai pattern promo
+**Descrizione:** Rimossi pattern "/hgss\d+/i" dai pattern promo
+**Dettagli:**
+- Rimossi da promoNumberPatterns array
+- Rimossi da promoPatterns array in isPromoByCollectorNumber
+- Evitati falsi positivi per numeri collezionista
+
+## MODIFICA #9 - 2024-12-19
+**File:** changes/changes_log_001.txt
+**Tipo:** Sistema di tracciamento modifiche
+**Descrizione:** Creato sistema di logging per tracciare tutte le modifiche
+**Dettagli:**
+- Cartella changes/ creata (non inclusa nel manifest)
+- File di log per tracciare modifiche
+- Sistema per creare nuovo file ogni 10 modifiche
+- Tracciamento per sviluppatore e assistente
+
+## MODIFICA #10 - 2024-12-19
+**File:** manifest.json
+**Tipo:** Aggiunta PromoFilter al manifest
+**Descrizione:** Aggiunto processors/PromoFilter.js al manifest.json per caricamento
+**Dettagli:**
+- Aggiunto "processors/PromoFilter.js" alla lista content_scripts
+- Posizionato prima di content.js per caricamento corretto
+- Modulo disponibile globalmente per l'estensione
+
+---
+**STATO ATTUALE:**
+- ✅ Estensione caricabile senza errori
+- ✅ Pulsanti diventano verdi quando trova carte
+- ✅ Falsi positivi espansioni eliminati
+- ✅ Sistema promo modulare funzionante
+- ✅ Tracciamento modifiche attivo
+
+**PROSSIMI PASSI:**
+- Testare estensione su Vinted/eBay/Cardmarket
+- Verificare che pulsanti siano cliccabili
+- Monitorare performance e stabilità 

@@ -23,7 +23,7 @@
     "https://cardmarket.com/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "config/background.js"
   },
   "content_scripts": [
     {
@@ -40,38 +40,42 @@
         "https://cardmarket.com/*"
       ],
       "js": [
-        "supabase.js", 
-        "api-config.js", 
-        "supabase-config.js", 
-        "supabase-integration.js",
+        "config/supabase.js", 
+        "config/api-config.js", 
+        "config/supabase-config.js", 
+        "config/supabase-integration.js",
         "core/ExtensionCore.js",
         "core/CacheManager.js",
         "ui/ButtonManager.js",
         "data/TitleExtractor.js",
         "utils/UrlGenerator.js",
+        "processors/PromoFilter.js",
+        "processors/VINT.js",
+        "processors/EBAYE.js",
+        "processors/CME.js",
         "content.js"
       ]
     }
   ],
   "action": {
-    "default_popup": "popup.html",
+    "default_popup": "ui-pages/popup.html",
     "default_title": "Pokemon Card Trader Linker",
     "default_icon": {
-      "16": "icon-default.png",
-      "32": "icon-default.png",
-      "48": "icon-default.png",
-      "128": "icon-default.png"
+      "16": "icons/icon-default.png",
+      "32": "icons/icon-default.png",
+      "48": "icons/icon-default.png",
+      "128": "icons/icon-default.png"
     }
   },
   "icons": {
-    "16": "icon-default.png",
-    "32": "icon-default.png",
-    "48": "icon-default.png",
-    "128": "icon-default.png"
+    "16": "icons/icon-default.png",
+    "32": "icons/icon-default.png",
+    "48": "icons/icon-default.png",
+    "128": "icons/icon-default.png"
   },
   "web_accessible_resources": [
     {
-      "resources": ["supabase-integration.js"],
+      "resources": ["config/supabase-integration.js"],
       "matches": ["<all_urls>"]
     }
   ]
