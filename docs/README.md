@@ -291,8 +291,7 @@ Questo progetto è rilasciato sotto licenza MIT. Vedi il file `LICENSE` per i de
 
 Per supporto o domande:
 - Apri una issue su GitHub
-- Contatta via email: [tua-email@example.com]
-- Discord: [link-discord]
+- Contatta via email: [vitologiuseppe17@gmail.com]
 
 ---
 
