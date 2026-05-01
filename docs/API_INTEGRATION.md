@@ -1,180 +1,61 @@
-# Integrazione API CardTrader v2
+# CardTrader API Integration
 
-## Panoramica
+## Overview
 
-L'estensione Pokemon Card Trader Linker è stata aggiornata per utilizzare le API v2 di CardTrader per generare link più specifici e diretti alle carte Pokemon. Questa integrazione richiede un token di autenticazione per accedere alle API avanzate.
+The extension supports token-based CardTrader API behavior for more specific link generation and richer lookup flows.
 
-## Funzionalità
+## Main Integration Points
 
-### 1. Estrazione Informazioni Carta
-L'estensione analizza i titoli delle inserzioni per estrarre:
-- **Nome del Pokemon**: Charizard, Pikachu, Mewtwo, ecc.
-- **Tipo di carta**: VMAX, V, GX, EX, Holo, Reverse Holo, Full Art, Secret Rare
-- **Set**: Base Set, Jungle, Fossil, Sword & Shield, ecc.
+### `config/api-config.js`
 
-### 2. Ricerca API v2
-- Utilizza le API v2 di CardTrader per cercare carte specifiche
-- Richiede autenticazione tramite token Bearer
-- Cerca attraverso espansioni, blueprint e marketplace
-- Gestisce il rate limiting per rispettare i limiti dell'API (1 chiamata/secondo per marketplace)
+- API base URL settings
+- Request timeout settings
+- Basic request behavior and guardrails
 
-### 3. Generazione Link
-- **Link diretti**: Se la carta viene trovata, genera un link diretto alla pagina della carta
-- **Link di ricerca**: Se la carta non viene trovata, genera un link di ricerca con parametri ottimizzati
-- **Fallback**: In caso di errore, utilizza il link generico alla sezione Pokemon
+### `ui-pages/settings.html` + `ui-pages/settings.js`
 
-## File Principali
+- User-facing token input
+- Option to enable advanced API mode
+- Persisted settings via `chrome.storage.sync`
 
-### `api-config.js`
-Configurazione centralizzata per l'API:
-- URL base dell'API
-- Timeout per le richieste
-- Configurazione cache
-- Rate limiting
-- Headers predefiniti
+### `content.js` and processors
 
-### `cardtrader-api.js`
-Classe principale per l'integrazione API:
-- `CardTraderAPI`: Classe per gestire le chiamate API
-- `extractCardInfo()`: Estrae informazioni dalla carta dal titolo
-- `searchCard()`: Cerca la carta tramite API
-- `generateCardLink()`: Genera link specifici
+- Title extraction and normalization
+- Query decision flow
+- Fallback to generic links when no reliable match is found
 
-### `content.js`
-Script principale aggiornato:
-- Utilizza la nuova API per generare link
-- Gestisce le chiamate asincrone
-- Mantiene la compatibilità con il codice esistente
+## Link Generation Strategy
 
-## Configurazione
+1. Try direct match from extracted title data
+2. Build targeted search URL when direct match is uncertain
+3. Fallback to generic CardTrader search flow if needed
 
-### Rate Limiting
-```javascript
-rateLimit: {
-    maxRequests: 60, // Richieste massime per minuto (più conservativo)
-    windowMs: 60 * 1000, // Finestra temporale
-    marketplaceDelay: 1000 // 1 secondo tra chiamate marketplace
-}
-```
+## Token Configuration
 
-### Cache
-```javascript
-cacheTimeout: 5 * 60 * 1000 // 5 minuti di cache
-```
+1. Open extension settings
+2. Paste CardTrader token
+3. Enable advanced API mode
+4. Save settings
 
-### Timeout
-```javascript
-requestTimeout: 10000 // 10 secondi per richiesta
-```
+Token handling notes:
 
-## Pattern di Ricerca
+- Token is stored in browser extension storage
+- Avoid storing tokens in source files
+- Never commit personal API credentials
 
-L'estensione riconosce i seguenti pattern nei titoli:
+## Failure Modes
 
-### Pokemon Popolari
-- Charizard, Pikachu, Blastoise, Venusaur, Mewtwo
-- Rayquaza, Lugia, Ho-oh, Kyogre, Groudon
-- Dialga, Palkia, Giratina, Arceus
-- Reshiram, Zekrom, Xerneas, Yveltal
-- Solgaleo, Lunala, Necrozma, Zacian, Zamazenta, Calyrex
+- Rate limiting from upstream API
+- Timeouts/network interruptions
+- Incomplete title metadata for precise matching
 
-### Tipi di Carta
-- VMAX, V, GX, EX
-- Holo, Reverse Holo
-- Full Art, Secret Rare, Ultra Rare
+Expected behavior in failures:
 
-### Set Principali
-- Base Set, Jungle, Fossil
-- Sword & Shield, Scarlet & Violet
-- 151, Paradox Rift, Paldean Fates
-- E molti altri set storici e moderni
+- Extension degrades to safe search/fallback links
+- Core listing scanning should remain functional
 
-## Gestione Errori
+## Maintenance Notes
 
-### Fallback Strategy
-1. **Link diretto alla carta**: Se la ricerca API ha successo
-2. **Link di ricerca**: Se la carta non viene trovata ma il Pokemon è identificato
-3. **Link generico**: Se non è possibile estrarre informazioni specifiche
-
-### Errori Comuni
-- **Rate limit exceeded**: Troppe richieste in poco tempo
-- **API timeout**: Richiesta troppo lenta
-- **Network error**: Problemi di connessione
-- **Invalid response**: Risposta API non valida
-
-## Performance
-
-### Ottimizzazioni
-- **Cache**: Risultati API memorizzati per 5 minuti
-- **Rate limiting**: Controllo automatico delle richieste
-- **Parallel processing**: Elaborazione parallela dei container
-- **Timeout**: Prevenzione di richieste bloccate
-
-### Metriche
-- Tempo medio di generazione link: < 500ms
-- Hit rate cache: ~80% per ricerche ripetute
-- Fallback rate: < 5% per titoli ben formattati
-
-## Compatibilità
-
-### Siti Supportati
-- eBay (tutti i domini)
-- Vinted (tutti i domini)
-- Compatibilità con layout dinamici
-
-### Browser
-- Chrome (manifest v3)
-- Edge (manifest v3)
-- Altri browser basati su Chromium
-
-## Sviluppo Futuro
-
-### Possibili Miglioramenti
-1. **API Key**: Supporto per API key per rate limit più alti
-2. **Machine Learning**: Miglioramento dell'estrazione informazioni
-3. **Database locale**: Cache persistente tra sessioni
-4. **Analytics**: Tracciamento delle performance
-5. **Altri giochi**: Estensione a Magic: The Gathering, Yu-Gi-Oh!, ecc.
-
-### API Endpoints Utilizzati
-- `GET /api/v2/games`: Ottiene la lista dei giochi
-- `GET /api/v2/expansions`: Ottiene la lista delle espansioni
-- `GET /api/v2/blueprints/export`: Ottiene i blueprint per un'espansione
-- `GET /api/v2/marketplace/products`: Ottiene i prodotti del marketplace
-- `GET /api/v2/info`: Test dell'autenticazione
-
-## Configurazione Token
-
-### Ottenere il Token
-1. Vai su [CardTrader Settings](https://www.cardtrader.com/settings)
-2. Accedi al tuo account CardTrader
-3. Cerca la sezione "API" o "Developer"
-4. Copia il token di autenticazione
-
-### Configurare l'Estensione
-1. Apri le impostazioni dell'estensione
-2. Vai alla sezione "🔑 API CardTrader"
-3. Incolla il tuo token nel campo "Token di autenticazione"
-4. Abilita "Usa API avanzate"
-5. Salva le impostazioni
-
-### Sicurezza
-- Il token viene salvato localmente nel browser
-- Non viene mai inviato a server esterni
-- Puoi disabilitare le API avanzate in qualsiasi momento
-
-## Troubleshooting
-
-### Problemi Comuni
-1. **Token non valido**: Verifica che il token sia corretto e non scaduto
-2. **Link non generati**: Controllare la console per errori API
-3. **Link generici**: Titolo non riconosciuto o API non configurate
-4. **Performance lente**: Possibile rate limiting, attendere un minuto
-5. **Errori di rete**: Verificare la connessione internet
-
-### Debug
-Abilitare i log nella console del browser per vedere:
-- Informazioni estratte dai titoli
-- Query API generate
-- Risultati delle ricerche
-- Errori e fallback 
+- Keep docs aligned with existing files only.
+- Remove references to non-existent wrappers/classes.
+- Validate token flow whenever settings UI changes.

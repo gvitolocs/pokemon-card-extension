@@ -1,54 +1,39 @@
-# Generazione Icone
+# Icon Generation
 
-## Conversione da SVG a PNG
+## Required Formats
 
-L'estensione richiede icone PNG in diverse dimensioni. Puoi convertire l'icona SVG in PNG usando uno di questi metodi:
+The extension uses PNG icons referenced by `manifest.json`.
 
-### Metodo 1: Online Converter
-1. Vai su https://convertio.co/svg-png/ o https://cloudconvert.com/svg-to-png
-2. Carica il file `icon.svg`
-3. Imposta le dimensioni:
-   - 16x16 per `icon16.png`
-   - 48x48 per `icon48.png`
-   - 128x128 per `icon128.png`
-4. Scarica i file PNG
+Required sizes:
 
-### Metodo 2: Inkscape (Gratuito)
-1. Apri `icon.svg` in Inkscape
-2. File → Export PNG Image
-3. Imposta le dimensioni e esporta
+- `16x16` (toolbar/small contexts)
+- `32x32` (extension management)
+- `48x48` (store/management views)
+- `128x128` (store listing and high-res contexts)
 
-### Metodo 3: GIMP (Gratuito)
-1. Apri `icon.svg` in GIMP
-2. Immagine → Scala immagine
-3. Imposta le dimensioni e salva
+## Source and Output
 
-### Metodo 4: Photoshop
-1. Apri `icon.svg` in Photoshop
-2. File → Export As
-3. Scegli PNG e imposta le dimensioni
+- Keep source assets under `icons/` (SVG or high-resolution PNG).
+- Export final PNG files used by the manifest into `icons/`.
 
-## Dimensioni richieste
+Current manifest references:
 
-- `icon16.png` - 16x16 pixel (barra degli strumenti)
-- `icon48.png` - 48x48 pixel (gestione estensioni)
-- `icon128.png` - 128x128 pixel (Chrome Web Store)
+- `icons/icon-default.png` for `16`, `32`, `48`, `128`
 
-## Posizionamento file
+If you add per-size icons, update the manifest mapping accordingly.
 
-Dopo la conversione, posiziona i file PNG nella root del progetto:
+## Conversion Options
 
-```
-pokemon-card-extension/
-├── icon16.png
-├── icon48.png
-├── icon128.png
-└── ...
-```
+You can convert SVG to PNG with:
 
-## Note
+- Inkscape
+- GIMP
+- Photoshop
+- Online converters (if no local editor is available)
 
-- Assicurati che le icone siano quadrate
-- Mantieni la trasparenza se presente
-- Le icone devono essere chiare anche in dimensioni piccole
-- Testa le icone in Chrome per verificare che si vedano bene 
+## Quality Checklist
+
+- Use square canvas
+- Preserve transparency where needed
+- Verify readability at 16x16
+- Re-check icon paths after edits to `manifest.json`
