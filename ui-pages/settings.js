@@ -1,4 +1,4 @@
-// Settings script per Pokemon Card Trader Linker
+// Settings script for Pokemon Card Trader Linker
 document.addEventListener('DOMContentLoaded', function() {
     const autoActivateToggle = document.getElementById('autoActivate');
     const notificationsToggle = document.getElementById('notifications');
@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const saveBtn = document.getElementById('saveBtn');
     const status = document.getElementById('status');
 
-    // Impostazioni di default
+    // Default settings
     const defaultSettings = {
         autoActivate: true,
         notifications: true,
@@ -19,13 +19,13 @@ document.addEventListener('DOMContentLoaded', function() {
         apiToken: '',
 
         pokemonKeywords: [
-            'pokemon', 'pokémon', 'carta', 'card', 'tcg', 'trading card',
+            'pokemon', 'pokémon', 'card', 'tcg', 'trading card',
             'charizard', 'pikachu', 'blastoise', 'venusaur', 'mewtwo',
             'holo', 'reverse holo', 'full art', 'secret rare', 'ultra rare'
         ]
     };
 
-    // Carica le impostazioni salvate
+    // Load saved settings
     function loadSettings() {
         chrome.storage.sync.get(defaultSettings, function(items) {
             if (autoActivateToggle) autoActivateToggle.classList.toggle('active', items.autoActivate);
@@ -43,7 +43,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Salva le impostazioni
+    // Save settings
     function saveSettings() {
         const settings = {
             autoActivate: autoActivateToggle && autoActivateToggle.classList.contains('active'),
@@ -56,9 +56,9 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         chrome.storage.sync.set(settings, function() {
-            showStatus('Impostazioni salvate con successo!', 'success');
+            showStatus('Settings saved successfully!', 'success');
             
-            // Aggiorna le pagine attive
+            // Refresh active pages
             chrome.tabs.query({}, function(tabs) {
                 tabs.forEach(tab => {
                     if (tab.url && (tab.url.includes('ebay') || tab.url.includes('vinted'))) {
@@ -72,7 +72,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Mostra messaggio di stato
+    // Show status message
     function showStatus(message, type) {
         status.textContent = message;
         status.className = `status ${type}`;
@@ -83,7 +83,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 3000);
     }
 
-    // Gestione dei toggle
+    // Toggle handlers
     if (autoActivateToggle) {
         autoActivateToggle.addEventListener('click', function() {
             this.classList.toggle('active');
@@ -108,12 +108,12 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Salva quando si clicca il pulsante
+    // Save on button click
     if (saveBtn) {
         saveBtn.addEventListener('click', saveSettings);
     }
 
-    // Salva anche quando si preme Ctrl+S
+    // Save on Ctrl+S / Cmd+S
     document.addEventListener('keydown', function(e) {
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
             e.preventDefault();
@@ -121,6 +121,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Carica le impostazioni all'avvio
+    // Load settings on startup
     loadSettings();
 }); 

@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Impostazioni - Pokemon Card Trader Linker</title>
+    <title>Settings - Pokemon Card Trader Linker</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -183,33 +183,33 @@
 <body>
     <div class="header">
         <div class="logo">🎴</div>
-        <div class="title">Impostazioni</div>
+        <div class="title">Settings</div>
         <div class="subtitle">Pokemon Card Trader Linker</div>
     </div>
 
     <div class="section">
-        <h3>⚙️ Funzionalità</h3>
+        <h3>⚙️ Features</h3>
         
         <div class="option">
             <div>
-                <div class="option-label">Attivazione automatica</div>
-                <div class="option-description">Attiva automaticamente l'estensione sui siti supportati</div>
+                <div class="option-label">Auto activation</div>
+                <div class="option-description">Automatically enable the extension on supported sites</div>
             </div>
             <div class="toggle active" id="autoActivate"></div>
         </div>
 
         <div class="option">
             <div>
-                <div class="option-label">Notifiche</div>
-                <div class="option-description">Mostra notifiche quando vengono trovati link</div>
+                <div class="option-label">Notifications</div>
+                <div class="option-description">Show notifications when links are found</div>
             </div>
             <div class="toggle active" id="notifications"></div>
         </div>
 
         <div class="option">
             <div>
-                <div class="option-label">Apertura in nuova tab</div>
-                <div class="option-description">Apri i link CardTrader in una nuova tab</div>
+                <div class="option-label">Open in new tab</div>
+                <div class="option-description">Open CardTrader links in a new tab</div>
             </div>
             <div class="toggle active" id="newTab"></div>
         </div>
@@ -218,9 +218,9 @@
     </div>
 
     <div class="section">
-        <h3>🔍 Parole chiave Pokemon</h3>
+        <h3>🔍 Pokemon Keywords</h3>
         <div class="option-description">
-            Personalizza le parole chiave per identificare le carte Pokemon. Una parola per riga.
+            Customize keywords used to identify Pokemon cards. One keyword per line.
         </div>
         <div class="keywords-section">
             <textarea class="keywords-input" id="pokemonKeywords" placeholder="pokemon&#10;pokémon&#10;carta&#10;card&#10;tcg&#10;trading card&#10;charizard&#10;pikachu&#10;holo&#10;reverse holo&#10;full art&#10;secret rare"></textarea>
@@ -230,31 +230,31 @@
     <div class="section">
         <h3>🔑 API CardTrader</h3>
         <div class="option-description">
-            Configura il token di autenticazione per utilizzare le API avanzate di CardTrader.
-            <br><a href="https://www.cardtrader.com/settings" target="_blank">Ottieni il tuo token qui</a>
+            Configure your authentication token to use advanced CardTrader APIs.
+            <br><a href="https://www.cardtrader.com/settings" target="_blank">Get your token here</a>
         </div>
         <div class="keywords-section">
-            <input type="password" class="keywords-input" id="apiToken" placeholder="Inserisci il tuo token di autenticazione CardTrader" style="min-height: auto; height: 40px;">
+            <input type="password" class="keywords-input" id="apiToken" placeholder="Enter your CardTrader authentication token" style="min-height: auto; height: 40px;">
         </div>
         <div class="option">
             <div>
-                <div class="option-label">Usa API avanzate</div>
-                <div class="option-description">Abilita la ricerca intelligente tramite API CardTrader</div>
+                <div class="option-label">Use advanced API</div>
+                <div class="option-description">Enable smarter search through CardTrader APIs</div>
             </div>
             <div class="toggle" id="useAdvancedAPI"></div>
         </div>
     </div>
 
     <div class="section">
-        <h3>💾 Salva Impostazioni</h3>
-        <button class="save-btn" id="saveBtn">Salva Impostazioni</button>
+        <h3>💾 Save Settings</h3>
+        <button class="save-btn" id="saveBtn">Save Settings</button>
         <div id="status" class="status" style="display: none;"></div>
     </div>
 
     <div class="footer">
         <p><strong>Pokemon Card Trader Linker v1.0</strong></p>
-        <p>Estensione per trovare facilmente le carte Pokemon su CardTrader</p>
-        <p><a href="https://www.cardtrader.com" target="_blank">Visita CardTrader</a></p>
+        <p>Extension to quickly find Pokemon cards on CardTrader</p>
+        <p><a href="https://www.cardtrader.com" target="_blank">Visit CardTrader</a></p>
     </div>
 
     <script src="settings.js"></script>

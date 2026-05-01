@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <title>Pokemon Card Trader Linker</title>
@@ -91,7 +91,7 @@
             display: block;
         }
         
-        /* Sezione Salva URL */
+        /* Save URL section */
         .save-url-section {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 12px;
@@ -168,7 +168,7 @@
             cursor: not-allowed;
         }
         
-        /* Sezione Aggiungi Manuale */
+        /* Manual add section */
         .manual-section {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 12px;
@@ -228,7 +228,7 @@
             box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
         }
         
-        /* Sezione Collezione */
+        /* Collection section */
         .collection-section {
             background: rgba(255, 255, 255, 0.1);
             border-radius: 12px;
@@ -434,7 +434,7 @@
             margin-top: 6px;
         }
         
-        /* Messaggi */
+        /* Messages */
         .message {
             padding: 10px 14px;
             border-radius: 8px;
@@ -460,7 +460,7 @@
             border: 1px solid #2196F3;
         }
         
-        /* Scrollbar personalizzata */
+        /* Custom scrollbar */
         .cards-list::-webkit-scrollbar {
             width: 6px;
         }
@@ -485,45 +485,45 @@
         <div class="header">
             <div class="logo">
                 <i class="fas fa-book-open"></i>
-                Blocco Note Pokemon
+                Pokemon Notes
             </div>
-            <div class="subtitle">Salva e organizza le tue pagine preferite</div>
+            <div class="subtitle">Save and organize your favorite pages</div>
         </div>
         
         <div class="tabs">
             <div class="tab active" data-tab="save">
-                <i class="fas fa-save"></i> Salva
+                <i class="fas fa-save"></i> Save
             </div>
             <div class="tab" data-tab="manual">
-                <i class="fas fa-plus"></i> Manuale
+                <i class="fas fa-plus"></i> Manual
             </div>
             <div class="tab" data-tab="collection">
-                <i class="fas fa-bookmark"></i> Collezione
+                <i class="fas fa-bookmark"></i> Collection
             </div>
         </div>
         
-        <!-- Tab Salva URL -->
+        <!-- Save URL tab -->
         <div class="tab-content active" id="save-tab">
             <div class="save-url-section" id="saveUrlSection">
                 <div class="save-url-title">
                     <i class="fas fa-link"></i>
-                    Salva Pagina Corrente
+                    Save Current Page
                 </div>
                 <div class="page-info" id="pageInfo">
-                    <div class="page-title" id="pageTitle">Caricamento...</div>
+                    <div class="page-title" id="pageTitle">Loading...</div>
                     <div class="page-url" id="pageUrl"></div>
                     <div class="page-site" id="pageSite"></div>
                 </div>
                 <button id="saveUrlBtn" class="save-url-btn">
                     <i class="fas fa-save"></i>
-                    Salva URL
+                    Save URL
                 </button>
             </div>
             
             <div class="manual-section">
                 <div class="manual-title">
                     <i class="fas fa-plus-circle"></i>
-                    Aggiungi Manualmente
+                    Add Manually
                 </div>
                 <div class="input-group">
                     <input type="text" id="manualCardInput" class="input-field" placeholder="Es: Charizard, Pikachu..." />
@@ -531,23 +531,23 @@
                 <div class="input-group">
                     <select id="manualCategorySelect" class="input-field">
                         <option value="wishlist">🎯 Wishlist</option>
-                        <option value="viewed">👁️ Viste</option>
-                        <option value="favorite">⭐ Preferite</option>
+                        <option value="viewed">👁️ Viewed</option>
+                        <option value="favorite">⭐ Favorites</option>
                     </select>
                 </div>
                 <button id="manualAddBtn" class="manual-add-btn">
                     <i class="fas fa-plus"></i>
-                    Aggiungi
+                    Add
                 </button>
             </div>
         </div>
         
-        <!-- Tab Manuale -->
+        <!-- Manual tab -->
         <div class="tab-content" id="manual-tab">
             <div class="manual-section">
                 <div class="manual-title">
                     <i class="fas fa-plus-circle"></i>
-                    Aggiungi Carta
+                    Add Card
                 </div>
                 <div class="input-group">
                     <input type="text" id="manualCardInput2" class="input-field" placeholder="Es: Charizard, Pikachu..." />
@@ -555,54 +555,54 @@
                 <div class="input-group">
                     <select id="manualCategorySelect2" class="input-field">
                         <option value="wishlist">🎯 Wishlist</option>
-                        <option value="viewed">👁️ Viste</option>
-                        <option value="favorite">⭐ Preferite</option>
+                        <option value="viewed">👁️ Viewed</option>
+                        <option value="favorite">⭐ Favorites</option>
                     </select>
                 </div>
                 <button id="manualAddBtn2" class="manual-add-btn">
                     <i class="fas fa-plus"></i>
-                    Aggiungi
+                    Add
                 </button>
             </div>
         </div>
         
-        <!-- Tab Collezione -->
+        <!-- Collection tab -->
         <div class="tab-content" id="collection-tab">
             <div class="collection-section">
                 <div class="collection-header">
                     <div class="collection-title">
                         <i class="fas fa-bookmark"></i>
-                        Le Mie Pagine
+                        My Pages
                     </div>
                     <div class="collection-actions">
                         <button class="action-btn export-btn" id="exportBtn">
                             <i class="fas fa-download"></i>
-                            Esporta
+                            Export
                         </button>
                         <button class="action-btn clear-btn" id="clearBtn">
                             <i class="fas fa-trash"></i>
-                            Svuota
+                            Clear
                         </button>
                     </div>
                 </div>
                 
                 <div class="search-box">
                     <i class="fas fa-search search-icon"></i>
-                    <input type="text" id="searchInput" class="search-input" placeholder="Cerca nelle tue pagine..." />
+                    <input type="text" id="searchInput" class="search-input" placeholder="Search your pages..." />
                 </div>
                 
                 <div class="category-filter">
-                    <button class="category-btn active" data-category="all">Tutte</button>
+                    <button class="category-btn active" data-category="all">All</button>
                     <button class="category-btn" data-category="wishlist">🎯 Wishlist</button>
-                    <button class="category-btn" data-category="viewed">👁️ Viste</button>
-                    <button class="category-btn" data-category="favorite">⭐ Preferite</button>
+                    <button class="category-btn" data-category="viewed">👁️ Viewed</button>
+                    <button class="category-btn" data-category="favorite">⭐ Favorites</button>
                 </div>
                 
                 <div class="cards-list" id="cardsList">
                     <div class="empty-state">
                         <i class="fas fa-book-open"></i>
-                        <div>Nessuna pagina salvata</div>
-                        <div>Inizia salvando la tua prima pagina!</div>
+                        <div>No saved pages yet</div>
+                        <div>Start by saving your first page!</div>
                     </div>
                 </div>
             </div>
