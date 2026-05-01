@@ -1,6 +1,6 @@
 /**
- * EBAYE.js - Gestione specifica per eBay
- * Contiene tutta la logica per pagine prodotto e inserzioni eBay
+ * EBAYE.js - eBay-specific processor
+ * Contains logic for eBay product pages and listing feeds.
  */
 
 class EbayProcessor {
@@ -10,22 +10,22 @@ class EbayProcessor {
     }
 
     /**
-     * Inizializza il processore eBay
+     * Initialize eBay processor
      */
     init() {
-        console.log('🔴 [EBAYE] Inizializzazione processore eBay...');
+        console.log('🔴 [EBAYE] Initializing eBay processor...');
         
-        // Processa immediatamente se siamo su una pagina prodotto
+        // Process immediately if current page is a product page
         if (this.isProductPage()) {
             this.processProductPage();
         }
         
-        // Avvia observer per nuove inserzioni
+        // Start observer for new listings
         this.startObserver();
     }
 
     /**
-     * Controlla se siamo su una pagina prodotto eBay
+     * Check whether current page is an eBay product page
      */
     isProductPage() {
         return window.location.hostname.includes('ebay') && 
@@ -34,18 +34,18 @@ class EbayProcessor {
     }
 
     /**
-     * Processa una pagina prodotto eBay
+     * Process an eBay product page
      */
     processProductPage() {
         if (this.processedPages.has(window.location.href)) {
-            console.log('🚫 [EBAYE] Pagina prodotto già processata, saltando');
+            console.log('🚫 [EBAYE] Product page already processed, skipping');
             return;
         }
 
         try {
-            console.log('🔍 [EBAYE] Processando pagina prodotto eBay...');
+            console.log('🔍 [EBAYE] Processing eBay product page...');
             
-            // Cerca il titolo del prodotto
+            // Find product title
             const titleSelectors = [
                 'h1.x-item-title__mainTitle',
                 'h1[data-testid="x-item-title__mainTitle"]',
@@ -62,26 +62,26 @@ class EbayProcessor {
             }
             
             if (!titleElement) {
-                console.log('⚠️ [EBAYE] Titolo prodotto non trovato');
+                console.log('⚠️ [EBAYE] Product title not found');
                 return;
             }
             
             const title = titleElement.textContent.trim();
             if (!title) {
-                console.log('⚠️ [EBAYE] Titolo prodotto vuoto');
+                console.log('⚠️ [EBAYE] Product title is empty');
                 return;
             }
             
-            console.log(`🔍 [EBAYE] Titolo prodotto: "${title}"`);
+            console.log(`🔍 [EBAYE] Product title: "${title}"`);
             
-            // Estrai informazioni dal titolo
+            // Extract metadata from title
             const titleInfo = this.extractTitleInfo(title);
             if (!titleInfo.pokemonName) {
-                console.log('🚫 [EBAYE] Nessun Pokemon trovato nel titolo');
+                console.log('🚫 [EBAYE] No Pokemon found in title');
                 return;
             }
             
-            // Crea pulsante
+            // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
             button.innerHTML = 'CardTrader';
@@ -100,23 +100,23 @@ class EbayProcessor {
                 transition: all 0.2s ease;
             `;
             
-            // Inserisci il pulsante dopo il titolo
+            // Insert button after title
             if (titleElement.parentNode) {
                 titleElement.parentNode.insertBefore(button, titleElement.nextSibling);
-                console.log(`✅ [EBAYE] Aggiunto pulsante CT (loading) alla pagina prodotto`);
+                console.log(`✅ [EBAYE] Added CT button (loading) on product page`);
             } else {
-                console.log('⚠️ [EBAYE] Impossibile inserire pulsante CT');
+                console.log('⚠️ [EBAYE] Unable to insert CT button');
                 return;
             }
             
-            // Cerca nel database e aggiorna il pulsante
+            // Search database and update button state
             this.searchCardInDatabase(titleInfo, title).then(results => {
                 if (results && results.length > 0) {
-                    // Cambia il colore in verde quando ha trovato il link
+                    // Turn button green when a link is found
                     button.style.background = '#28a745';
-                    console.log(`✅ [EBAYE] Link trovato, pulsante diventato verde`);
+                    console.log(`✅ [EBAYE] Link found, button turned green`);
                     
-                    // Apri direttamente il link CardTrader quando si clicca
+                    // Open CardTrader link on click
                     const bestResult = results[0];
                     button.addEventListener('click', (e) => {
                         e.preventDefault();
@@ -125,7 +125,7 @@ class EbayProcessor {
                         window.open(cardTraderUrl, '_blank');
                     });
                     
-                    // Effetti hover migliorati (verde)
+                    // Enhanced hover effects (green)
                     button.addEventListener('mouseenter', () => {
                         button.style.background = '#218838';
                         button.style.transform = 'scale(1.05)';
@@ -139,10 +139,10 @@ class EbayProcessor {
                     });
                     
                 } else {
-                    // Mantieni grigio se non ha trovato risultati
-                    console.log(`⚠️ [EBAYE] Nessun risultato trovato, pulsante rimane grigio`);
+                    // Keep gray if no result is found
+                    console.log(`⚠️ [EBAYE] No result found, button remains gray`);
                     
-                    // Effetti hover per pulsante grigio (disabilitato)
+                    // Hover effects for gray (disabled) button
                     button.addEventListener('mouseenter', () => {
                         button.style.background = '#5a6268';
                         button.style.transform = 'scale(1.05)';
@@ -157,16 +157,16 @@ class EbayProcessor {
                 }
             });
             
-            // Marca pagina come processata
+            // Mark page as processed
             this.processedPages.add(window.location.href);
             
         } catch (error) {
-            console.error('❌ [EBAYE] Errore nel processamento pagina prodotto:', error);
+            console.error('❌ [EBAYE] Error while processing product page:', error);
         }
     }
 
     /**
-     * Avvia observer per nuove inserzioni
+     * Start observer for new listings
      */
     startObserver() {
         const observer = new MutationObserver((mutations) => {
@@ -188,12 +188,12 @@ class EbayProcessor {
                 childList: true,
                 subtree: true
             });
-            console.log('✅ [EBAYE] Observer avviato');
+            console.log('✅ [EBAYE] Observer started');
         }
     }
 
     /**
-     * Processa nuove inserzioni
+     * Process new listings
      */
     processNewListings(container) {
         const listings = this.findListings(container);
@@ -205,7 +205,7 @@ class EbayProcessor {
     }
 
     /**
-     * Trova inserzioni in un container
+     * Find listings in a container
      */
     findListings(container) {
         const selectors = [
@@ -227,7 +227,7 @@ class EbayProcessor {
     }
 
     /**
-     * Processa una singola inserzione
+     * Process one listing
      */
     async processListing(listingElement) {
         if (!this.isEnabled || listingElement.hasAttribute('data-pokemon-linker-processed')) {
@@ -241,7 +241,7 @@ class EbayProcessor {
             const titleInfo = this.extractTitleInfo(title);
             if (!titleInfo.pokemonName) return;
             
-            // Crea pulsante
+            // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
             button.innerHTML = 'CardTrader';
@@ -261,12 +261,12 @@ class EbayProcessor {
                 transition: all 0.2s ease;
             `;
             
-            // Inserisci pulsante
+            // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
             if (inserted) {
-                console.log(`✅ [EBAYE] Aggiunto pulsante per ${titleInfo.pokemonName}`);
+                console.log(`✅ [EBAYE] Added button for ${titleInfo.pokemonName}`);
                 
-                // Cerca nel database
+                // Search database
                 const results = await this.searchCardInDatabase(titleInfo, title);
                 if (results && results.length > 0) {
                     button.style.background = '#28a745';
@@ -283,12 +283,12 @@ class EbayProcessor {
             listingElement.setAttribute('data-pokemon-linker-processed', 'true');
             
         } catch (error) {
-            console.error('❌ [EBAYE] Errore nel processamento inserzione:', error);
+            console.error('❌ [EBAYE] Error while processing listing:', error);
         }
     }
 
     /**
-     * Estrae il titolo da un'inserzione
+     * Extract title from listing
      */
     extractTitleFromListing(listingElement) {
         const titleSelectors = [
@@ -312,7 +312,7 @@ class EbayProcessor {
     }
 
     /**
-     * Inserisce il container del link
+     * Insert link container
      */
     insertLinkContainer(listingElement, button) {
         const insertAfterSelectors = [
@@ -338,10 +338,10 @@ class EbayProcessor {
     }
 
     /**
-     * Estrae informazioni dal titolo (delega a content.js)
+     * Extract title info (delegates to `content.js`)
      */
     extractTitleInfo(title) {
-        // Delega alla funzione globale se disponibile
+        // Delegate to global function when available
         if (typeof window.extractTitleInfo === 'function') {
             return window.extractTitleInfo(title);
         }
@@ -349,10 +349,10 @@ class EbayProcessor {
     }
 
     /**
-     * Cerca nel database (delega a content.js)
+     * Search database (delegates to `content.js`)
      */
     async searchCardInDatabase(titleInfo, title) {
-        // Delega alla funzione globale se disponibile
+        // Delegate to global function when available
         if (typeof window.searchCardInDatabase === 'function') {
             return await window.searchCardInDatabase(titleInfo, title);
         }
@@ -360,12 +360,12 @@ class EbayProcessor {
     }
 
     /**
-     * Genera link CardTrader
+     * Generate CardTrader link
      */
     generateCardTraderLink(blueprintId) {
         return `https://www.cardtrader.com/cards/${blueprintId}`;
     }
 }
 
-// Esporta per uso globale
+// Export for global usage
 window.EbayProcessor = EbayProcessor; 

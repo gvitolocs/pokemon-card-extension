@@ -1,78 +1,78 @@
 /**
- * UrlGenerator.js - Generazione link CardTrader
- * Gestisce la generazione dei link per CardTrader e altri servizi
+ * UrlGenerator.js - CardTrader link generation
+ * Handles URL generation for CardTrader and related services.
  */
 
 class UrlGenerator {
     constructor() {
-        console.log('🔗 UrlGenerator inizializzato');
+        console.log('🔗 UrlGenerator initialized');
     }
     
     /**
-     * Genera un link CardTrader per un blueprint ID
+     * Generate CardTrader URL for a blueprint ID
      */
     generateCardTraderLink(blueprintId) {
         if (!blueprintId) {
-            console.warn('⚠️ [CardTrader] Blueprint ID mancante per generare link');
+            console.warn('⚠️ [CardTrader] Missing blueprint ID, cannot generate link');
             return null;
         }
         
         const url = `https://www.cardtrader.com/blueprints/${blueprintId}`;
-        console.log(`🔗 [CardTrader] Link generato: ${url}`);
+        console.log(`🔗 [CardTrader] Generated link: ${url}`);
         return url;
     }
     
     /**
-     * Genera un link Cardmarket per un risultato
+     * Generate Cardmarket URL for a result
      */
     generateCardmarketLink(result, titleInfo, originalTitle) {
         if (!result || !result.pokemon_name) {
-            console.warn('⚠️ [CardTrader] Dati insufficienti per generare link Cardmarket');
+            console.warn('⚠️ [CardTrader] Insufficient data to generate Cardmarket link');
             return null;
         }
         
-        // Costruisci il link Cardmarket
+        // Build Cardmarket URL
         const pokemonName = result.pokemon_name.toLowerCase().replace(/\s+/g, '-');
         const expansionName = result.expansion_name_en ? 
             result.expansion_name_en.toLowerCase().replace(/\s+/g, '-') : '';
         
         let url = `https://www.cardmarket.com/en/Pokemon/Products/Singles/${expansionName}/${pokemonName}`;
         
-        // Aggiungi numero collezionista se disponibile
+        // Add collector number if available
         if (result.collector_number) {
             url += `-${result.collector_number}`;
         }
         
-        console.log(`🔗 [CardTrader] Link Cardmarket generato: ${url}`);
+        console.log(`🔗 [CardTrader] Generated Cardmarket link: ${url}`);
         return url;
     }
     
     /**
-     * Genera un link di ricerca generico per CardTrader
+     * Generate generic CardTrader search URL
      */
     generateSearchLink(searchTerm) {
         if (!searchTerm) {
-            console.warn('⚠️ [CardTrader] Termine di ricerca mancante');
+            console.warn('⚠️ [CardTrader] Missing search term');
             return null;
         }
         
         const encodedTerm = encodeURIComponent(searchTerm);
         const url = `https://www.cardtrader.com/cards?search=${encodedTerm}`;
         
-        console.log(`🔗 [CardTrader] Link di ricerca generato: ${url}`);
+        console.log(`🔗 [CardTrader] Generated search link: ${url}`);
         return url;
     }
     
     /**
-     * Genera un link per una carta specifica su CardTrader
+     * Generate URL for a specific card search on CardTrader
      */
     generateSpecificCardLink(pokemonName, expansionName, collectorNumber) {
         if (!pokemonName) {
-            console.warn('⚠️ [CardTrader] Nome Pokemon mancante per link specifico');
+            console.warn('⚠️ [CardTrader] Missing Pokemon name for specific link');
             return null;
         }
         
-        // Costruisci il termine di ricerca
+        // Build search term
         let searchTerm = pokemonName;
         
         if (expansionName) {
@@ -87,7 +87,7 @@ class UrlGenerator {
     }
     
     /**
-     * Verifica se un URL è valido
+     * Validate URL
      */
     isValidUrl(url) {
         try {
@@ -99,26 +99,26 @@ class UrlGenerator {
     }
     
     /**
-     * Apre un link in una nuova tab
+     * Open URL in new tab
      */
     openLink(url) {
         if (!this.isValidUrl(url)) {
-            console.error('❌ [CardTrader] URL non valido:', url);
+            console.error('❌ [CardTrader] Invalid URL:', url);
             return false;
         }
         
         try {
             window.open(url, '_blank');
-            console.log(`✅ [CardTrader] Link aperto: ${url}`);
+            console.log(`✅ [CardTrader] Opened link: ${url}`);
             return true;
         } catch (error) {
-            console.error('❌ [CardTrader] Errore nell\'apertura del link:', error);
+            console.error('❌ [CardTrader] Error opening link:', error);
             return false;
         }
     }
     
     /**
-     * Genera un link di fallback per CardTrader
+     * Generate fallback CardTrader URL
      */
     generateFallbackLink(titleInfo) {
         if (!titleInfo || !titleInfo.pokemonName) {
@@ -130,10 +130,10 @@ class UrlGenerator {
     }
 }
 
-// Esporta la classe per l'uso in altri moduli
+// Export class for other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = UrlGenerator;
 } else {
-    // Per uso in browser
+    // Browser global fallback
     window.UrlGenerator = UrlGenerator;
 } 

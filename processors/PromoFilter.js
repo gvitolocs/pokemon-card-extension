@@ -1,35 +1,32 @@
 /**
- * PromoFilter.js - Gestione filtri per carte promo
- * Contiene tutta la logica per identificare e filtrare carte promo
+ * PromoFilter.js - Promo card filter logic
+ * Contains all logic used to detect and filter promo cards.
  */
 
 class PromoFilter {
     constructor() {
-        // Parole chiave per identificare carte promo
+        // Keywords used to identify promo cards
         this.promoKeywords = [
-            'promo', 'promotional', 'promozionale', 'promozione',
-            'event', 'evento', 'convention', 'convenzione',
-            'pre-release', 'prerelease', 'preview', 'anteprima',
-            'stamp', 'stampa', 'limited', 'limitata',
-            'exclusive', 'esclusiva', 'special', 'speciale',
-            'collector', 'collezionista', 'anniversary', 'anniversario',
-            'celebration', 'celebrazione', 'holiday', 'festività',
-            'christmas', 'natale', 'halloween', 'pasqua',
-            'easter', 'valentine', 'san valentino', 'birthday',
-            'compleanno', 'tournament', 'torneo', 'championship',
-            'campionato', 'league', 'lega', 'gym', 'palestra',
-            'challenge', 'sfida', 'battle', 'battaglia',
-            'season', 'stagione', 'series', 'serie',
-            'edition', 'edizione', 'version', 'versione',
-            'variant', 'variante', 'alternate', 'alternativa',
-            'secret', 'segreto', 'hidden', 'nascosto',
-            'rare', 'rara', 'ultra rare', 'ultra rara',
-            'shiny', 'lucido', 'holo', 'olografica',
-            'reverse holo', 'reverse olografica', 'full art', 'arte completa',
-            'rainbow', 'arcobaleno', 'gold', 'oro', 'silver', 'argento'
+            'promo', 'promotional',
+            'event', 'convention',
+            'pre-release', 'prerelease', 'preview',
+            'stamp', 'limited',
+            'exclusive', 'special',
+            'collector', 'anniversary',
+            'celebration', 'holiday',
+            'christmas', 'halloween', 'easter', 'valentine', 'birthday',
+            'tournament', 'championship', 'league', 'gym',
+            'challenge', 'battle',
+            'season', 'series',
+            'edition', 'version',
+            'variant', 'alternate',
+            'secret', 'hidden',
+            'rare', 'ultra rare',
+            'shiny', 'holo', 'reverse holo', 'full art',
+            'rainbow', 'gold', 'silver'
         ];
 
-        // Pattern per numeri promo
+        // Patterns for promo numbers
         this.promoNumberPatterns = [
             /promo/i,
             /p\d+/i,
@@ -49,56 +46,56 @@ class PromoFilter {
             /base set\d+/i
         ];
 
-        // Espansioni che contengono principalmente carte promo
+        // Expansions that mostly contain promo cards
         this.promoExpansions = [
-            'promo', 'promotional', 'promozionale',
+            'promo', 'promotional',
             'black star promo', 'promo black star',
-            'event promo', 'promo evento',
-            'convention promo', 'promo convenzione',
-            'pre-release promo', 'promo pre-release',
-            'stamp promo', 'promo stampa',
-            'collector promo', 'promo collezionista',
-            'anniversary promo', 'promo anniversario',
-            'celebration promo', 'promo celebrazione',
-            'holiday promo', 'promo festività',
-            'christmas promo', 'promo natale',
-            'halloween promo', 'promo halloween',
-            'easter promo', 'promo pasqua',
-            'valentine promo', 'promo san valentino',
-            'birthday promo', 'promo compleanno',
-            'tournament promo', 'promo torneo',
-            'championship promo', 'promo campionato',
-            'league promo', 'promo lega',
-            'gym promo', 'promo palestra',
-            'challenge promo', 'promo sfida',
-            'battle promo', 'promo battaglia',
-            'season promo', 'promo stagione',
-            'series promo', 'promo serie'
+            'event promo',
+            'convention promo',
+            'pre-release promo',
+            'stamp promo',
+            'collector promo',
+            'anniversary promo',
+            'celebration promo',
+            'holiday promo',
+            'christmas promo',
+            'halloween promo',
+            'easter promo',
+            'valentine promo',
+            'birthday promo',
+            'tournament promo',
+            'championship promo',
+            'league promo',
+            'gym promo',
+            'challenge promo',
+            'battle promo',
+            'season promo',
+            'series promo'
         ];
     }
 
     /**
-     * Controlla se una carta è una promo basandosi sul titolo
-     * @param {string} title - Il titolo della carta
-     * @returns {boolean} - True se è una promo
+     * Check whether a card is promo based on title
+     * @param {string} title - Card title
+     * @returns {boolean} - True if promo
      */
     isPromoByTitle(title) {
         if (!title) return false;
         
         const titleLower = title.toLowerCase();
         
-        // Controlla parole chiave promo
+        // Check promo keywords
         for (const keyword of this.promoKeywords) {
             if (titleLower.includes(keyword.toLowerCase())) {
-                console.log(`🎯 [PromoFilter] Carta promo rilevata per keyword: "${keyword}"`);
+                console.log(`🎯 [PromoFilter] Promo card detected by keyword: "${keyword}"`);
                 return true;
             }
         }
         
-        // Controlla pattern numeri promo
+        // Check promo number patterns
         for (const pattern of this.promoNumberPatterns) {
             if (pattern.test(title)) {
-                console.log(`🎯 [PromoFilter] Carta promo rilevata per pattern: "${pattern}"`);
+                console.log(`🎯 [PromoFilter] Promo card detected by pattern: "${pattern}"`);
                 return true;
             }
         }
@@ -107,9 +104,9 @@ class PromoFilter {
     }
 
     /**
-     * Controlla se una carta è una promo basandosi sull'espansione
-     * @param {string} expansion - Il nome dell'espansione
-     * @returns {boolean} - True se è una promo
+     * Check whether a card is promo based on expansion
+     * @param {string} expansion - Expansion name
+     * @returns {boolean} - True if promo
      */
     isPromoByExpansion(expansion) {
         if (!expansion) return false;
@@ -118,7 +115,7 @@ class PromoFilter {
         
         for (const promoExpansion of this.promoExpansions) {
             if (expansionLower.includes(promoExpansion.toLowerCase())) {
-                console.log(`🎯 [PromoFilter] Carta promo rilevata per espansione: "${promoExpansion}"`);
+                console.log(`🎯 [PromoFilter] Promo card detected by expansion: "${promoExpansion}"`);
                 return true;
             }
         }
@@ -127,16 +124,16 @@ class PromoFilter {
     }
 
     /**
-     * Controlla se una carta è una promo basandosi sul numero collezionista
-     * @param {string} collectorNumber - Il numero collezionista
-     * @returns {boolean} - True se è una promo
+     * Check whether a card is promo based on collector number
+     * @param {string} collectorNumber - Collector number
+     * @returns {boolean} - True if promo
      */
     isPromoByCollectorNumber(collectorNumber) {
         if (!collectorNumber) return false;
         
         const numberStr = collectorNumber.toString().toLowerCase();
         
-        // Pattern comuni per numeri promo
+        // Common patterns for promo numbers
         const promoPatterns = [
             /^promo\d+$/i,
             /^p\d+$/i,
@@ -157,7 +154,7 @@ class PromoFilter {
         
         for (const pattern of promoPatterns) {
             if (pattern.test(numberStr)) {
-                console.log(`🎯 [PromoFilter] Carta promo rilevata per numero collezionista: "${collectorNumber}"`);
+                console.log(`🎯 [PromoFilter] Promo card detected by collector number: "${collectorNumber}"`);
                 return true;
             }
         }
@@ -166,14 +163,14 @@ class PromoFilter {
     }
 
     /**
-     * Controlla se una carta è una promo basandosi su tutti i criteri
-     * @param {Object} cardInfo - Informazioni sulla carta
-     * @returns {boolean} - True se è una promo
+     * Check whether a card is promo using all criteria
+     * @param {Object} cardInfo - Card metadata
+     * @returns {boolean} - True if promo
      */
     isPromoCard(cardInfo) {
         if (!cardInfo) return false;
         
-        // Controlla per titolo
+        // Check by title
         if (cardInfo.name_en && this.isPromoByTitle(cardInfo.name_en)) {
             return true;
         }
@@ -182,12 +179,12 @@ class PromoFilter {
             return true;
         }
         
-        // Controlla per espansione
+        // Check by expansion
         if (cardInfo.expansion_name_en && this.isPromoByExpansion(cardInfo.expansion_name_en)) {
             return true;
         }
         
-        // Controlla per numero collezionista
+        // Check by collector number
         if (cardInfo.collector_number && this.isPromoByCollectorNumber(cardInfo.collector_number)) {
             return true;
         }
@@ -196,50 +193,50 @@ class PromoFilter {
     }
 
     /**
-     * Filtra i risultati rimuovendo le carte promo se non richieste
-     * @param {Array} results - Array di risultati
-     * @param {Object} titleInfo - Informazioni dal titolo
-     * @returns {Array} - Risultati filtrati
+     * Filter results by promo requirement
+     * @param {Array} results - Result array
+     * @param {Object} titleInfo - Extracted title info
+     * @returns {Array} - Filtered results
      */
     filterPromoResults(results, titleInfo) {
         if (!results || !Array.isArray(results)) return results;
         
-        // Se il titolo richiede esplicitamente una promo, mantieni solo le promo
+        // If title explicitly requests promo, keep only promo cards
         const wantsPromo = this.isPromoByTitle(titleInfo.originalTitle || '');
         
         if (wantsPromo) {
-            console.log(`🎯 [PromoFilter] Richiesta promo rilevata, filtrando solo carte promo`);
+            console.log(`🎯 [PromoFilter] Promo request detected, filtering to promo cards only`);
             return results.filter(card => this.isPromoCard(card));
         }
         
-        // Se il titolo NON richiede promo, rimuovi le promo
+        // If title does not request promo, remove promo cards
         const filteredResults = results.filter(card => !this.isPromoCard(card));
         
         if (filteredResults.length !== results.length) {
-            console.log(`🎯 [PromoFilter] Rimosse ${results.length - filteredResults.length} carte promo non richieste`);
+            console.log(`🎯 [PromoFilter] Removed ${results.length - filteredResults.length} non-requested promo cards`);
         }
         
         return filteredResults;
     }
 
     /**
-     * Aggiusta il punteggio per le carte promo
-     * @param {Object} card - Carta da valutare
-     * @param {Object} titleInfo - Informazioni dal titolo
-     * @param {number} baseScore - Punteggio base
-     * @returns {number} - Punteggio aggiustato
+     * Adjust score based on promo logic
+     * @param {Object} card - Card to evaluate
+     * @param {Object} titleInfo - Extracted title info
+     * @param {number} baseScore - Base score
+     * @returns {number} - Adjusted score
      */
     adjustScoreForPromo(card, titleInfo, baseScore) {
         const isPromo = this.isPromoCard(card);
         const wantsPromo = this.isPromoByTitle(titleInfo.originalTitle || '');
         
         if (isPromo && wantsPromo) {
-            // Bonus per promo quando richiesta
-            console.log(`🎯 [PromoFilter] Bonus punteggio per promo richiesta: +1000`);
+            // Bonus for requested promo
+            console.log(`🎯 [PromoFilter] Score bonus for requested promo: +1000`);
             return baseScore + 1000;
         } else if (isPromo && !wantsPromo) {
-            // Penalità per promo quando non richiesta
-            console.log(`🎯 [PromoFilter] Penalità punteggio per promo non richiesta: -2000`);
+            // Penalty for non-requested promo
+            console.log(`🎯 [PromoFilter] Score penalty for non-requested promo: -2000`);
             return baseScore - 2000;
         }
         
@@ -247,33 +244,31 @@ class PromoFilter {
     }
 
     /**
-     * Controlla se il titolo richiede una carta promo
-     * @param {string} title - Il titolo da analizzare
-     * @returns {boolean} - True se richiede una promo
+     * Check whether title requests a promo card
+     * @param {string} title - Title to inspect
+     * @returns {boolean} - True if promo requested
      */
     titleRequestsPromo(title) {
         if (!title) return false;
         
         const promoRequestKeywords = [
-            'promo', 'promotional', 'promozionale', 'promozione',
-            'event', 'evento', 'convention', 'convenzione',
-            'pre-release', 'prerelease', 'preview', 'anteprima',
-            'stamp', 'stampa', 'limited', 'limitata',
-            'exclusive', 'esclusiva', 'special', 'speciale',
-            'collector', 'collezionista', 'anniversary', 'anniversario',
-            'celebration', 'celebrazione', 'holiday', 'festività',
-            'christmas', 'natale', 'halloween', 'pasqua',
-            'easter', 'valentine', 'san valentino', 'birthday',
-            'compleanno', 'tournament', 'torneo', 'championship',
-            'campionato', 'league', 'lega', 'gym', 'palestra',
-            'challenge', 'sfida', 'battle', 'battaglia'
+            'promo', 'promotional',
+            'event', 'convention',
+            'pre-release', 'prerelease', 'preview',
+            'stamp', 'limited',
+            'exclusive', 'special',
+            'collector', 'anniversary',
+            'celebration', 'holiday',
+            'christmas', 'halloween', 'easter', 'valentine', 'birthday',
+            'tournament', 'championship', 'league', 'gym',
+            'challenge', 'battle'
         ];
         
         const titleLower = title.toLowerCase();
         
         for (const keyword of promoRequestKeywords) {
             if (titleLower.includes(keyword.toLowerCase())) {
-                console.log(`🎯 [PromoFilter] Richiesta promo rilevata nel titolo: "${keyword}"`);
+                console.log(`🎯 [PromoFilter] Promo request detected in title: "${keyword}"`);
                 return true;
             }
         }
@@ -282,9 +277,9 @@ class PromoFilter {
     }
 
     /**
-     * Ottieni informazioni dettagliate su una carta promo
-     * @param {Object} card - Carta da analizzare
-     * @returns {Object} - Informazioni dettagliate
+     * Get detailed promo information for a card
+     * @param {Object} card - Card to inspect
+     * @returns {Object} - Detailed metadata
      */
     getPromoDetails(card) {
         const details = {
@@ -300,37 +295,37 @@ class PromoFilter {
         
         details.isPromo = true;
         
-        // Analizza il titolo
+        // Analyze title
         if (card.name_en) {
             const titleLower = card.name_en.toLowerCase();
             for (const keyword of this.promoKeywords) {
                 if (titleLower.includes(keyword.toLowerCase())) {
                     details.promoKeywords.push(keyword);
                     details.promoType = 'title';
-                    details.promoReason = `Contiene keyword: "${keyword}"`;
+                    details.promoReason = `Contains keyword: "${keyword}"`;
                 }
             }
         }
         
-        // Analizza l'espansione
+        // Analyze expansion
         if (card.expansion_name_en) {
             const expansionLower = card.expansion_name_en.toLowerCase();
             for (const promoExpansion of this.promoExpansions) {
                 if (expansionLower.includes(promoExpansion.toLowerCase())) {
                     details.promoType = 'expansion';
-                    details.promoReason = `Espansione promo: "${promoExpansion}"`;
+                    details.promoReason = `Promo expansion: "${promoExpansion}"`;
                     break;
                 }
             }
         }
         
-        // Analizza il numero collezionista
+        // Analyze collector number
         if (card.collector_number) {
             const numberStr = card.collector_number.toString().toLowerCase();
             for (const pattern of this.promoNumberPatterns) {
                 if (pattern.test(numberStr)) {
                     details.promoType = 'collector_number';
-                    details.promoReason = `Numero collezionista promo: "${card.collector_number}"`;
+                    details.promoReason = `Promo collector number: "${card.collector_number}"`;
                     break;
                 }
             }
@@ -340,12 +335,12 @@ class PromoFilter {
     }
 }
 
-// Esporta la classe per l'uso in altri file
+// Export class for other files
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = PromoFilter;
 } else {
-    // Per uso in browser
+    // Browser global fallback
     window.PromoFilter = PromoFilter;
 }
 
-console.log('✅ [PromoFilter] Modulo PromoFilter caricato correttamente'); 
+console.log('✅ [PromoFilter] PromoFilter module loaded successfully');

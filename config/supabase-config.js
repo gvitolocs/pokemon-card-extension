@@ -1,74 +1,74 @@
-// Configurazione e inizializzazione Supabase
+// Supabase configuration and initialization
 let supabaseClient = null;
 let initializationPromise = null;
 
-// Funzione per inizializzare il client Supabase (singleton pattern)
-// PROBLEMA: Su Vinted (e altri siti SPA) l'estensione viene reinizializzata più volte
-// perché:
-// 1. Vinted usa navigazione SPA che non ricarica la pagina
-// 2. L'estensione si riattiva ad ogni cambio di URL interno
-// 3. Ogni attivazione chiama initializeSupabase() creando client multipli
-// 4. Supabase genera warning "Multiple GoTrueClient instances detected"
+// Initialize Supabase client (singleton pattern)
+// PROBLEM: on Vinted (and other SPA sites) the extension can reinitialize multiple times
+// because:
+// 1. SPA navigation does not fully reload the page
+// 2. The extension can reactivate on internal URL changes
+// 3. Each activation may call initializeSupabase(), creating multiple clients
+// 4. Supabase warns: "Multiple GoTrueClient instances detected"
 //
-// SOLUZIONE: Pattern singleton che garantisce un solo client
+// SOLUTION: singleton pattern guarantees only one client instance
 async function initializeSupabase() {
-    // Se il client è già stato inizializzato, restituisci quello esistente
-    // Questo evita di creare client multipli su navigazioni SPA
+    // If already initialized, return existing instance
+    // This prevents multiple client creation on SPA navigation
     if (supabaseClient) {
-        console.log('✅ Client Supabase già inizializzato, riutilizzo esistente');
+        console.log('✅ Supabase client already initialized, reusing existing instance');
         return true;
     }
     
-    // Se l'inizializzazione è già in corso, aspetta che finisca
-    // Questo evita race conditions quando più chiamate arrivano contemporaneamente
+    // If initialization is already running, await it
+    // This avoids race conditions from concurrent calls
     if (initializationPromise) {
-        console.log('⏳ Inizializzazione Supabase già in corso, aspetto...');
+        console.log('⏳ Supabase initialization already in progress, waiting...');
         return await initializationPromise;
     }
     
-    // Crea una nuova promessa di inizializzazione
-    // Questa promessa viene condivisa tra tutte le chiamate simultanee
+    // Create a shared initialization promise
+    // The same promise is reused by simultaneous callers
     initializationPromise = (async () => {
         try {
-            console.log('🔄 Inizializzazione nuovo client Supabase...');
+            console.log('🔄 Initializing new Supabase client...');
             
-            // Carica la configurazione dal storage
+            // Load configuration from storage
             const result = await chrome.storage.sync.get(['supabaseUrl', 'supabaseKey']);
             
             const supabaseUrl = result.supabaseUrl || 'https://msngrrrihwudtnyjatlo.supabase.co';
             const supabaseKey = result.supabaseKey || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1zbmdycnJpaHd1ZHRueWphdGxvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTAzNTU2NTIsImV4cCI6MjA2NTkzMTY1Mn0.Y0D-FHepxqXznrg2W0n_NOJkgY--GOPJD4EoloK94Yo';
             
-            // Crea il client Supabase
+            // Create Supabase client
             supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
             
-            // Rendi il client disponibile globalmente
+            // Expose client globally
             window.supabaseClient = supabaseClient;
             
-            // Testa la connessione
+            // Test connection
             const { data, error } = await supabaseClient
                 .from('cards')
                 .select('count')
                 .limit(1);
             
             if (error) {
-                console.error('❌ Errore connessione Supabase:', error);
+                console.error('❌ Supabase connection error:', error);
                 supabaseClient = null;
                 window.supabaseClient = null;
                 return false;
             }
             
-            console.log('✅ Supabase inizializzato correttamente');
-            console.log('✅ Client Supabase reso disponibile globalmente');
+            console.log('✅ Supabase initialized successfully');
+            console.log('✅ Supabase client exposed globally');
             return true;
             
         } catch (error) {
-            console.error('❌ Errore nell\'inizializzazione di Supabase:', error);
+            console.error('❌ Error during Supabase initialization:', error);
             supabaseClient = null;
             window.supabaseClient = null;
             return false;
         } finally {
-            // Pulisci la promessa di inizializzazione
-            // Questo permette nuove inizializzazioni se il client viene resettato
+            // Clear shared initialization promise
+            // Allows new initialization if client is reset
             initializationPromise = null;
         }
     })();
@@ -76,19 +76,19 @@ async function initializeSupabase() {
     return await initializationPromise;
 }
 
-// Funzione per ottenere il client Supabase
+// Get Supabase client
 function getSupabaseClient() {
     return supabaseClient;
 }
 
-// Funzione per verificare se Supabase è configurato
+// Check whether Supabase is configured
 function isSupabaseConfigured() {
     return supabaseClient !== null;
 }
 
-// Inizializza Supabase quando il DOM è pronto (solo se non è già stato fatto)
-// CONTROLLO AGGIUNTIVO: Verifica se il client esiste già prima di inizializzare
-// Questo è necessario perché su Vinted il DOM può essere "pronto" più volte
+// Initialize Supabase when DOM is ready (only once)
+// EXTRA SAFETY CHECK: verify client does not already exist
+// Needed because on Vinted the DOM can become "ready" more than once
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => {
         if (!supabaseClient) {

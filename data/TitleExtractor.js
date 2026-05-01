@@ -1,15 +1,15 @@
 /**
- * TitleExtractor.js - Estrazione e parsing dei titoli
- * Gestisce l'estrazione dei titoli dalle inserzioni e il parsing delle informazioni
+ * TitleExtractor.js - Listing title extraction and parsing
+ * Extracts titles from listings and parses card metadata.
  */
 
 class TitleExtractor {
     constructor() {
-        console.log('📝 TitleExtractor inizializzato');
+        console.log('📝 TitleExtractor initialized');
     }
     
     /**
-     * Estrae il titolo da un'inserzione
+     * Extract title from a listing
      */
     extractTitleFromListing(listingElement) {
         const hostname = window.location.hostname;
@@ -26,7 +26,7 @@ class TitleExtractor {
     }
     
     /**
-     * Estrae il titolo da Vinted
+     * Extract title from Vinted
      */
     extractTitleVinted(listingElement) {
         const titleSelectors = [
@@ -46,7 +46,7 @@ class TitleExtractor {
             }
         }
         
-        // Fallback: usa il testo dell'elemento stesso
+        // Fallback: use listing element text
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
             title = this.cleanTitle(title);
@@ -57,7 +57,7 @@ class TitleExtractor {
     }
     
     /**
-     * Estrae il titolo da eBay
+     * Extract title from eBay
      */
     extractTitleEbay(listingElement) {
         const titleSelectors = [
@@ -77,7 +77,7 @@ class TitleExtractor {
             }
         }
         
-        // Fallback: usa il testo dell'elemento stesso
+        // Fallback: use listing element text
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
             title = this.cleanTitle(title);
@@ -88,35 +88,35 @@ class TitleExtractor {
     }
     
     /**
-     * Estrae il titolo da Cardmarket
+     * Extract title from Cardmarket
      */
     extractTitleCardmarket(listingElement) {
         const titleSelectors = [
-            '.page-title-container', // container principale
-            '.page-title-container .flex-grow-1 h1', // h1 specifico
-            'h1', // pagina prodotto
+            '.page-title-container', // main container
+            '.page-title-container .flex-grow-1 h1', // specific h1
+            'h1', // product page
             '.product-title', // listing
-            '.col-12 .d-flex .flex-grow-1 h1', // struttura tipica Cardmarket
+            '.col-12 .d-flex .flex-grow-1 h1', // typical Cardmarket structure
             '.col-12 .product-title'
         ];
         
         for (const selector of titleSelectors) {
             const element = listingElement.querySelector(selector) || (listingElement.matches(selector) ? listingElement : null);
             if (element && element.textContent && element.textContent.trim()) {
-                console.log(`🔍 [CardTrader] Cardmarket selettore trovato: "${selector}"`);
+                console.log(`🔍 [CardTrader] Cardmarket selector found: "${selector}"`);
                 let title = '';
                 
-                // Per Cardmarket, prendi TUTTO il contenuto dell'h1 inclusi gli span (per avere l'espansione)
+                // On Cardmarket, take full h1 text including spans (to include expansion)
                 if (element.tagName === 'H1') {
                     title = element.textContent.trim();
-                    console.log(`🔍 [CardTrader] Cardmarket H1 completo - Titolo estratto: "${title}"`);
+                    console.log(`🔍 [CardTrader] Full Cardmarket H1 - extracted title: "${title}"`);
                 } else {
                     title = element.textContent.trim();
-                    console.log(`🔍 [CardTrader] Cardmarket titolo normale - Titolo estratto: "${title}"`);
+                    console.log(`🔍 [CardTrader] Standard Cardmarket title - extracted: "${title}"`);
                 }
                 
                 title = this.cleanTitle(title);
-                console.log(`🔍 [CardTrader] Cardmarket titolo finale: "${title}"`);
+                console.log(`🔍 [CardTrader] Final Cardmarket title: "${title}"`);
                 return title;
             }
         }
@@ -125,28 +125,28 @@ class TitleExtractor {
     }
     
     /**
-     * Pulisce il titolo da elementi dell'estensione
+     * Remove extension artifacts from title
      */
     cleanTitle(title) {
-        // Rimuovi eventuali pulsanti CardTrader dal titolo
+        // Remove possible CardTrader button artifacts from title
         title = title.replace(/\bCardTrader\b/g, '').trim();
         title = title.replace(/\bDB offline\b/g, '').trim();
-        title = title.replace(/\bCaricamento\.\.\.\b/g, '').trim();
+        title = title.replace(/\bLoading\.\.\.\b/g, '').trim();
         
         return title;
     }
     
     /**
-     * Estrae informazioni dal titolo
+     * Extract metadata from title
      */
     extractTitleInfo(title) {
-        // Pulisci il titolo da "CardTrader" e altri elementi dell'estensione
+        // Remove extension artifacts from title
         let cleanTitle = this.cleanTitle(title);
         
-        console.log(`🔍 [CardTrader] Processando titolo: "${cleanTitle}" (originale: "${title}")`);
+        console.log(`🔍 [CardTrader] Processing title: "${cleanTitle}" (original: "${title}")`);
         const titleLower = cleanTitle.toLowerCase();
         
-        // Gestione speciale per Pokemon con nomi multipli o varianti
+        // Special handling for Pokemon with multi-word names/variants
         const specialCases = {
             'mr. mime': 'mr-mime',
             'mr mime': 'mr-mime', 
@@ -188,9 +188,9 @@ class TitleExtractor {
             'florges': 'florges'
         };
 
-        // Lista completa di tutti i Pokemon (Generazioni 1-9)
+        // Full Pokemon list (Generations 1-9)
         const pokemonNames = [
-            // Generazione 1 (Kanto) - 151 Pokemon
+            // Generation 1 (Kanto) - 151 Pokemon
             'bulbasaur', 'ivysaur', 'venusaur', 'charmander', 'charmeleon', 'charizard',
             'squirtle', 'wartortle', 'blastoise', 'caterpie', 'metapod', 'butterfree',
             'weedle', 'kakuna', 'beedrill', 'pidgey', 'pidgeotto', 'pidgeot',
@@ -216,13 +216,13 @@ class TitleExtractor {
             'mewtwo', 'mew'
         ];
 
-        // Cerca il Pokemon nel titolo
+        // Search Pokemon name in title
         let pokemonName = null;
         let expansionName = null;
         let collectorNumber = null;
         let rarity = null;
 
-        // Prima controlla i casi speciali
+        // Check special cases first
         for (const [variant, normalized] of Object.entries(specialCases)) {
             if (titleLower.includes(variant)) {
                 pokemonName = normalized;
@@ -230,7 +230,7 @@ class TitleExtractor {
             }
         }
 
-        // Se non trovato nei casi speciali, cerca nella lista generale
+        // If not found in special cases, scan general list
         if (!pokemonName) {
             for (const name of pokemonNames) {
                 if (titleLower.includes(name)) {
@@ -240,13 +240,13 @@ class TitleExtractor {
             }
         }
 
-        // Estrai numero collezionista (pattern: numero tra parentesi o spazi)
+        // Extract collector number (number in spaces or parentheses)
         const numberMatch = cleanTitle.match(/(?:\(|^|\s)(\d{1,3})(?:\)|$|\s)/);
         if (numberMatch) {
             collectorNumber = numberMatch[1];
         }
 
-        // Estrai espansione (cerca parole chiave comuni)
+        // Extract expansion by known keywords
         const expansionKeywords = [
             'evoluzioni prismatiche', 'prismatiche', 'evoluzioni', 'evolutions',
             'base set', 'jungle', 'fossil', 'team rocket', 'gym heroes', 'gym challenge',
@@ -279,14 +279,14 @@ class TitleExtractor {
             }
         }
 
-        // Estrai rarità
+        // Extract rarity
         const rarityKeywords = {
-            'common': ['comune', 'common'],
-            'uncommon': ['non comune', 'uncommon'],
-            'rare': ['rara', 'rare'],
-            'rare holo': ['rara olografica', 'rare holo', 'holo'],
-            'ultra rare': ['ultra rara', 'ultra rare'],
-            'secret rare': ['rara segreta', 'secret rare'],
+            'common': ['common'],
+            'uncommon': ['uncommon'],
+            'rare': ['rare'],
+            'rare holo': ['rare holo', 'holo'],
+            'ultra rare': ['ultra rare'],
+            'secret rare': ['secret rare'],
             'promo': ['promo', 'promotional'],
             'v': ['v'],
             'vmax': ['vmax'],
@@ -303,7 +303,7 @@ class TitleExtractor {
             'supporter': ['supporter'],
             'item': ['item'],
             'stadium': ['stadium'],
-            'energy': ['energy', 'energia']
+            'energy': ['energy']
         };
 
         for (const [rarityType, keywords] of Object.entries(rarityKeywords)) {
@@ -327,17 +327,17 @@ class TitleExtractor {
     }
     
     /**
-     * Genera una chiave di cache per un titolo
+     * Generate cache key for title
      */
     generateCacheKey(title) {
         return title.toLowerCase().trim().replace(/\s+/g, ' ');
     }
 }
 
-// Esporta la classe per l'uso in altri moduli
+// Export class for other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = TitleExtractor;
 } else {
-    // Per uso in browser
+    // Browser global fallback
     window.TitleExtractor = TitleExtractor;
 } 

@@ -1,18 +1,18 @@
 /**
- * ButtonManager.js - Gestione pulsanti CardTrader
- * Gestisce la creazione, clonazione e inserimento dei pulsanti
+ * ButtonManager.js - CardTrader button manager
+ * Handles button creation, cloning, and insertion.
  */
 
 class ButtonManager {
     constructor() {
-        // Pulsante globale creato una sola volta all'avvio (fuori da tutti i cicli)
+        // Global button created once at startup (outside all loops)
         this.globalButton = this.createGlobalButton();
         
-        console.log('🔘 ButtonManager inizializzato');
+        console.log('🔘 ButtonManager initialized');
     }
     
     /**
-     * Crea il pulsante globale una sola volta
+     * Create the global button once
      */
     createGlobalButton() {
         const button = document.createElement('button');
@@ -33,36 +33,36 @@ class ButtonManager {
             transition: all 0.2s ease;
         `;
         
-        console.log('✅ Pulsante globale CardTrader creato UNA SOLA VOLTA all\'avvio');
+        console.log('✅ Global CardTrader button created once at startup');
         return button;
     }
     
     /**
-     * Clona il pulsante globale per un nuovo inserimento
+     * Clone the global button for a new insertion
      */
     cloneButton() {
         return this.globalButton.cloneNode(true);
     }
     
     /**
-     * Crea un pulsante con stili personalizzati
+     * Create a button with custom styles
      */
     createCustomButton(styles = {}) {
         const button = this.cloneButton();
         
-        // Applica stili personalizzati
+        // Apply custom styles
         Object.assign(button.style, styles);
         
         return button;
     }
     
     /**
-     * Imposta il pulsante come "successo" (verde)
+     * Set button to success state (green)
      */
     setButtonSuccess(button, clickHandler) {
         button.style.background = '#28a745';
         
-        // Aggiungi event listener per il click
+        // Add click handler
         if (clickHandler) {
             button.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -71,7 +71,7 @@ class ButtonManager {
             });
         }
         
-        // Effetti hover migliorati (verde)
+        // Enhanced hover effects (green)
         button.addEventListener('mouseenter', () => {
             button.style.background = '#218838';
             button.style.transform = 'scale(1.05)';
@@ -86,13 +86,13 @@ class ButtonManager {
     }
     
     /**
-     * Imposta il pulsante come "disabilitato" (grigio)
+     * Set button to disabled state (gray)
      */
     setButtonDisabled(button, message = 'CardTrader (DB offline)') {
         button.innerHTML = message;
         button.style.background = '#6c757d';
         
-        // Effetti hover per pulsante grigio (disabilitato)
+        // Hover effects for gray disabled button
         button.addEventListener('mouseenter', () => {
             button.style.background = '#5a6268';
             button.style.transform = 'scale(1.05)';
@@ -107,7 +107,7 @@ class ButtonManager {
     }
     
     /**
-     * Inserisce il pulsante in un elemento specifico
+     * Insert button into target element
      */
     insertButton(listingElement, button) {
         const hostname = window.location.hostname;
@@ -124,7 +124,7 @@ class ButtonManager {
     }
     
     /**
-     * Inserisce il pulsante su Vinted
+     * Insert button on Vinted
      */
     insertButtonVinted(listingElement, button) {
         const insertAfterSelectors = [
@@ -143,7 +143,7 @@ class ButtonManager {
             }
         }
         
-        // Fallback: inserisci dopo l'elemento
+        // Fallback: insert after current element
         if (listingElement.parentNode) {
             listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
             return true;
@@ -152,7 +152,7 @@ class ButtonManager {
     }
     
     /**
-     * Inserisce il pulsante su eBay
+     * Insert button on eBay
      */
     insertButtonEbay(listingElement, button) {
         const insertAfterSelectors = [
@@ -170,7 +170,7 @@ class ButtonManager {
             }
         }
         
-        // Fallback: inserisci dopo l'elemento
+        // Fallback: insert after current element
         if (listingElement.parentNode) {
             listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
             return true;
@@ -179,7 +179,7 @@ class ButtonManager {
     }
     
     /**
-     * Inserisce il pulsante su Cardmarket
+     * Insert button on Cardmarket
      */
     insertButtonCardmarket(listingElement, button) {
         const insertAfterSelectors = [
@@ -200,7 +200,7 @@ class ButtonManager {
             }
         }
         
-        // Fallback: inserisci dopo l'elemento
+        // Fallback: insert after current element
         if (listingElement.parentNode) {
             listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
             return true;
@@ -209,7 +209,7 @@ class ButtonManager {
     }
     
     /**
-     * Crea un pulsante per pagina prodotto eBay
+     * Create button for eBay product page
      */
     createEbayProductButton() {
         return this.createCustomButton({
@@ -229,7 +229,7 @@ class ButtonManager {
     }
     
     /**
-     * Crea un pulsante per pagina prodotto Cardmarket
+     * Create button for Cardmarket product page
      */
     createCardmarketProductButton() {
         return this.createCustomButton({
@@ -253,10 +253,10 @@ class ButtonManager {
     }
 }
 
-// Esporta la classe per l'uso in altri moduli
+// Export class for other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = ButtonManager;
 } else {
-    // Per uso in browser
+    // Browser global fallback
     window.ButtonManager = ButtonManager;
 } 

@@ -1,119 +1,119 @@
 /**
  * content-modular-example.js - Esempio di content.js modulare
- * Mostra come usare i moduli creati per organizzare il codice
+ * Shows how to use created modules to organize code
  */
 
-// Inizializza i moduli
+// Initialize modules
 const extensionCore = new ExtensionCore();
 const cacheManager = new CacheManager();
 const buttonManager = new ButtonManager();
 const titleExtractor = new TitleExtractor();
 const urlGenerator = new UrlGenerator();
 
-// Pulsante globale creato una sola volta all'avvio (fuori da tutti i cicli)
+// Global button created only once at startup (outside all loops)
 let globalButton = null;
 
-// Inizializza le variabili globali se non esistono
+// Initialize global variables if they do not exist
 if (typeof window.supabaseClient === 'undefined') {
     window.supabaseClient = null;
 }
 
-// Crea il pulsante globale una sola volta (fuori da tutti i cicli)
+// Create the global button only once (outside all loops)
 globalButton = buttonManager.createGlobalButton();
 
-// Event listeners per la comunicazione tra moduli
+// Event listeners for module communication
 document.addEventListener('cardtrader-dom-ready', () => {
-    console.log('⚡ [CardTrader] DOM caricato, riavvio osservatore...');
+    console.log('⚡ [CardTrader] DOM loaded, restarting observer...');
     startObserver();
 });
 
 document.addEventListener('cardtrader-check-periodic', () => {
-    console.log('⚡ [CardTrader] Controllo periodico - avvio osservatore...');
+    console.log('⚡ [CardTrader] Periodic check - starting observer...');
     startObserver();
 });
 
 document.addEventListener('cardtrader-force-start', () => {
-    console.log('⚡ [CardTrader] Forzatura finale avvio osservatore...');
+    console.log('⚡ [CardTrader] Final forced observer start...');
     startObserver();
 });
 
 document.addEventListener('cardtrader-url-changed', (event) => {
-    console.log('🔄 [CardTrader] URL cambiato, pulendo stati...');
+    console.log('🔄 [CardTrader] URL changed, clearing states...');
     cacheManager.clearAllCaches();
     cacheManager.clearProcessingAttributes();
     
-    // Riavvia l'osservatore dopo un breve delay
+    // Restart observer after a short delay
     setTimeout(() => {
         startObserver();
     }, 500);
 });
 
-// Inizializza l'estensione
+// Initialize the extension
 async function initializeExtension() {
     try {
-        console.log('🃏 Pokemon Card Trader Linker - Inizializzazione rapida...');
+        console.log('🃏 Pokemon Card Trader Linker - Fast initialization...');
         
-        // Inizializza il core
+        // Initialize core
         await extensionCore.initialize();
         
-        // Configura il gestore dei cambi URL
+        // Configure URL change handler
         extensionCore.setupUrlChangeHandler();
         
-        // Avvia immediatamente l'osservatore per inserimento veloce
+        // Start the observer immediately for fast insertion
         startObserver();
         
-        console.log('✅ Estensione inizializzata rapidamente');
+        console.log('✅ Extension initialized quickly');
         
     } catch (error) {
-        console.error('❌ Errore nell\'inizializzazione:', error);
+        console.error('❌ Error nell\'initialization:', error);
         startObserver();
     }
 }
 
-// Inizializzazione ultra-rapida che si attiva immediatamente
+// Ultra-fast initialization that runs immediately
 function initializeUltraFast() {
-    console.log('⚡ [CardTrader] Inizializzazione ultra-rapida...');
+    console.log('⚡ [CardTrader] Initialization ultra-rapida...');
     
-    // Pulisci i match riusciti quando cambia la pagina
+    // Clear successful matches when the page changes
     cacheManager.clearSuccessfulMatches();
     
-    // Avvia immediatamente l'osservatore
+    // Start observer immediately
     startObserver();
     
-    // Se il DOM è ancora in caricamento, riavvia quando è pronto
+    // If the DOM is still loading, restart when ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
-            console.log('⚡ [CardTrader] DOM caricato, riavvio osservatore...');
+            console.log('⚡ [CardTrader] DOM loaded, restarting observer...');
             document.dispatchEvent(new CustomEvent('cardtrader-dom-ready'));
         });
     }
     
-    // Backup: controlla ogni 50ms se ci sono nuovi elementi
+    // Backup: check every 50ms for new elements
     const checkInterval = setInterval(() => {
         if (document.body) {
-            console.log('⚡ [CardTrader] Controllo periodico - avvio osservatore...');
+            console.log('⚡ [CardTrader] Periodic check - starting observer...');
             document.dispatchEvent(new CustomEvent('cardtrader-check-periodic'));
         }
         
-        // Ferma il controllo dopo 5 secondi
+        // Stop checking after 5 seconds
         setTimeout(() => {
             clearInterval(checkInterval);
         }, 5000);
     }, 50);
     
-    // Backup finale: se dopo 200ms non è ancora partito, forza l'avvio
+    // Final backup: if it has not started after 200ms, force start
     setTimeout(() => {
-        console.log('⚡ [CardTrader] Forzatura finale avvio osservatore...');
+        console.log('⚡ [CardTrader] Final forced observer start...');
         document.dispatchEvent(new CustomEvent('cardtrader-force-start'));
     }, 200);
 }
 
-// Avvia l'osservatore per rilevare nuove inserzioni con inserimento immediato
+// Start observer to detect new listings with immediate insertion
 function startObserver() {
     try {
-        console.log('🔍 [CardTrader] Avvio osservatore con inserimento immediato...');
+        console.log('🔍 [CardTrader] Starting observer with immediate insertion...');
         
-        // Inserimento immediato per elementi già presenti
+        // Immediate insertion for already present elements
         processExistingListingsImmediate();
         
         const observer = new MutationObserver((mutations) => {
@@ -137,26 +137,26 @@ function startObserver() {
             });
             
             if (hasNewListings) {
-                // Processamento immediato per nuovi elementi
-                console.log(`⚡ [CardTrader] Processamento immediato di ${pendingListings.length} nuove inserzioni`);
+                // Processing immediato for nuovi elementi
+                console.log(`⚡ [CardTrader] Immediate processing of ${pendingListings.length} new listings`);
                 
-                // Processa solo i primi 3 elementi immediatamente per evitare sovraccarico
+                // Process only the first 3 elements immediately to avoid overload
                 const immediateListings = pendingListings.slice(0, 3);
                 immediateListings.forEach(listing => {
                     processListingImmediate(listing);
                 });
                 
-                // Debounce per elaborazioni successive
+                // Debounce for subsequent processing
                 cacheManager.setDebounceTimer(() => {
-                    console.log(`🔄 [CardTrader] Elaborazione successiva di ${pendingListings.length} inserzioni`);
+                    console.log(`🔄 [CardTrader] Subsequent processing of ${pendingListings.length} listings`);
                     
-                    // Processa in batch per migliorare le performance
+                    // Process in batches to improve performance
                     const batchSize = 3;
                     for (let i = 0; i < pendingListings.length; i += batchSize) {
                         const batch = pendingListings.slice(i, i + batchSize);
                         setTimeout(() => {
                             batch.forEach(listing => {
-                                // Controlla se abbiamo già un match riuscito per questo elemento
+                                // Check whether we already have a successful match for this element
                                 const title = titleExtractor.extractTitleFromListing(listing);
                                 if (title) {
                                     const cacheKey = titleExtractor.generateCacheKey(title);
@@ -177,44 +177,44 @@ function startObserver() {
                 subtree: true
             });
             
-            // Controllo periodico per elementi esistenti
+            // Periodic check for existing elements
             setInterval(() => {
                 if (extensionCore.isExtensionEnabled() && !extensionCore.isExtensionProcessing()) {
                     processExistingListings();
                 }
             }, 5000);
             
-            console.log('✅ [CardTrader] Osservatore con inserimento immediato avviato');
+            console.log('✅ [CardTrader] Observer with immediate insertion started');
         } else {
-            console.warn('⚠️ [CardTrader] Document.body non disponibile, riprovo tra 500ms');
+            console.warn('⚠️ [CardTrader] Document.body not available, retrying in 500ms');
             setTimeout(startObserver, 500);
         }
     } catch (error) {
-        console.error('❌ [CardTrader] Errore nell\'avvio osservatore:', error);
+        console.error('❌ [CardTrader] Error while starting observer:', error);
     }
 }
 
-// Processamento immediato delle inserzioni esistenti
+// Immediate processing of existing listings
 function processExistingListingsImmediate() {
     if (!extensionCore.isExtensionEnabled()) return;
     
-    console.log('⚡ [CardTrader] Processamento immediato delle inserzioni esistenti...');
+    console.log('⚡ [CardTrader] Immediate processing of existing listings...');
     
     const listings = findListings();
-    console.log(`⚡ [CardTrader] Trovate ${listings.length} inserzioni per processamento immediato`);
+    console.log(`⚡ [CardTrader] Found ${listings.length} listings for processing immediato`);
     
-    // Processa immediatamente solo i primi 5 elementi
+    // Immediately process only the first 5 elements
     const immediateListings = listings.slice(0, 5);
     immediateListings.forEach(listing => {
         processListingImmediate(listing);
     });
     
-    // Processa il resto con un delay maggiore
+    // Process the rest with a longer delay
     if (listings.length > 5) {
         setTimeout(() => {
             const remainingListings = listings.slice(5);
             remainingListings.forEach(listing => {
-                // Controlla se abbiamo già un match riuscito per questo elemento
+                // Check whether we already have a successful match for this element
                 const title = titleExtractor.extractTitleFromListing(listing);
                 if (title) {
                     const cacheKey = titleExtractor.generateCacheKey(title);
@@ -227,44 +227,44 @@ function processExistingListingsImmediate() {
     }
 }
 
-// Processamento immediato di una singola inserzione
+// Immediate processing of a single listing
 function processListingImmediate(listingElement) {
     if (!extensionCore.isExtensionEnabled() || !listingElement || listingElement.hasAttribute('data-pokemon-linker-processed')) {
         return;
     }
     
     try {
-        // Estrai il titolo immediatamente
+        // Extract title immediately
         const title = titleExtractor.extractTitleFromListing(listingElement);
         if (!title || title.trim().length < 3) {
             return;
         }
         
-        // Controlla se abbiamo già un match riuscito per questo titolo
+        // Check whether we already have a successful match for this title
         const cacheKey = titleExtractor.generateCacheKey(title);
         if (cacheManager.hasSuccessfulMatch(cacheKey)) {
-            console.log(`🚫 [CardTrader] Match già riuscito per: "${title}", saltando`);
+            console.log(`🚫 [CardTrader] Match already successful for: "${title}", skipping`);
             return;
         }
         
-        // Crea un pulsante di caricamento immediato (clona il pulsante globale)
+        // Create an immediate loading button (clone the global button)
         const loadingButton = globalButton.cloneNode(true);
-        buttonManager.insertButton(listingElement, loadingButton);
+        buttonManager.inserisciButton(listingElement, loadingButton);
         
-        // Marca come processato per evitare duplicati
+        // Mark as processed to avoid duplicates
         listingElement.setAttribute('data-pokemon-linker-processed', 'true');
         
-        // Avvia la ricerca in background
+        // Start background search
         requestIdleCallback(() => {
             processListing(listingElement);
         });
         
     } catch (error) {
-        console.error('❌ [CardTrader] Errore nel processamento immediato:', error);
+        console.error('❌ [CardTrader] Error during immediate processing:', error);
     }
 }
 
-// Trova tutte le inserzioni nella pagina
+// Find all listings on the page
 function findListings() {
     const selectors = getListingSelectors();
     const listings = [];
@@ -310,7 +310,7 @@ function findListings() {
     return listings;
 }
 
-// Ottieni i selettori per le inserzioni
+// Get selectors for listings
 function getListingSelectors() {
     const hostname = window.location.hostname;
     
@@ -340,7 +340,7 @@ function getListingSelectors() {
     return [];
 }
 
-// Trova inserzioni in un container specifico
+// Find listings in a specific container
 function findListingsInContainer(container) {
     const selectors = getListingSelectors();
     const listings = [];
@@ -386,18 +386,18 @@ function findListingsInContainer(container) {
     return listings;
 }
 
-// Processa le inserzioni esistenti
+// Process existing listings
 function processExistingListings() {
     if (!extensionCore.isExtensionEnabled() || extensionCore.isExtensionProcessing()) return;
     
     const listings = findListings();
-    console.log(`🔍 Trovate ${listings.length} inserzioni da processare`);
+    console.log(`🔍 Found ${listings.length} listings to process`);
     
-    // Limita il numero di inserzioni processate per volta
+    // Limit number of listings processed for batch
     const limitedListings = listings.slice(0, 10);
     
     limitedListings.forEach(listing => {
-        // Controlla se abbiamo già un match riuscito per questo elemento
+        // Check whether we already have a successful match for this element
         const title = titleExtractor.extractTitleFromListing(listing);
         if (title) {
             const cacheKey = titleExtractor.generateCacheKey(title);
@@ -408,85 +408,85 @@ function processExistingListings() {
     });
 }
 
-// Processa una singola inserzione
+// Process a single listing
 async function processListing(listingElement) {
     if (!extensionCore.isExtensionEnabled() || extensionCore.isExtensionProcessing()) return;
     
     try {
-        // CONTROLLO DUPLICAZIONE ROBUSTO
+        // ROBUST DUPLICATION CHECK
         const isAlreadyProcessed = 
             listingElement.hasAttribute('data-pokemon-linker-processed') ||
             cacheManager.isInObserverCache(listingElement) ||
             cacheManager.isInProcessingElements(listingElement);
         
-        // Controllo aggiuntivo per evitare processamento multiplo recente
+        // Additional check to avoid recent multiple processing
         const lastProcessedTime = listingElement.getAttribute('data-pokemon-linker-last-processed');
         if (lastProcessedTime) {
             const timeSinceLastProcess = Date.now() - parseInt(lastProcessedTime);
             if (timeSinceLastProcess < 1000) {
-                console.log(`🚫 [CardTrader] Elemento processato di recente (${Math.round(timeSinceLastProcess)}ms fa), saltando`);
+                console.log(`🚫 [CardTrader] Element processed recently (${Math.round(timeSinceLastProcess)}ms ago), skipping`);
                 return;
             }
         }
         
         if (isAlreadyProcessed) {
-            console.log('🚫 [CardTrader] Elemento già processato (controllo robusto), saltando');
+            console.log('🚫 [CardTrader] Element already processed (robust check), skipping');
             return;
         }
         
-        // Marca IMMEDIATAMENTE come in fase di processamento per evitare duplicazioni
+        // Mark IMMEDIATELY as processing to avoid duplicates
         cacheManager.addToProcessingElements(listingElement);
         listingElement.setAttribute('data-pokemon-linker-processing', 'true');
         
-        // Estrai il titolo
+        // Extract title
         const title = titleExtractor.extractTitleFromListing(listingElement);
         if (!title || title.trim().length < 3) {
-            console.log('🚫 [CardTrader] Titolo troppo corto o vuoto, saltando');
+            console.log('🚫 [CardTrader] Title too short or empty, skipping');
             return;
         }
         
-        // Controlla se abbiamo già un match riuscito per questo titolo
+        // Check whether we already have a successful match for this title
         const cacheKey = titleExtractor.generateCacheKey(title);
         if (cacheManager.hasSuccessfulMatch(cacheKey)) {
-            console.log(`🚫 [CardTrader] Match già riuscito per: "${title}", saltando`);
+            console.log(`🚫 [CardTrader] Match already successful for: "${title}", skipping`);
             return;
         }
         
-        // Estrai informazioni dal titolo
+        // Extract info from title
         const titleInfo = titleExtractor.extractTitleInfo(title);
         if (!titleInfo.pokemonName) {
-            console.log('🚫 [CardTrader] Nessun Pokemon trovato nel titolo');
+            console.log('🚫 [CardTrader] No Pokemon found in title');
             return;
         }
         
         console.log(`🔍 [CardTrader] Processando: "${title}" -> ${titleInfo.pokemonName}`);
         
-        // Crea il pulsante con "CardTrader" (grigio di default)
+        // Create button with "CardTrader" (gray by default)
         const button = buttonManager.cloneButton();
         
-        // Inserisci il pulsante subito (grigio)
-        const inserted = buttonManager.insertButton(listingElement, button);
+        // Insert button immediately (gray)
+        const inseriscied = buttonManager.inserisciButton(listingElement, button);
         
-        if (inserted) {
-            console.log(`✅ [CardTrader] Aggiunto pulsante CardTrader (loading) per ${titleInfo.pokemonName}`);
+        if (inseriscied) {
+            console.log(`✅ [CardTrader] Added CardTrader button (loading) for ${titleInfo.pokemonName}`);
             
-            // Cerca nel database
-            console.log(`🔍 [CardTrader] Avvio ricerca per: "${title}"`);
+            // Search in database
+            console.log(`🔍 [CardTrader] Starting search for: "${title}"`);
             let results = await searchCardInDatabase(titleInfo, title);
-            console.log(`🔍 [CardTrader] Risultati ricevuti:`, results);
+            console.log(`🔍 [CardTrader] Results received:`, results);
             
             if (results && results.length > 0) {
-                console.log(`✅ [CardTrader] Trovati ${results.length} risultati`);
+                console.log(`✅ [CardTrader] Found ${results.length} results`);
                 
-                // Marca come match riuscito per evitare riprocessamento
+                // Mark as successful match to avoid reprocessing
                 cacheManager.addSuccessfulMatch(cacheKey);
                 
-                // Salva in cache per future ricerche
+                // Save in cache for future searches
                 cacheManager.saveToCardCache(cacheKey, { results, titleInfo });
                 
                 const bestResult = results[0];
                 
-                // Imposta il pulsante come successo
+                // Set button to success
                 buttonManager.setButtonSuccess(button, (e) => {
                     const cardTraderUrl = urlGenerator.generateCardTraderLink(bestResult.blueprint_id);
                     if (cardTraderUrl) {
@@ -495,45 +495,45 @@ async function processListing(listingElement) {
                 });
                 
             } else {
-                console.log('❌ [CardTrader] Nessun risultato trovato nel database');
+                console.log('❌ [CardTrader] No result found in database');
                 
-                // Controlla se Supabase è disponibile
+                // Check if Supabase is available
                 if (typeof window.supabaseClient === 'undefined' || !window.supabaseClient) {
-                    console.log('⚠️ [CardTrader] Supabase non disponibile, pulsante rimane grigio');
+                    console.log('⚠️ [CardTrader] Supabase not available, button stays gray');
                     buttonManager.setButtonDisabled(button, 'CardTrader (DB offline)');
                 } else {
                     buttonManager.setButtonDisabled(button);
                 }
             }
         } else {
-            console.log(`⚠️ [CardTrader] Impossibile inserire pulsante per ${titleInfo.pokemonName}`);
+            console.log(`⚠️ [CardTrader] Unable to inserisci button for ${titleInfo.pokemonName}`);
         }
         
-        // Marca come processato
+        // Marca come processed
         cacheManager.addToObserverCache(listingElement);
         listingElement.setAttribute('data-pokemon-linker-processed', 'true');
         listingElement.setAttribute('data-pokemon-linker-last-processed', Date.now().toString());
         
     } catch (error) {
-        console.error('❌ [CardTrader] Errore nel processamento inserzione:', error);
+        console.error('❌ [CardTrader] Error processing listing:', error);
     } finally {
-        // Rimuovi dall'elenco degli elementi in fase di processamento
+        // Remove from list of elements being processed
         cacheManager.removeFromProcessingElements(listingElement);
-        // Rimuovi l'attributo di processamento
+        // Remove processing attribute
         listingElement.removeAttribute('data-pokemon-linker-processing');
     }
 }
 
-// Funzione per cercare nel database (da implementare)
+// Function to search in database (to be implemented)
 async function searchCardInDatabase(titleInfo, originalTitle) {
-    // Implementazione della ricerca nel database
-    // Questa funzione dovrebbe essere implementata nel modulo DatabaseManager
-    console.log('🔍 [CardTrader] Ricerca nel database per:', titleInfo.pokemonName);
+    // Database search implementation
+    // This function should be implemented in the DatabaseManager module
+    console.log('🔍 [CardTrader] Database search for:', titleInfo.pokemonName);
     return [];
 }
 
-// Inizializzazione ultra-rapida per inserimento immediato
+// Ultra-fast initialization for immediate insertion
 initializeUltraFast();
 
-// Inizializzazione completa in background
+// Full initialization in background
 initializeExtension(); 

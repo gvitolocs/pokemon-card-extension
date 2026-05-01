@@ -1,11 +1,11 @@
-// Background script per l'estensione Pokemon Card Trader Linker
+// Background script for Pokemon Card Trader Linker
 let stats = {
     cardsProcessed: 0,
     linksGenerated: 0,
     lastUpdate: Date.now()
 };
 
-// Funzione per aggiornare l'icona dell'estensione
+// Update extension icon
 async function updateIcon(status) {
     try {
         let iconPath;
@@ -22,14 +22,14 @@ async function updateIcon(status) {
         }
         
         await chrome.action.setIcon({ path: iconPath });
-        console.log('✅ Icona aggiornata:', iconPath);
+        console.log('✅ Icon updated:', iconPath);
     } catch (error) {
-        console.log('⚠️ Impossibile aggiornare icona, usando icona di default');
-        // Non fare nulla, lascia l'icona di default
+        console.log('⚠️ Unable to update icon, keeping default icon');
+        // No-op: keep default icon
     }
 }
 
-// Funzione per aggiornare le statistiche
+// Update extension statistics
 async function updateStats(type, increment = 1) {
     if (type === 'cardsProcessed') {
         stats.cardsProcessed += increment;
@@ -38,20 +38,20 @@ async function updateStats(type, increment = 1) {
     }
     stats.lastUpdate = Date.now();
     
-    // Salva le statistiche in storage
+    // Save stats in storage
     try {
         await chrome.storage.local.set({ stats });
     } catch (error) {
-        console.log('⚠️ Errore nel salvataggio statistiche:', error);
+        console.log('⚠️ Error while saving stats:', error);
     }
 }
 
-// Gestione messaggi dal content script
+// Handle messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-    console.log('📨 [Background] Messaggio ricevuto:', request);
+    console.log('📨 [Background] Message received:', request);
     
     if (request.action === 'updateIcon') {
-        console.log('🎨 [Background] Aggiornamento icona a:', request.status);
+        console.log('🎨 [Background] Updating icon to:', request.status);
         updateIcon(request.status);
         sendResponse({ success: true });
     } else if (request.action === 'updateStats') {
@@ -60,20 +60,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'getStats') {
         sendResponse({ stats });
     } else if (request.action === 'toggleExtension') {
-        // Implementa la logica per attivare/disattivare l'estensione
+        // Implement extension enable/disable logic
         sendResponse({ success: true });
     }
-    return true; // Mantieni il canale aperto per risposte asincrone
+    return true; // Keep channel open for async responses
 });
 
-// Inizializzazione
+// Initialization
 chrome.runtime.onInstalled.addListener(() => {
-    console.log('🃏 Pokemon Card Trader Linker - Estensione installata');
+    console.log('🃏 Pokemon Card Trader Linker - Extension installed');
     updateIcon('default');
 });
 
-// Gestione errori di connessione
+// Startup hook
 chrome.runtime.onStartup.addListener(() => {
-    console.log('🃏 Pokemon Card Trader Linker - Estensione avviata');
+    console.log('🃏 Pokemon Card Trader Linker - Extension started');
     updateIcon('default');
 }); 

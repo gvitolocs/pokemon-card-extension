@@ -1,6 +1,6 @@
 /**
- * VINT.js - Gestione specifica per Vinted
- * Processore semplificato per pagine prodotto con singole carte
+ * VINT.js - Vinted-specific processor
+ * Simplified processor for single-card product pages.
  */
 
 class VintedProcessor {
@@ -10,21 +10,21 @@ class VintedProcessor {
     }
 
     /**
-     * Inizializza il processore Vinted
+     * Initialize Vinted processor
      */
     init() {
-        console.log('🟢 [VINT] Inizializzazione processore Vinted...');
+        console.log('🟢 [VINT] Initializing Vinted processor...');
         
         if (this.isProductPage()) {
-            console.log('✅ [VINT] Pagina prodotto rilevata, avvio processamento...');
+            console.log('✅ [VINT] Product page detected, starting processing...');
             this.processProductPage();
         } else {
-            console.log('ℹ️ [VINT] Pagina non prodotto, nessuna azione necessaria');
+            console.log('ℹ️ [VINT] Not a product page, no action required');
         }
     }
 
     /**
-     * Controlla se è una pagina prodotto Vinted
+     * Check whether this is a Vinted product page
      */
     isProductPage() {
         const isVinted = window.location.hostname.includes('vinted');
@@ -38,24 +38,24 @@ class VintedProcessor {
             pathname: window.location.pathname
         };
         
-        console.log('🔍 [VINT] Controllo pagina prodotto:', result);
+        console.log('🔍 [VINT] Product page check:', result);
         
         return isVinted && (hasItemPath || hasItemTitle);
     }
 
     /**
-     * Processa la pagina prodotto Vinted
+     * Process Vinted product page
      */
     processProductPage() {
         if (this.processedPages.has(window.location.href)) {
-            console.log('🚫 [VINT] Pagina prodotto già processata, saltando');
+            console.log('🚫 [VINT] Product page already processed, skipping');
             return;
         }
 
         try {
-            console.log('🔍 [VINT] Processando pagina prodotto Vinted...');
+            console.log('🔍 [VINT] Processing Vinted product page...');
             
-            // Cerca il titolo del prodotto
+            // Find product title
             const titleSelectors = [
                 'h1.web_ui__Text__title',
                 '[data-testid="item-title"]',
@@ -65,89 +65,89 @@ class VintedProcessor {
                 '.web_ui__Text__subtitle'
             ];
             
-            console.log(`🔍 [VINT] Cercando titolo con selettori:`, titleSelectors);
+            console.log(`🔍 [VINT] Looking for title with selectors:`, titleSelectors);
             
             let titleElement = null;
             for (const selector of titleSelectors) {
                 titleElement = document.querySelector(selector);
-                console.log(`🔍 [VINT] Prova selettore "${selector}":`, titleElement ? 'TROVATO' : 'NON TROVATO');
+                console.log(`🔍 [VINT] Trying selector "${selector}":`, titleElement ? 'FOUND' : 'NOT FOUND');
                 if (titleElement) {
-                    console.log(`✅ [VINT] Titolo trovato con selettore: ${selector}`);
-                    console.log(`🔍 [VINT] Contenuto titolo: "${titleElement.textContent.trim()}"`);
+                    console.log(`✅ [VINT] Title found with selector: ${selector}`);
+                    console.log(`🔍 [VINT] Title content: "${titleElement.textContent.trim()}"`);
                     break;
                 }
             }
             
             if (!titleElement) {
-                console.log('⚠️ [VINT] Titolo prodotto non trovato');
+                console.log('⚠️ [VINT] Product title not found');
                 return;
             }
             
             const title = titleElement.textContent.trim();
             if (!title) {
-                console.log('⚠️ [VINT] Titolo prodotto vuoto');
+                console.log('⚠️ [VINT] Product title is empty');
                 return;
             }
             
-            console.log(`🔍 [VINT] Titolo prodotto: "${title}"`);
+            console.log(`🔍 [VINT] Product title: "${title}"`);
             
-            // Estrai informazioni dal titolo
+            // Extract title information
             const titleInfo = this.extractTitleInfo(title);
             
-            // Crea sempre un pulsante grigio di fallback (anche se non è un Pokemon)
-            console.log('🔍 [VINT] Creando pulsante grigio di fallback...');
+            // Always create a gray fallback button (even for non-Pokemon titles)
+            console.log('🔍 [VINT] Creating gray fallback button...');
             this.createFallbackButton(titleElement);
             
-            // Se non è un Pokemon, non fare la ricerca nel database
+            // If not a Pokemon card, skip database lookup
             if (!titleInfo.pokemonName) {
-                console.log('🚫 [VINT] Nessun Pokemon trovato nel titolo, pulsante rimane grigio');
+                console.log('🚫 [VINT] No Pokemon found in title, button stays gray');
                 return;
             }
             
-            // Cerca nel database
+            // Search in the database
             this.searchCardInDatabase(titleInfo, title).then(results => {
-                console.log(`🔍 [VINT] Risultati ricevuti dal database:`, results);
+                console.log(`🔍 [VINT] Results received from database:`, results);
                 if (results && results.length > 0) {
-                    console.log(`✅ [VINT] Aggiornando pulsante con ${results.length} risultati`);
+                    console.log(`✅ [VINT] Updating button with ${results.length} results`);
                     this.updateButtonWithResults(results);
                 } else {
-                    console.log('⚠️ [VINT] Nessun risultato trovato nel database, pulsante rimane grigio');
+                    console.log('⚠️ [VINT] No database result found, button stays gray');
                 }
             }).catch(error => {
-                console.error('❌ [VINT] Errore nella ricerca database:', error);
+                console.error('❌ [VINT] Database lookup error:', error);
             });
             
-            // Marca pagina come processata
+            // Mark page as processed
             this.processedPages.add(window.location.href);
             
         } catch (error) {
-            console.error('❌ [VINT] Errore nel processamento pagina prodotto:', error);
+            console.error('❌ [VINT] Error while processing product page:', error);
         }
     }
 
     /**
-     * Crea un pulsante grigio di fallback
+     * Create gray fallback button
      */
     createFallbackButton(titleElement) {
-        console.log(`🔍 [VINT] Creando pulsante grigio fisso in alto a destra`);
+        console.log(`🔍 [VINT] Creating fixed gray button at top-right`);
         
-        // Usa sempre il metodo con posizione fissa in alto a destra
+        // Always use fixed-position top-right method
         this.createFixedPositionButton();
     }
 
 
 
     /**
-     * Crea un pulsante fisso in alto a destra
+     * Create fixed top-right button
      */
     createFixedPositionButton() {
-        console.log('🔄 [VINT] Creazione pulsante fisso in alto a destra...');
+        console.log('🔄 [VINT] Creating fixed top-right button...');
         
-        // Crea un pulsante grigio con posizione fissa
+        // Create gray fixed-position button
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.setAttribute('data-pokemon-linker-fallback', 'true');
-        button.innerHTML = 'CardTrader (Caricamento...)';
+        button.innerHTML = 'CardTrader (Loading...)';
         button.style.cssText = `
             position: fixed;
             top: 100px;
@@ -168,7 +168,7 @@ class VintedProcessor {
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         `;
         
-        // Effetti hover (grigio)
+        // Hover effects (gray)
         button.addEventListener('mouseenter', () => {
             button.style.background = '#5a6268';
             button.style.transform = 'scale(1.05)';
@@ -181,23 +181,23 @@ class VintedProcessor {
             button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
         });
         
-        // Inserisci nel body
+        // Insert into body
         document.body.appendChild(button);
-        console.log(`✅ [VINT] Aggiunto pulsante fisso in alto a destra`);
+        console.log(`✅ [VINT] Added fixed top-right button`);
         this.currentButton = button;
     }
 
     /**
-     * Metodo alternativo per inserire il pulsante se il metodo principale fallisce
+     * Alternate insertion method if primary method fails
      */
     createAlternativeButton(titleElement) {
-        console.log('🔄 [VINT] Creazione pulsante alternativo...');
+        console.log('🔄 [VINT] Creating alternate button...');
         
-        // Crea un pulsante grigio
+        // Create gray button
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.setAttribute('data-pokemon-linker-fallback', 'true');
-        button.innerHTML = 'CardTrader (Caricamento...)';
+        button.innerHTML = 'CardTrader (Loading...)';
         button.style.cssText = `
             margin: 16px 0;
             padding: 12px 24px;
@@ -214,7 +214,7 @@ class VintedProcessor {
             font-family: Arial, sans-serif;
         `;
         
-        // Effetti hover (grigio)
+        // Hover effects (gray)
         button.addEventListener('mouseenter', () => {
             button.style.background = '#5a6268';
             button.style.transform = 'scale(1.05)';
@@ -227,13 +227,13 @@ class VintedProcessor {
             button.style.boxShadow = 'none';
         });
         
-        // Inserisci dopo il titolo
+        // Insert after title
         if (titleElement.parentNode) {
             titleElement.parentNode.insertBefore(button, titleElement.nextSibling);
-            console.log(`✅ [VINT] Aggiunto pulsante alternativo`);
+            console.log(`✅ [VINT] Added alternate button`);
             this.currentButton = button;
         } else {
-            console.log('⚠️ [VINT] Impossibile inserire pulsante alternativo');
+            console.log('⚠️ [VINT] Unable to insert alternate button');
         }
     }
 
@@ -242,57 +242,57 @@ class VintedProcessor {
 
 
     /**
-     * Avvia un observer per monitorare se il pulsante viene rimosso dal DOM
+     * Start observer to monitor button removal from DOM
      */
     startButtonObserver(button, titleElement) {
-        console.log('🔍 [VINT] Avvio observer per monitorare pulsante...');
+        console.log('🔍 [VINT] Starting observer to monitor button...');
         
-        // Controlla periodicamente se il pulsante è ancora nel DOM
+        // Periodically check if button is still in DOM
         const checkInterval = setInterval(() => {
             if (!document.contains(button)) {
-                console.log('⚠️ [VINT] Pulsante rimosso dal DOM, tentativo re-inserimento...');
+                console.log('⚠️ [VINT] Button removed from DOM, trying reinsertion...');
                 clearInterval(checkInterval);
                 
-                // Aspetta un po' e poi riprova a inserire il pulsante
+                // Wait briefly, then attempt reinsertion
                 setTimeout(() => {
                     if (!document.querySelector('[data-pokemon-linker-button]')) {
-                        console.log('🔄 [VINT] Re-inserimento pulsante grigio...');
+                        console.log('🔄 [VINT] Reinserting gray button...');
                         this.createFallbackButton(titleElement);
                     }
                 }, 500);
             }
         }, 200);
         
-        // Ferma l'observer dopo 30 secondi per evitare loop infiniti
+        // Stop observer after 30 seconds to avoid infinite loops
         setTimeout(() => {
             clearInterval(checkInterval);
-            console.log('⏹️ [VINT] Observer fermato dopo 30 secondi');
+            console.log('⏹️ [VINT] Observer stopped after 30 seconds');
         }, 30000);
     }
 
     /**
-     * Aggiorna il pulsante con i risultati del database
+     * Update button using database results
      */
     updateButtonWithResults(results) {
         if (!this.currentButton) {
-            console.log('⚠️ [VINT] Nessun pulsante da aggiornare');
+            console.log('⚠️ [VINT] No button to update');
             return;
         }
         
-        console.log(`🔍 [VINT] Aggiornando pulsante con ${results.length} risultati`);
-        console.log(`🔍 [VINT] Primo risultato:`, results[0]);
+        console.log(`🔍 [VINT] Updating button with ${results.length} results`);
+        console.log(`🔍 [VINT] First result:`, results[0]);
         
         const bestResult = results[0];
         
-        // Verifica che il pulsante sia ancora nel DOM
+        // Ensure button is still in DOM
         if (!document.contains(this.currentButton)) {
-            console.log('⚠️ [VINT] Pulsante non più presente nel DOM');
+            console.log('⚠️ [VINT] Button is no longer in DOM');
             return;
         }
         
-        // Aggiorna il pulsante
+        // Update button
         if (this.currentButton.tagName === 'A') {
-            // Se è un link (pulsante sostituito), aggiorna il contenuto
+            // If this is a link element (replacement case), update content
             this.currentButton.innerHTML = `
                 <span class="web_ui__Button__content">
                     <span class="web_ui__Button__label">CardTrader</span>
@@ -301,19 +301,19 @@ class VintedProcessor {
             this.currentButton.style.background = '#28a745';
             this.currentButton.style.color = 'white';
         } else {
-            // Se è un button normale
+            // If this is a normal button
             this.currentButton.innerHTML = 'CardTrader';
             this.currentButton.style.background = '#28a745';
         }
         
         this.currentButton.removeAttribute('data-pokemon-linker-fallback');
         
-        // Rimuovi tutti gli event listener precedenti clonando il pulsante
+        // Remove previous listeners by cloning the button
         const newButton = this.currentButton.cloneNode(true);
         this.currentButton.parentNode.replaceChild(newButton, this.currentButton);
         this.currentButton = newButton;
         
-        // Aggiungi click handler
+        // Add click handler
         this.currentButton.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -321,7 +321,7 @@ class VintedProcessor {
             window.open(cardTraderUrl, '_blank');
         });
         
-        // Effetti hover (verde)
+        // Hover effects (green)
         this.currentButton.addEventListener('mouseenter', () => {
             this.currentButton.style.background = '#218838';
             this.currentButton.style.transform = 'scale(1.05)';
@@ -334,17 +334,17 @@ class VintedProcessor {
             this.currentButton.style.boxShadow = 'none';
         });
         
-        console.log(`✅ [VINT] Pulsante aggiornato con successo per: ${bestResult.name_en || bestResult.pokemon_name}`);
+        console.log(`✅ [VINT] Button updated successfully for: ${bestResult.name_en || bestResult.pokemon_name}`);
     }
 
     /**
-     * Crea il pulsante CardTrader per la pagina prodotto (metodo legacy)
+     * Create CardTrader button for product page (legacy method)
      */
     createProductButton(titleElement, results) {
-        console.log(`🔍 [VINT] Iniziando creazione pulsante con ${results.length} risultati`);
-        console.log(`🔍 [VINT] Primo risultato:`, results[0]);
+        console.log(`🔍 [VINT] Starting button creation with ${results.length} results`);
+        console.log(`🔍 [VINT] First result:`, results[0]);
         
-        // Crea un singolo pulsante CardTrader
+        // Create single CardTrader button
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.innerHTML = 'CardTrader';
@@ -364,7 +364,7 @@ class VintedProcessor {
             font-family: Arial, sans-serif;
         `;
         
-        // Aggiungi click handler con il miglior risultato
+        // Add click handler with top-ranked result
         const bestResult = results[0];
         button.addEventListener('click', (e) => {
             e.preventDefault();
@@ -373,7 +373,7 @@ class VintedProcessor {
             window.open(cardTraderUrl, '_blank');
         });
         
-        // Effetti hover
+        // Hover effects
         button.addEventListener('mouseenter', () => {
             button.style.background = '#218838';
             button.style.transform = 'scale(1.05)';
@@ -386,63 +386,63 @@ class VintedProcessor {
             button.style.boxShadow = 'none';
         });
         
-        // Inserisci dopo il titolo
-        console.log(`🔍 [VINT] Tentativo inserimento pulsante dopo:`, titleElement);
+        // Insert after title
+        console.log(`🔍 [VINT] Attempting button insertion after:`, titleElement);
         console.log(`🔍 [VINT] Parent node:`, titleElement.parentNode);
         
         if (titleElement.parentNode) {
             titleElement.parentNode.insertBefore(button, titleElement.nextSibling);
-            console.log(`✅ [VINT] Aggiunto pulsante CardTrader alla pagina prodotto per: ${bestResult.name_en || bestResult.pokemon_name}`);
-            console.log(`✅ [VINT] Pulsante inserito con successo nel DOM`);
+            console.log(`✅ [VINT] Added CardTrader button on product page for: ${bestResult.name_en || bestResult.pokemon_name}`);
+            console.log(`✅ [VINT] Button inserted successfully in DOM`);
         } else {
-            console.log('⚠️ [VINT] Impossibile inserire pulsante CardTrader: parentNode non trovato');
+            console.log('⚠️ [VINT] Unable to insert CardTrader button: parentNode not found');
         }
     }
 
     /**
-     * Estrae informazioni dal titolo (delega a content.js)
+     * Extract title info (delegates to `content.js`)
      */
     extractTitleInfo(title) {
-        // Delega alla funzione globale se disponibile
+        // Delegate to global function when available
         if (typeof window.extractTitleInfo === 'function') {
-            console.log(`🔍 [VINT] Usando extractTitleInfo globale per: "${title}"`);
+            console.log(`🔍 [VINT] Using global extractTitleInfo for: "${title}"`);
             return window.extractTitleInfo(title);
         }
-        console.log(`⚠️ [VINT] extractTitleInfo globale non disponibile, restituendo null`);
+        console.log(`⚠️ [VINT] Global extractTitleInfo unavailable, returning null`);
         return { pokemonName: null };
     }
 
     /**
-     * Cerca nel database (delega a content.js)
+     * Search database (delegates to `content.js`)
      */
     async searchCardInDatabase(titleInfo, title) {
-        // Delega alla funzione globale se disponibile
+        // Delegate to global function when available
         if (typeof window.searchCardInDatabase === 'function') {
-            console.log(`🔍 [VINT] Usando searchCardInDatabase globale per: "${title}"`);
-            console.log(`🔍 [VINT] Parametri inviati:`, { titleInfo, title });
+            console.log(`🔍 [VINT] Using global searchCardInDatabase for: "${title}"`);
+            console.log(`🔍 [VINT] Sent parameters:`, { titleInfo, title });
             
             try {
                 const results = await window.searchCardInDatabase(titleInfo, title);
-                console.log(`🔍 [VINT] Risultati ricevuti dalla funzione globale:`, results);
-                console.log(`🔍 [VINT] Tipo di risultati:`, typeof results);
-                console.log(`🔍 [VINT] Lunghezza risultati:`, results ? results.length : 'null/undefined');
+                console.log(`🔍 [VINT] Results received from global function:`, results);
+                console.log(`🔍 [VINT] Result type:`, typeof results);
+                console.log(`🔍 [VINT] Result length:`, results ? results.length : 'null/undefined');
                 return results;
             } catch (error) {
-                console.error(`❌ [VINT] Errore nella chiamata searchCardInDatabase globale:`, error);
+                console.error(`❌ [VINT] Error in global searchCardInDatabase call:`, error);
                 return [];
             }
         }
-        console.log(`⚠️ [VINT] searchCardInDatabase globale non disponibile, restituendo array vuoto`);
+        console.log(`⚠️ [VINT] Global searchCardInDatabase unavailable, returning empty array`);
         return [];
     }
 
     /**
-     * Genera link CardTrader
+     * Generate CardTrader link
      */
     generateCardTraderLink(blueprintId) {
         return `https://www.cardtrader.com/cards/${blueprintId}`;
     }
 }
 
-// Esporta per uso globale
+// Export for global usage
 window.VintedProcessor = VintedProcessor; 

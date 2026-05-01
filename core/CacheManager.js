@@ -1,30 +1,30 @@
 /**
- * CacheManager.js - Gestione cache e stati dell'estensione
- * Gestisce cache per risultati, elementi processati e stati
+ * CacheManager.js - Extension cache/state manager
+ * Handles lookup cache, processed elements, and runtime state.
  */
 
 class CacheManager {
     constructor() {
-        // Cache per i risultati delle ricerche
+        // Cache for search results
         this.cardCache = new Map();
         
-        // Cache per elementi già processati
+        // Cache for already-processed elements
         this.observerCache = new WeakSet();
         
-        // Traccia match riusciti per evitare riprocessamento
+        // Track successful matches to avoid reprocessing
         this.successfulMatches = new Set();
         
         // Debounce timer
         this.debounceTimer = null;
         
-        // Elementi in fase di processamento
+        // Elements currently being processed
         this.processingElements = new WeakSet();
         
-        console.log('📦 CacheManager inizializzato');
+        console.log('📦 CacheManager initialized');
     }
     
     /**
-     * Pulisce tutte le cache
+     * Clear all caches
      */
     clearAllCaches() {
         this.cardCache.clear();
@@ -37,89 +37,89 @@ class CacheManager {
             this.debounceTimer = null;
         }
         
-        console.log('🧹 [CardTrader] Tutte le cache pulite');
+        console.log('🧹 [CardTrader] All caches cleared');
     }
     
     /**
-     * Pulisce solo la cache dei risultati
+     * Clear only result cache
      */
     clearCardCache() {
         this.cardCache.clear();
-        console.log('🧹 [CardTrader] Cache risultati pulita');
+        console.log('🧹 [CardTrader] Result cache cleared');
     }
     
     /**
-     * Pulisce solo i match riusciti
+     * Clear only successful matches
      */
     clearSuccessfulMatches() {
         this.successfulMatches.clear();
-        console.log('🧹 [CardTrader] Match riusciti puliti');
+        console.log('🧹 [CardTrader] Successful matches cleared');
     }
     
     /**
-     * Pulisce gli elementi in processamento
+     * Clear processing elements
      */
     clearProcessingElements() {
         this.processingElements = new WeakSet();
-        console.log('🧹 [CardTrader] Elementi in processamento puliti');
+        console.log('🧹 [CardTrader] Processing elements cleared');
     }
     
     /**
-     * Aggiunge un elemento alla cache degli elementi processati
+     * Add element to processed cache
      */
     addToObserverCache(element) {
         this.observerCache.add(element);
     }
     
     /**
-     * Verifica se un elemento è nella cache degli observer
+     * Check if element is in observer cache
      */
     isInObserverCache(element) {
         return this.observerCache.has(element);
     }
     
     /**
-     * Aggiunge un elemento agli elementi in processamento
+     * Add element to processing set
      */
     addToProcessingElements(element) {
         this.processingElements.add(element);
     }
     
     /**
-     * Rimuove un elemento dagli elementi in processamento
+     * Remove element from processing set
      */
     removeFromProcessingElements(element) {
         this.processingElements.delete(element);
     }
     
     /**
-     * Verifica se un elemento è in fase di processamento
+     * Check if element is being processed
      */
     isInProcessingElements(element) {
         return this.processingElements.has(element);
     }
     
     /**
-     * Aggiunge un match riuscito
+     * Add successful match key
      */
     addSuccessfulMatch(cacheKey) {
         this.successfulMatches.add(cacheKey);
     }
     
     /**
-     * Verifica se un match è già riuscito
+     * Check if match already succeeded
      */
     hasSuccessfulMatch(cacheKey) {
         return this.successfulMatches.has(cacheKey);
     }
     
     /**
-     * Salva un risultato nella cache
+     * Save a result in cache
      */
     saveToCardCache(cacheKey, data) {
         this.cardCache.set(cacheKey, data);
         
-        // Limita la dimensione della cache (max 100 elementi)
+        // Limit cache size (max 100 entries)
         if (this.cardCache.size > 100) {
             const firstKey = this.cardCache.keys().next().value;
             this.cardCache.delete(firstKey);
@@ -127,21 +127,21 @@ class CacheManager {
     }
     
     /**
-     * Recupera un risultato dalla cache
+     * Get cached result
      */
     getFromCardCache(cacheKey) {
         return this.cardCache.get(cacheKey);
     }
     
     /**
-     * Verifica se un risultato è in cache
+     * Check if result exists in cache
      */
     hasInCardCache(cacheKey) {
         return this.cardCache.has(cacheKey);
     }
     
     /**
-     * Imposta il debounce timer
+     * Set debounce timer
      */
     setDebounceTimer(callback, delay) {
         if (this.debounceTimer) {
@@ -152,7 +152,7 @@ class CacheManager {
     }
     
     /**
-     * Cancella il debounce timer
+     * Clear debounce timer
      */
     clearDebounceTimer() {
         if (this.debounceTimer) {
@@ -162,7 +162,7 @@ class CacheManager {
     }
     
     /**
-     * Ottiene statistiche della cache
+     * Get cache statistics
      */
     getCacheStats() {
         return {
@@ -174,7 +174,7 @@ class CacheManager {
     }
     
     /**
-     * Pulisce attributi di processamento dal DOM
+     * Clear processing attributes from DOM
      */
     clearProcessingAttributes() {
         const processedElements = document.querySelectorAll('[data-pokemon-linker-processed]');
@@ -182,14 +182,14 @@ class CacheManager {
             element.removeAttribute('data-pokemon-linker-processed');
         });
         
-        console.log(`🧹 [CardTrader] Rimossi attributi di processamento da ${processedElements.length} elementi`);
+        console.log(`🧹 [CardTrader] Removed processing attributes from ${processedElements.length} elements`);
     }
 }
 
-// Esporta la classe per l'uso in altri moduli
+// Export class for other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = CacheManager;
 } else {
-    // Per uso in browser
+    // Browser global fallback
     window.CacheManager = CacheManager;
 } 
