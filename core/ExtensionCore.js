@@ -1,123 +1,129 @@
 /**
- * ExtensionCore.js - Core principale dell'estensione Pokemon Card Trader Linker
- * Gestisce l'inizializzazione e lo stato globale dell'estensione
+ * ExtensionCore.js - Core runtime for Pokemon Card Trader Linker
+ * Handles startup lifecycle and global extension state.
  */
 
 class ExtensionCore {
     constructor() {
-        // Stato dell'estensione
+        // Extension state
         this.isEnabled = true;
         this.isProcessing = false;
         this.currentUrl = window.location.href;
         
-        // Inizializza le variabili globali se non esistono
+        // Initialize global variables if needed
         if (typeof window.supabaseClient === 'undefined') {
             window.supabaseClient = null;
         }
         
-        console.log('🃏 Pokemon Card Trader Linker - Core inizializzato');
+        console.log('🃏 Pokemon Card Trader Linker - Core initialized');
     }
     
     /**
-     * Inizializza l'estensione
+     * Initialize extension runtime
      */
     async initialize() {
         try {
-            console.log('🃏 Pokemon Card Trader Linker - Inizializzazione rapida...');
+            console.log('🃏 Pokemon Card Trader Linker - Fast initialization...');
             
-            // Carica la configurazione in background
+            // Load configuration in background
             if (typeof loadConfig === 'function') {
                 loadConfig().then(() => {
-                    console.log('✅ Configurazione caricata');
+                    console.log('✅ Configuration loaded');
                 }).catch(error => {
-                    console.warn('⚠️ Errore nel caricamento configurazione:', error);
+                    console.warn('⚠️ Error loading configuration:', error);
                 });
             } else {
-                console.warn('⚠️ Funzione loadConfig non disponibile');
+                console.warn('⚠️ loadConfig function not available');
             }
             
-            // Inizializza Supabase in background
+            // Initialize Supabase in background
             if (typeof initializeSupabase === 'function') {
                 initializeSupabase().then(supabaseReady => {
                     if (supabaseReady) {
-                        console.log('✅ Supabase connesso - Cambiando icona a verde');
+                        console.log('✅ Supabase connected - switching icon to green');
                         chrome.runtime.sendMessage({ 
                             action: 'updateIcon', 
                             status: 'connected' 
                         });
                     } else {
-                        console.warn('⚠️ Supabase non configurato, l\'estensione funzionerà in modalità limitata');
+                        console.warn('⚠️ Supabase not configured, extension will run in limited mode');
                         chrome.runtime.sendMessage({ 
                             action: 'updateIcon', 
                             status: 'error' 
                         });
                     }
                 }).catch(error => {
-                    console.warn('⚠️ Errore nell\'inizializzazione Supabase:', error);
+                    console.warn('⚠️ Error during Supabase initialization:', error);
                 });
             } else {
-                console.warn('⚠️ Funzione initializeSupabase non disponibile');
+                console.warn('⚠️ initializeSupabase function not available');
             }
             
-            console.log('✅ Estensione inizializzata rapidamente');
+            console.log('✅ Extension initialized');
             
         } catch (error) {
-            console.error('❌ Errore nell\'inizializzazione:', error);
+            console.error('❌ Initialization error:', error);
         }
     }
     
     /**
-     * Inizializzazione ultra-rapida
+     * Ultra-fast initialization hooks
      */
     initializeUltraFast() {
-        console.log('⚡ [CardTrader] Inizializzazione ultra-rapida...');
+        console.log('⚡ [CardTrader] Ultra-fast initialization...');
         
-        // Se il DOM è ancora in caricamento, riavvia quando è pronto
+        // If DOM is still loading, restart when ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
-                console.log('⚡ [CardTrader] DOM caricato, riavvio osservatore...');
-                // Trigger event per riavviare l'observer
+                console.log('⚡ [CardTrader] DOM loaded, restarting observer...');
+                // Trigger event to restart observer
                 document.dispatchEvent(new CustomEvent('cardtrader-dom-ready'));
             });
         }
         
-        // Backup: controlla ogni 50ms se ci sono nuovi elementi
+        // Backup: check every 50ms for new elements
         const checkInterval = setInterval(() => {
             if (document.body) {
-                console.log('⚡ [CardTrader] Controllo periodico - avvio osservatore...');
+                console.log('⚡ [CardTrader] Periodic check - starting observer...');
                 document.dispatchEvent(new CustomEvent('cardtrader-check-periodic'));
             }
-            
-            // Ferma il controllo dopo 5 secondi
-            setTimeout(() => {
-                clearInterval(checkInterval);
-            }, 5000);
         }, 50);
         
-        // Backup finale: se dopo 200ms non è ancora partito, forza l'avvio
+        // Stop periodic checks after 5 seconds
         setTimeout(() => {
-            console.log('⚡ [CardTrader] Forzatura finale avvio osservatore...');
+            clearInterval(checkInterval);
+        }, 5000);
+        
+        // Final backup: force start after 200ms
+        setTimeout(() => {
+            console.log('⚡ [CardTrader] Final forced observer start...');
             document.dispatchEvent(new CustomEvent('cardtrader-force-start'));
         }, 200);
     }
     
     /**
-     * Gestisce i cambi di URL (SPA navigation)
+     * Handle URL changes (SPA navigation)
      */
     setupUrlChangeHandler() {
+        if (this.urlObserver) {
+            this.urlObserver.disconnect();
+        }
+
         const urlObserver = new MutationObserver(() => {
             if (window.location.href !== this.currentUrl) {
-                console.log('🔄 [CardTrader] URL cambiato, pulendo stati...');
+                console.log('🔄 [CardTrader] URL changed, clearing state...');
+                const oldUrl = this.currentUrl;
                 this.currentUrl = window.location.href;
                 
-                // Trigger event per pulire gli stati
+                // Trigger event so other modules can reset state
                 document.dispatchEvent(new CustomEvent('cardtrader-url-changed', {
-                    detail: { oldUrl: this.currentUrl, newUrl: window.location.href }
+                    detail: { oldUrl, newUrl: this.currentUrl }
                 }));
             }
         });
+        this.urlObserver = urlObserver;
         
-        // Osserva cambiamenti nel DOM che potrebbero indicare navigazione SPA
+        // Observe DOM mutations that can indicate SPA navigation
         if (document.body) {
             urlObserver.observe(document.body, {
                 childList: true,
@@ -127,39 +133,39 @@ class ExtensionCore {
     }
     
     /**
-     * Abilita/disabilita l'estensione
+     * Enable/disable extension
      */
     setEnabled(enabled) {
         this.isEnabled = enabled;
-        console.log(`🔄 [CardTrader] Estensione ${enabled ? 'abilitata' : 'disabilitata'}`);
+        console.log(`🔄 [CardTrader] Extension ${enabled ? 'enabled' : 'disabled'}`);
     }
     
     /**
-     * Imposta lo stato di processamento
+     * Set processing state
      */
     setProcessing(processing) {
         this.isProcessing = processing;
     }
     
     /**
-     * Verifica se l'estensione è abilitata
+     * Check whether extension is enabled
      */
     isExtensionEnabled() {
         return this.isEnabled;
     }
     
     /**
-     * Verifica se è in fase di processamento
+     * Check whether extension is processing
      */
     isExtensionProcessing() {
         return this.isProcessing;
     }
 }
 
-// Esporta la classe per l'uso in altri moduli
+// Export class for other modules
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = ExtensionCore;
 } else {
-    // Per uso in browser
+    // Browser global fallback
     window.ExtensionCore = ExtensionCore;
 } 

@@ -2,11 +2,19 @@
 let currentPageData = null;
 let currentFilter = 'all';
 let currentSearch = '';
+const SUPPORTED_SITES = [
+    'ebay.com', 'ebay.it', 'ebay.co.uk', 'ebay.de', 'ebay.fr', 'ebay.es',
+    'vinted.com', 'vinted.it', 'vinted.fr', 'vinted.de', 'vinted.es',
+    'vinted.pl', 'vinted.nl', 'vinted.be', 'vinted.at', 'vinted.lu',
+    'cardmarket.com'
+];
+const pokemonSpriteCache = new Map();
+let pokemonListPromise = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 [Popup] Initializing Pokemon notes...');
     
-    // Elementi DOM
+    // DOM elements
     const tabs = document.querySelectorAll('.tab');
     const tabContents = document.querySelectorAll('.tab-content');
     
@@ -32,12 +40,12 @@ document.addEventListener('DOMContentLoaded', function() {
     const exportBtn = document.getElementById('exportBtn');
     const clearBtn = document.getElementById('clearBtn');
     
-    // Inizializza
+    // Initialize
     initializeTabs();
     initializeCollection();
     loadCurrentPage();
     
-    // Carica sempre le carte salvate all'avvio
+    // Always load saved cards on startup
     loadCards();
     
     // Event listeners
@@ -56,13 +64,13 @@ document.addEventListener('DOMContentLoaded', function() {
         if (e.key === 'Enter') addManualCard(manualCardInput2, manualCategorySelect2);
     });
     
-    // Inizializza i tab
+    // Initialize tabs
     function initializeTabs() {
         tabs.forEach(tab => {
             tab.addEventListener('click', () => {
                 const targetTab = tab.getAttribute('data-tab');
                 
-                // Rimuovi classe active da tutti i tab
+                // Remove active class from all tabs
                 tabs.forEach(t => t.classList.remove('active'));
                 tabContents.forEach(tc => tc.classList.remove('active'));
                 
@@ -70,7 +78,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tab.classList.add('active');
                 document.getElementById(`${targetTab}-tab`).classList.add('active');
                 
-                // Se vai alla collezione, aggiorna la lista
+                // Refresh list when entering collection tab
                 if (targetTab === 'collection') {
                     loadCards();
                 }
@@ -78,9 +86,9 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    // Inizializza la collezione
+    // Initialize collection
     function initializeCollection() {
-        // Event listeners per i filtri categoria
+        // Event listeners for category filters
         categoryButtons.forEach(btn => {
             btn.addEventListener('click', () => {
                 categoryButtons.forEach(b => b.classList.remove('active'));
@@ -90,11 +98,11 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         });
         
-        // Carica le carte
+        // Load cards
         loadCards();
     }
     
-    // Carica informazioni della pagina corrente
+    // Load current page information
     async function loadCurrentPage() {
         try {
             console.log('🔍 [Popup] Loading current page information...');
@@ -107,8 +115,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             
             const hostname = new URL(tab.url).hostname;
-            const supportedSites = ['ebay.com', 'ebay.it', 'ebay.co.uk', 'ebay.de', 'ebay.fr', 'ebay.es', 'vinted.com', 'vinted.it', 'vinted.fr', 'vinted.de', 'vinted.es', 'vinted.pl', 'vinted.nl', 'vinted.be', 'vinted.at', 'vinted.lu', 'cardmarket.com'];
-            const isSupported = supportedSites.some(site => hostname.includes(site));
+            const isSupported = SUPPORTED_SITES.some(site => hostname.includes(site));
             
             console.log(`🔍 [Popup] Hostname: ${hostname}, Supported: ${isSupported}`);
             
@@ -121,7 +128,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
             
-            // Chiedi al content script di estrarre le informazioni
+            // Ask content script for extracted page information
             const response = await new Promise((resolve, reject) => {
                 chrome.tabs.sendMessage(tab.id, { 
                     action: 'autoSearchCurrentPage'
@@ -145,11 +152,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     cardmarketUrl: `https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=${encodeURIComponent(pageInfo.pageTitle || pageInfo.title)}`
                 };
                 
-                // Popola i campi
+                // Populate UI fields
                 pageTitle.textContent = currentPageData.name;
                 pageUrl.textContent = pageInfo.url;
                 
-                // Mostra l'icona del sito
+                // Show site icon
                 let siteName, siteIcon;
                 if (hostname.includes('ebay')) {
                     siteName = 'eBay';
@@ -166,7 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 pageSite.innerHTML = `<i class="${siteIcon}"></i> ${siteName}`;
                 
-                // Controlla se la pagina è già stata salvata
+                // Check if current page is already saved
                 const existingCard = checkIfPageExists(pageInfo.url);
                 if (existingCard) {
                     showMessage(`Page already present in ${getCategoryName(existingCard.category)}`, 'info');
@@ -181,7 +188,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 
             } else {
                 console.log('⚠️ [Popup] Content script did not respond, using fallback');
-                // Fallback: usa le informazioni del tab
+                // Fallback: use tab information directly
                 currentPageData = {
                     name: tab.title || 'eBay page',
                     info: `Page ${hostname}`,
@@ -192,7 +199,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 pageTitle.textContent = currentPageData.name;
                 pageUrl.textContent = tab.url;
                 
-                // Mostra l'icona del sito
+                // Show site icon
                 let siteName, siteIcon;
                 if (hostname.includes('ebay')) {
                     siteName = 'eBay';
@@ -209,7 +216,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 pageSite.innerHTML = `<i class="${siteIcon}"></i> ${siteName}`;
                 
-                // Controlla se la pagina è già stata salvata
+                // Check if current page is already saved
                 const existingCard = checkIfPageExists(tab.url);
                 if (existingCard) {
                     showMessage(`Page already present in ${getCategoryName(existingCard.category)}`, 'info');
@@ -253,13 +260,13 @@ document.addEventListener('DOMContentLoaded', function() {
         showSaveConfirmation();
         showMessage(`Page saved in ${getCategoryName(card.category)}`, 'success');
         
-        // Aggiorna il bottone
+        // Update save button state
         saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Already Saved';
         saveUrlBtn.classList.add('disabled');
         saveUrlBtn.disabled = true;
     }
     
-    // Aggiunge una carta manualmente
+    // Add card manually
     async function addManualCard(inputElement, categoryElement) {
         const cardName = inputElement.value.trim();
         const category = categoryElement.value;
@@ -289,7 +296,7 @@ document.addEventListener('DOMContentLoaded', function() {
         loadCards();
     }
     
-    // Gestisce la ricerca
+    // Handle search
     function handleSearch() {
         currentSearch = searchInput.value.toLowerCase();
         loadCards();
@@ -302,24 +309,24 @@ document.addEventListener('DOMContentLoaded', function() {
         localStorage.setItem('pokemonCardNotes', JSON.stringify(cards));
     }
     
-    // Ottiene tutte le carte
+    // Get all cards
     function getCards() {
         const cards = localStorage.getItem('pokemonCardNotes');
         return cards ? JSON.parse(cards) : [];
     }
     
-    // Carica e mostra le carte
+    // Load and render cards
     async function loadCards() {
         console.log('📚 [Popup] Loading cards...');
         
         let cards = getCards();
         
-        // Filtra per categoria
+        // Filter by category
         if (currentFilter !== 'all') {
             cards = cards.filter(card => card.category === currentFilter);
         }
         
-        // Filtra per ricerca
+        // Filter by search term
         if (currentSearch) {
             cards = cards.filter(card => 
                 card.name.toLowerCase().includes(currentSearch) ||
@@ -329,7 +336,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         console.log(`📚 [Popup] Found ${cards.length} cards after filters`);
         
-        // Mostra le carte
+        // Render cards
         if (cards.length === 0) {
             cardsList.innerHTML = `
                 <div class="empty-state">
@@ -365,7 +372,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // Add event listeners to open URLs
             document.querySelectorAll('.card-item').forEach((item, index) => {
                 item.addEventListener('click', (e) => {
-                    // Non aprire l'URL se si clicca sul nome (che ha già il suo handler)
+                    // Skip because card name already has its own click handler
                     if (e.target.classList.contains('card-name')) return;
                     
                     const card = cards[index];
@@ -378,16 +385,16 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Funzione globale per aprire URL delle carte
+    // Global helper to open card URLs
     window.openCardUrl = function(url) {
         if (url) {
             chrome.tabs.create({ url: url });
         }
     };
     
-    // Estrae il nome del Pokemon dal titolo
+    // Extract Pokemon name from title
     function extractPokemonName(title) {
-        // Lista estesa dei Pokemon più comuni, inclusi Raikou e varianti di nomi
+        // Extended list of common Pokemon names (with known variants)
         const pokemonNames = [
             'pikachu', 'charizard', 'blastoise', 'venusaur', 'mewtwo', 'mew', 'lugia', 'ho-oh',
             'rayquaza', 'groudon', 'kyogre', 'dialga', 'palkia', 'giratina', 'arceus', 'reshiram',
@@ -403,7 +410,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         const titleLower = title.toLowerCase();
         
-        // Gestione speciale per Pokemon con nomi multipli o varianti
+        // Special handling for multi-word names and variants
         const specialCases = {
             'mr. mime': 'mr-mime',
             'mr mime': 'mr-mime', 
@@ -476,21 +483,21 @@ document.addEventListener('DOMContentLoaded', function() {
             'enamorus therian': 'enamorus-therian'
         };
         
-        // Controlla prima i casi speciali
+        // Check special cases first
         for (const [variant, pokemonId] of Object.entries(specialCases)) {
             if (titleLower.includes(variant)) {
                 return pokemonId;
             }
         }
         
-        // Poi controlla la lista normale
+        // Then check standard list
         for (const pokemon of pokemonNames) {
             if (titleLower.includes(pokemon)) {
                 return pokemon;
             }
         }
         
-        // Se non trova un Pokemon specifico, prova a estrarre la prima parola
+        // If no explicit Pokemon is found, fallback to first meaningful word
         const words = titleLower.split(/\s+/);
         if (words.length > 0 && words[0].length > 2) {
             return words[0];
@@ -499,34 +506,45 @@ document.addEventListener('DOMContentLoaded', function() {
         return 'unknown';
     }
     
-    // Ottiene lo sprite del Pokemon dalla PokeAPI con fallback migliorato
+    // Retrieve Pokemon sprite from PokeAPI with caching
+    async function getPokemonList() {
+        if (!pokemonListPromise) {
+            pokemonListPromise = fetch('https://pokeapi.co/api/v2/pokemon?limit=1000')
+                .then(response => (response.ok ? response.json() : null))
+                .then(data => (data?.results || []))
+                .catch(() => []);
+        }
+        return pokemonListPromise;
+    }
+
     async function getPokemonSprite(pokemonName) {
         try {
             if (pokemonName === 'unknown') return null;
+            const normalizedName = pokemonName.toLowerCase();
+            if (pokemonSpriteCache.has(normalizedName)) {
+                return pokemonSpriteCache.get(normalizedName);
+            }
             
-            // Prova prima con il nome esatto
-            let response = await fetch(`https://pokeapi.co/api/v2/pokemon/${pokemonName.toLowerCase()}`);
+            // Try exact name first
+            let response = await fetch(`https://pokeapi.co/api/v2/pokemon/${normalizedName}`);
             
             if (!response.ok) {
-                // Se fallisce, prova a cercare nella lista completa
-                const searchResponse = await fetch(`https://pokeapi.co/api/v2/pokemon?limit=1000`);
-                if (searchResponse.ok) {
-                    const searchData = await searchResponse.json();
-                    const pokemon = searchData.results.find(p => 
-                        p.name.toLowerCase() === pokemonName.toLowerCase()
-                    );
-                    
-                    if (pokemon) {
-                        response = await fetch(pokemon.url);
-                    }
+                // On failure, lookup from cached Pokemon list
+                const pokemonList = await getPokemonList();
+                const pokemon = pokemonList.find(p => p.name.toLowerCase() === normalizedName);
+                if (pokemon) {
+                    response = await fetch(pokemon.url);
                 }
             }
             
             if (response && response.ok) {
                 const data = await response.json();
-                return data.sprites.front_default;
+                const spriteUrl = data.sprites.front_default;
+                pokemonSpriteCache.set(normalizedName, spriteUrl || null);
+                return spriteUrl || null;
             }
             
+            pokemonSpriteCache.set(normalizedName, null);
             return null;
             
         } catch (error) {
@@ -535,7 +553,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    // Esporta le carte
+    // Export cards
     function exportCards() {
         const cards = getCards();
         if (cards.length === 0) {
@@ -553,19 +571,19 @@ document.addEventListener('DOMContentLoaded', function() {
         link.click();
         
         URL.revokeObjectURL(url);
-        showMessage(`${cards.length} pagine esportate con successo`, 'success');
+        showMessage(`${cards.length} pages exported successfully`, 'success');
     }
     
-    // Svuota tutte le carte
+    // Clear all cards
     function clearAllCards() {
-        if (confirm('Sei sicuro di voler eliminare tutte le pagine?')) {
+        if (confirm('Are you sure you want to delete all pages?')) {
             localStorage.removeItem('pokemonCardNotes');
             loadCards();
             showMessage('All pages were cleared', 'success');
         }
     }
     
-    // Controlla se una carta esiste già
+    // Check whether a card already exists
     function checkIfCardExists(cardName, cardInfo) {
         const cards = getCards();
         return cards.find(card => 
@@ -574,13 +592,13 @@ document.addEventListener('DOMContentLoaded', function() {
         );
     }
     
-    // Controlla se una pagina esiste già
+    // Check whether a page already exists
     function checkIfPageExists(pageUrl) {
         const cards = getCards();
         return cards.find(card => card.listingUrl === pageUrl);
     }
     
-    // Mostra un messaggio
+    // Show a message
     function showMessage(text, type = 'success') {
         const messageDiv = document.createElement('div');
         let iconClass;
@@ -609,7 +627,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const container = document.querySelector('.container');
         container.insertBefore(messageDiv, container.firstChild);
         
-        // Rimuovi il messaggio dopo 3 secondi
+        // Remove message after 3 seconds
         setTimeout(() => {
             if (messageDiv.parentNode) {
                 messageDiv.parentNode.removeChild(messageDiv);
@@ -617,7 +635,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 3000);
     }
     
-    // Mostra conferma di salvataggio
+    // Show save confirmation
     function showSaveConfirmation() {
         const originalText = saveUrlBtn.innerHTML;
         saveUrlBtn.innerHTML = '<i class="fas fa-check"></i> Saved!';
@@ -629,7 +647,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 2000);
     }
     
-    // Ottiene il nome della categoria
+    // Get category display name
     function getCategoryName(category) {
         const names = {
             'wishlist': 'Wishlist',
@@ -639,7 +657,7 @@ document.addEventListener('DOMContentLoaded', function() {
         return names[category] || category;
     }
     
-    // Ottiene l'icona della categoria
+    // Get category icon
     function getCategoryIcon(category) {
         const icons = {
             'wishlist': '🎯',
