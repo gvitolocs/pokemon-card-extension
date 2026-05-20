@@ -12,9 +12,7 @@ It is kept for context, but the active project structure is documented in:
 
 - There is no active `standalone-config.js` in this repository.
 - Runtime configuration is currently spread across `config/` and runtime logic in `content.js`.
-- Supabase connection and related behavior are managed by:
-  - `config/supabase-config.js`
-  - `config/supabase-integration.js`
+- Card matching is handled by Pokoin/Cardvault APIs through `content.js` and `config/background.js`.
 
 ## If You Need a Fully Standalone Profile
 

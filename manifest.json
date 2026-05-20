@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Pokemon Card Trader Linker",
   "version": "1.4.0",
-  "description": "Converts Pokemon card listing titles from eBay, Vinted, and Cardmarket into clickable CardTrader links with Supabase integration",
+  "description": "Adds Pokoin card links to supported Pokemon marketplace listings.",
   "permissions": [
     "activeTab",
     "scripting",
@@ -43,10 +43,6 @@
         "https://cardmarket.com/*"
       ],
       "js": [
-        "config/supabase.js", 
-        "config/api-config.js", 
-        "config/supabase-config.js", 
-        "config/supabase-integration.js",
         "core/ExtensionCore.js",
         "core/CacheManager.js",
         "ui/ButtonManager.js",
@@ -81,7 +77,6 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "config/supabase-integration.js",
         "assets/pokoin.svg"
       ],
       "matches": ["<all_urls>"]

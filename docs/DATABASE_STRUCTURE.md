@@ -1,8 +1,8 @@
-# Database Structure
+# Legacy Database Structure
 
 ## Overview
 
-Supabase stores card metadata used by title matching and CardTrader link generation.
+This file is historical context for the old direct database integration. The active extension no longer connects to a database from content scripts; card matching now goes through Pokoin/Cardvault APIs.
 
 ## Core Tables
 
@@ -106,5 +106,4 @@ create index if not exists idx_card_variants_blueprint_id
 ## Security and Config Notes
 
 - Do not hardcode private credentials in source code or docs.
-- Keep Supabase keys in extension settings or safe local config.
-- Verify Row Level Security (RLS) policies if access fails.
+- Keep marketplace matching behind server-side APIs instead of browser database clients.

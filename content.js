@@ -32,11 +32,6 @@ class PokemonCardTraderLinker {
     }
     
     createGlobalButton() {
-        // Initialize global variables if they do not exist
-        if (typeof window.supabaseClient === 'undefined') {
-            window.supabaseClient = null;
-        }
-
         // Create the global button only once
         if (!window.globalCardTraderButton) {
             this.globalButton = document.createElement('button');
@@ -86,9 +81,6 @@ class PokemonCardTraderLinker {
             } else {
                 console.warn('⚠️ loadConfig function not available');
             }
-            
-            // Marketplace matching now uses Pokoin/Cardvault APIs. Do not start
-            // the legacy Supabase client on third-party marketplace pages.
             
             console.log('✅ Extension initialized quickly');
             
@@ -348,11 +340,6 @@ class PokemonCardTraderLinker {
 // Istanza globale del Singleton
 let pokemonCardTraderInstance = null;
 
-// Initialize global variables if they do not exist
-if (typeof window.supabaseClient === 'undefined') {
-    window.supabaseClient = null;
-}
-
 function pokoinIconUrl() {
     return chrome.runtime.getURL('assets/pokoin.svg');
 }
@@ -521,9 +508,6 @@ async function initializeExtension() {
         } else {
             console.warn('⚠️ loadConfig function not available');
         }
-        
-        // Marketplace matching now uses Pokoin/Cardvault APIs. Do not start
-        // the legacy Supabase client on third-party marketplace pages.
         
         console.log('✅ Extension initialized quickly');
         
@@ -1136,12 +1120,6 @@ async function processListing(listingElement) {
             } else {
                 console.log('❌ [CardTrader] No result found in database');
                 
-                // Controlla Supabase
-                if (typeof window.supabaseClient === 'undefined' || !window.supabaseClient) {
-                    console.log('⚠️ [CardTrader] Supabase not available, button stays gray');
-                    setPokoinButtonLabel(button, '(DB offline)');
-                }
-                
                 // Effetti hover (gray)
                 button.addEventListener('mouseenter', () => {
                     button.style.background = '#5a6268';
@@ -1437,40 +1415,7 @@ async function handleAutoSearchCurrentPage(sendResponse) {
 // Function specifica for il popup che search su Cardmarket
 async function searchCardInDatabaseForPopup(titleInfo, originalTitle = '') {
     try {
-        // Wait for Supabase to initialize if it is not already
-        let supabaseClient = window.supabaseClient;
-        
-        if (!supabaseClient) {
-            console.log('⏳ [Popup] Supabase not initialized, aspetto...');
-            
-            // Aspetta fino a 5 secondi che Supabase sia initialized
-            let attempts = 0;
-            const maxAttempts = 50; // 50 tentativi * 100ms = 5 secondi
-            
-            while (!supabaseClient && attempts < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                supabaseClient = window.supabaseClient;
-                attempts++;
-                
-                if (attempts % 10 === 0) {
-                    console.log(`⏳ [Popup] Tentativo ${attempts}/${maxAttempts} - Aspetto Supabase...`);
-                }
-            }
-            
-            if (!supabaseClient) {
-                console.error('❌ [Popup] Supabase client not available after 5 seconds of waiting');
-                return [];
-            } else {
-                console.log('✅ [Popup] Supabase initialized, procedo with la search');
-            }
-        }
-        
-        console.log('🔍 [Popup] Searching on Cardmarket with criteria:', JSON.stringify(titleInfo, null, 2));
-        
-        // Search in database come for CardTrader
-        const results = await performSearch(supabaseClient, titleInfo, originalTitle);
-        
-        // Modifica i results for usare link Cardmarket invece di CardTrader
+        const results = await searchCardInDatabase(titleInfo, originalTitle);
         if (results && results.length > 0) {
             return results.map(result => ({
                 ...result,
@@ -2971,600 +2916,125 @@ function extractTitleInfo(title) {
 // Search cards in database
 async function searchCardInDatabase(titleInfo, originalTitle = '') {
     try {
-        // Wait for Supabase to initialize if it is not already
-        let supabaseClient = window.supabaseClient;
-        
-        if (!supabaseClient) {
-            console.log('⏳ [CardTrader] Supabase not initialized, aspetto...');
-            
-            // Aspetta fino a 5 secondi che Supabase sia initialized
-            let attempts = 0;
-            const maxAttempts = 50; // 50 tentativi * 100ms = 5 secondi
-            
-            while (!supabaseClient && attempts < maxAttempts) {
-                await new Promise(resolve => setTimeout(resolve, 100));
-                supabaseClient = window.supabaseClient;
-                attempts++;
-                
-                if (attempts % 10 === 0) {
-                    console.log(`⏳ [CardTrader] Tentativo ${attempts}/${maxAttempts} - Aspetto Supabase...`);
-                }
-            }
-            
-            if (!supabaseClient) {
-                console.error('❌ [CardTrader] Supabase client not available after 5 seconds of waiting');
-                return [];
-            } else {
-                console.log('✅ [CardTrader] Supabase initialized, procedo with la search');
-            }
-        }
-        
-        // Ottimizzazione: usa requestIdleCallback se available for not bloccare l'UI
-        if (window.requestIdleCallback) {
-            return new Promise((resolve) => {
-                requestIdleCallback(() => {
-                    performSearch(supabaseClient, titleInfo, originalTitle).then(resolve);
-                });
-            });
-        } else {
-            return performSearch(supabaseClient, titleInfo, originalTitle);
-        }
+        return searchPokoinCardApi(titleInfo, originalTitle);
     } catch (error) {
         console.error('❌ [CardTrader] Error during search:', error);
         return [];
     }
 }
 
-async function performSearch(supabaseClient, titleInfo, originalTitle) {
-    try {
-        
-        console.log('🔍 [CardTrader] Cercando with criteri:', JSON.stringify(titleInfo, null, 2));
-        
-        // PRIORITY 0: Caso special for "Mew bubble" - blueprint_id fisso
-        const titleLower = originalTitle.toLowerCase();
-        console.log(`🔍 [CardTrader] Checking special Mew bubble case in: "${titleLower}"`);
-        console.log(`🔍 [CardTrader] Contiene 'mew': ${titleLower.includes('mew')}`);
-        console.log(`🔍 [CardTrader] Contiene 'bubble': ${titleLower.includes('bubble')}`);
-        
-        if (titleLower.includes('mew') && titleLower.includes('bubble')) {
-            console.log('🎯 [CardTrader] SPECIAL CASE: Mew bubble detected, imposto blueprint_id 274416');
-            
-            // Crea un result fittizio with il blueprint_id specifico
-            const mewBubbleResult = {
-                blueprint_id: 274416,
-                name_en: 'Mew Bubble',
-                pokemon_name: 'Mew Bubble',
-                expansion_name_en: 'Special Case',
-                expansion_code: 'SPECIAL',
-                source: 'mew_bubble_speciale_case',
-                exact_number_match: true,
-                speciale_case: true
-            };
-            
-            console.log('🎯 [CardTrader] Result Mew bubble creato:', mewBubbleResult);
-            return scoreAndValidateResults([mewBubbleResult], titleInfo, originalTitle);
-        }
-        
-        // PRIORITY 0.5: Caso special for cards SAR del Terastal Festival
-        if (titleLower.includes('sar') && titleLower.includes('terastal festival') && titleInfo.collectorNumber) {
-            console.log(`🎯 [CardTrader] SPECIAL CASE: Card SAR Terastal Festival detected, number ${titleInfo.collectorNumber}`);
-            
-            // Search Terastal Festival cards specifically with the collector number
-            const sarQuery = supabaseClient
-                .from('cards')
-                .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .ilike('expansion_name_en', '%terastal festival%')
-                .not('name_en', 'ilike', '%deck%')
-                .not('name_en', 'ilike', '%booster%')
-                .not('name_en', 'ilike', '%bundle%')
-                .not('name_en', 'ilike', '%lot%')
-                .not('name_en', 'ilike', '%binder%')
-                .not('name_en', 'ilike', '%album%')
-                .not('name_en', 'ilike', '%sleeve%')
-                .not('name_en', 'ilike', '%dice%')
-                .not('name_en', 'ilike', '%token%')
-                .not('name_en', 'ilike', '%gift box%')
-                .not('name_en', 'ilike', '%box%')
-                .not('name_en', 'ilike', '%tin%')
-                .not('name_en', 'ilike', '%collection%');
-            
-            const { data: sarResults, error: sarError } = await sarQuery;
-            
-            if (sarError) {
-                console.error('❌ [CardTrader] Error query SAR:', sarError);
-            } else if (sarResults && sarResults.length > 0) {
-                console.log(`✅ [CardTrader] Found ${sarResults.length} cards Terastal Festival for ${titleInfo.pokemonName}:`, sarResults.map(c => c.name_en));
-                
-                // Search variants with the specific number
-                const blueprintIds = sarResults.map(card => card.blueprint_id).filter(id => id);
-                
-                if (blueprintIds.length > 0) {
-                    const { data: sarVariants, error: variantsError } = await supabaseClient
-                        .from('card_variants')
-                        .select('*')
-                        .in('blueprint_id', blueprintIds)
-                        .eq('collector_number', titleInfo.collectorNumber);
-                    
-                    if (!variantsError && sarVariants && sarVariants.length > 0) {
-                        console.log(`✅ [CardTrader] Found ${sarVariants.length} variants Terastal Festival with number ${titleInfo.collectorNumber}:`, sarVariants);
-                        
-                        const sarResultsWithVariants = sarVariants.map(variant => {
-                            const card = sarResults.find(c => c.blueprint_id === variant.blueprint_id);
-                            if (card) {
-                                return {
-                                    ...variant,
-                                    name_en: card.name_en,
-                                    pokemon_name: card.name_en,
-                                    expansion_name_en: card.expansion_name_en,
-                                    expansion_code: card.expansion_code,
-                                    source: 'sar_terastal_festival_speciale_case',
-                                    exact_number_match: true,
-                                    speciale_case: true
-                                };
-                            }
-                            return null;
-                        }).filter(result => result !== null);
-                        
-                        if (sarResultsWithVariants.length > 0) {
-                            console.log('🎯 [CardTrader] Results SAR Terastal Festival found:', sarResultsWithVariants);
-                            return scoreAndValidateResults(sarResultsWithVariants, titleInfo, originalTitle);
-                        } else {
-                            console.log('⚠️ [CardTrader] No valid result from special SAR case');
-                        }
-                    } else {
-                        console.log('⚠️ [CardTrader] No variant found with number', titleInfo.collectorNumber);
-                    }
-                } else {
-                    console.log('⚠️ [CardTrader] No blueprint_id valid dalle cards SAR');
-                }
-            } else {
-                console.log('⚠️ [CardTrader] No card Terastal Festival found for', titleInfo.pokemonName);
-            }
-        }
-        
-        // PRIORITY 1: If a trainer name is present, search that trainer's cards directly
-        if (titleInfo.trainerName) {
-            console.log(`🎯 [CardTrader] RICERCA PRIORITARIA for trainer: ${titleInfo.trainerName} ${titleInfo.pokemonName}`);
-            
-            // Search all Pokemon cards with trainer name in card NAME
-            let trainerQuery = supabaseClient
-                .from('cards')
-                .select('*')
-                .ilike('name_en', `%${titleInfo.pokemonName}%`)
-                .ilike('name_en', `%${titleInfo.trainerName}%`)
-                .not('name_en', 'ilike', '%deck%')
-                .not('name_en', 'ilike', '%booster%')
-                .not('name_en', 'ilike', '%bundle%')
-                .not('name_en', 'ilike', '%lot%')
-                .not('name_en', 'ilike', '%binder%')
-                .not('name_en', 'ilike', '%album%')
-                .not('name_en', 'ilike', '%sleeve%')
-                .not('name_en', 'ilike', '%dice%')
-                .not('name_en', 'ilike', '%token%')
-                .not('name_en', 'ilike', '%gift box%')
-                .not('name_en', 'ilike', '%box%')
-                .not('name_en', 'ilike', '%tin%')
-                .not('name_en', 'ilike', '%collection%');
-            
-            const { data: trainerResults, error: trainerError } = await trainerQuery;
-            
-            if (trainerError) {
-                console.error('❌ [CardTrader] Error query trainer:', trainerError);
-            } else if (trainerResults && trainerResults.length > 0) {
-                console.log(`✅ [CardTrader] Found ${trainerResults.length} cards with trainer ${titleInfo.trainerName}`);
-                
-                // If there is also a collector number, filter by it
-                if (titleInfo.collectorNumber) {
-                    console.log(`🎯 [CardTrader] Filter by number: ${titleInfo.collectorNumber}`);
-                    
-                    const blueprintIds = trainerResults.map(card => card.blueprint_id).filter(id => id);
-                    
-                    if (blueprintIds.length > 0) {
-                        const numberQuery = supabaseClient
-                            .from('card_variants')
-                            .select('*')
-                            .in('blueprint_id', blueprintIds)
-                            .eq('collector_number', titleInfo.collectorNumber);
-                        
-                        const { data: numberResults, error: numberError } = await numberQuery;
-                        
-                        if (numberError) {
-                            console.error('❌ [CardTrader] Error querying number:', numberError);
-                        } else if (numberResults && numberResults.length > 0) {
-                            console.log(`✅ [CardTrader] Found ${numberResults.length} cards with trainer + number`);
-                            
-                            // Combina i results e filtra for assicurarsi che siano cards valide
-                            const combinedResults = numberResults.map(variant => {
-                                const card = trainerResults.find(c => c.blueprint_id === variant.blueprint_id);
-                                if (card) {
-                                    // Verifica aggiuntiva: il nome deve contenere sia Pokemon che trainer
-                                    const cardNameLower = card.name_en.toLowerCase();
-                                    const pokemonLower = titleInfo.pokemonName.toLowerCase();
-                                    const trainerLower = titleInfo.trainerName.toLowerCase();
-                                    
-                                    if (cardNameLower.includes(pokemonLower) && cardNameLower.includes(trainerLower)) {
-                                        console.log(`✅ [CardTrader] Valid card found: "${card.name_en}"`);
-                                        return {
-                                            ...variant,
-                                            name_en: card.name_en,
-                                            pokemon_name: card.name_en,
-                                            expansion_name_en: card.expansion_name_en,
-                                            expansion_code: card.expansion_code,
-                                            source: 'trainer_number_match',
-                                            exact_number_match: true
-                                        };
-                                    } else {
-                                        console.log(`❌ [CardTrader] Card scartata: "${card.name_en}" (manca Pokemon o trainer)`);
-                                    }
-                                }
-                                return null;
-                            }).filter(result => result !== null);
-                            
-                            if (combinedResults.length > 0) {
-                                console.log(`✅ [CardTrader] ${combinedResults.length} valid results after filter`);
-                                return scoreAndValidateResults(combinedResults, titleInfo, originalTitle);
-                            } else {
-                                console.log(`⚠️ [CardTrader] No valid result after filter`);
-                            }
-                        }
-                    }
-                }
-                
-                // If there is no number or none found, validate found trainer cards
-                const trainerCards = trainerResults.map(card => ({
-                    ...card,
-                    source: 'trainer_match',
-                    exact_number_match: false
-                }));
-                
-                return scoreAndValidateResults(trainerCards, titleInfo, originalTitle);
-            }
-        }
-        
-        let allResults = [];
-        
-        // FALLBACK: Traditional search (only if there is no trainer name or none found)
-        console.log(`🔍 [CardTrader] Fallback: search traditional for ${titleInfo.pokemonName}`);
-        
-        // 1. Search in cards with il nome Pokemon
-        let query = supabaseClient
-            .from('cards')
-            .select('*');
-        
-        // Special handling for Pokemon with similar names
-        if (titleInfo.pokemonName === 'mew') {
-            query = query.ilike('name_en', '%mew%')
-                        .not('name_en', 'ilike', '%mewtwo%');
-        } else if (titleInfo.pokemonName === 'mewtwo') {
-            query = query.ilike('name_en', '%mewtwo%');
-        } else if (titleInfo.pokemonName === 'eevee') {
-            // Special handling for Eevee and variants
-            query = query.or('name_en.ilike.%eevee%,name_en.ilike.%evee%')
-                        .not('name_en', 'ilike', '%vaporeon%')
-                        .not('name_en', 'ilike', '%jolteon%')
-                        .not('name_en', 'ilike', '%flareon%')
-                        .not('name_en', 'ilike', '%espeon%')
-                        .not('name_en', 'ilike', '%umbreon%')
-                        .not('name_en', 'ilike', '%leafeon%')
-                        .not('name_en', 'ilike', '%glaceon%')
-                        .not('name_en', 'ilike', '%sylveon%');
-        } else if (titleInfo.pokemonName === 'ho-oh') {
-            // Special handling for Ho-Oh and variants
-            query = query.or('name_en.ilike.%ho-oh%,name_en.ilike.%ho oh%,name_en.ilike.%hooh%');
-        } else if (titleInfo.pokemonName === 'porygon-z') {
-            // Special handling for Porygon-Z and variants
-            query = query.or('name_en.ilike.%porygon-z%,name_en.ilike.%porygon z%,name_en.ilike.%porygonz%');
-        } else if (titleInfo.pokemonName === 'jangmo-o' || titleInfo.pokemonName === 'hakamo-o' || titleInfo.pokemonName === 'kommo-o') {
-            // Special handling for the Jangmo-o family
-            const baseName = titleInfo.pokemonName.replace('-o', '');
-            query = query.or(`name_en.ilike.%${titleInfo.pokemonName}%,name_en.ilike.%${baseName} o%,name_en.ilike.%${baseName}o%`);
-        } else if (titleInfo.pokemonName === 'type-null') {
-            // Special handling for Type: Null
-            query = query.or('name_en.ilike.%type: null%,name_en.ilike.%type null%,name_en.ilike.%typenull%');
-        } else if (titleInfo.pokemonName === 'mime-jr') {
-            // Special handling for Mime Jr.
-            query = query.or('name_en.ilike.%mime jr.%,name_en.ilike.%mime jr%,name_en.ilike.%mimejr%');
-        } else if (titleInfo.pokemonName === 'mr-rime') {
-            // Special handling for Mr. Rime
-            query = query.or('name_en.ilike.%mr. rime%,name_en.ilike.%mr rime%,name_en.ilike.%mrrime%');
-        } else if (titleInfo.pokemonName === 'farfetchd') {
-            // Special handling for Farfetch'd
-            query = query.or('name_en.ilike.%farfetch\'d%,name_en.ilike.%farfetchd%');
-        } else if (titleInfo.pokemonName === 'sirfetchd') {
-            // Special handling for Sirfetch'd
-            query = query.or('name_en.ilike.%sirfetch\'d%,name_en.ilike.%sirfetchd%');
-        } else if (titleInfo.pokemonName === 'flabebe') {
-            // Special handling for Flabébé
-            query = query.or('name_en.ilike.%flabébé%,name_en.ilike.%flabebe%');
-        } else if (titleInfo.isGXCard) {
-            // For cards GX, search cards che contengono il Pokemon e GX
-            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
-            query = query.ilike('name_en', `%${pokemonNameLower}%`)
-                        .ilike('name_en', '%gx%');
-            console.log(`🔍 [CardTrader] Search GX for: ${titleInfo.pokemonName}`);
-            
-            // If there is a second Pokemon, search cards containing both
-            if (titleInfo.secondPokemonName) {
-                const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
-                query = query.ilike('name_en', `%${secondPokemonLower}%`);
-                console.log(`🔍 [CardTrader] Search GX multi-Pokemon: ${titleInfo.pokemonName} & ${titleInfo.secondPokemonName}`);
-            }
-        } else if (titleInfo.isVCard) {
-            // For cards V (DISABILITATO) - usa search fuzzy normale
-            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
-            query = query.ilike('name_en', `%${pokemonNameLower}%`);
-            console.log(`🔍 [CardTrader] Search V DISABILITATA for: ${titleInfo.pokemonName}, usando search fuzzy`);
-            
-            // If there is a second Pokemon, search cards containing both
-            if (titleInfo.secondPokemonName) {
-                const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
-                query = query.ilike('name_en', `%${secondPokemonLower}%`);
-                console.log(`🔍 [CardTrader] Search V multi-Pokemon DISABILITATA: ${titleInfo.pokemonName} & ${titleInfo.secondPokemonName}`);
-            }
-        } else if (titleInfo.isVSTARCard) {
-            // For cards VSTAR, search cards che contengono il Pokemon e VSTAR
-            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
-            query = query.ilike('name_en', `%${pokemonNameLower}%`)
-                        .ilike('name_en', '%vstar%');
-            console.log(`🔍 [CardTrader] Search VSTAR for: ${titleInfo.pokemonName}`);
-            
-            // If there is a second Pokemon, search cards containing both
-            if (titleInfo.secondPokemonName) {
-                const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
-                query = query.ilike('name_en', `%${secondPokemonLower}%`);
-                console.log(`🔍 [CardTrader] Search VSTAR multi-Pokemon: ${titleInfo.pokemonName} & ${titleInfo.secondPokemonName}`);
-            }
-        } else if (titleInfo.isEXCard) {
-            // For cards EX, search cards che contengono il Pokemon e EX (logica original che funzionava)
-            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
-            query = query.ilike('name_en', `%${pokemonNameLower}% ex%`);
-            console.log(`🔍 [CardTrader] Search EX for: ${titleInfo.pokemonName}`);
-            
-            // If there is a second Pokemon, search cards containing both
-            if (titleInfo.secondPokemonName) {
-                const secondPokemonLower = titleInfo.secondPokemonName.toLowerCase();
-                query = query.ilike('name_en', `%${secondPokemonLower}%`);
-                console.log(`🔍 [CardTrader] Search EX multi-Pokemon: ${titleInfo.pokemonName} & ${titleInfo.secondPokemonName}`);
-            }
-        } else {
-            // Fuzzy search for other Pokemon (fallback for all cases)
-            const pokemonNameLower = titleInfo.pokemonName.toLowerCase();
-            
-            // Special handling for hyphenated Pokemon names (like mr-mime)
-            if (pokemonNameLower.includes('-')) {
-                const variants = [
-                    pokemonNameLower, // mr-mime
-                    pokemonNameLower.replace('-', ' '), // mr mime
-                    pokemonNameLower.replace('-', '. '), // mr. mime
-                    pokemonNameLower.replace('-', ''), // mrmime
-                ];
-                
-                console.log(`🔍 [CardTrader] Search variants for ${pokemonNameLower}:`, variants);
-                
-                // Create an OR query for all variants
-                const orConditions = variants.map(variant => `name_en.ilike.%${variant}%`).join(',');
-                query = query.or(orConditions);
-            } else {
-                query = query.or(`name_en.ilike.%${pokemonNameLower}%,name_en.ilike.%${pokemonNameLower}%`);
-            }
-        }
-        
+function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
+    const title = originalTitle || titleInfo.originalTitle || '';
+    const promoNumber = title.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0]?.replace(/\s+/g, '');
+    const collectorNumber = promoNumber || titleInfo.collectorNumber || titleInfo.cardNumber || '';
+    const variation = titleInfo.cardType ||
+        (titleInfo.isEXCard ? 'ex' : '') ||
+        (titleInfo.isGXCard ? 'gx' : '') ||
+        (titleInfo.isVSTARCard ? 'vstar' : '') ||
+        (titleInfo.isVCard ? 'v' : '') ||
+        (title.match(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i)?.[0] || '');
 
-        
-        console.log(`🔍 [CardTrader] Eseguendo query Supabase...`);
-        
-        const { data: cards, error: cardsError } = await query
-            .not('name_en', 'ilike', '%deck%')
-            .not('name_en', 'ilike', '%booster%')
-            .not('name_en', 'ilike', '%bundle%')
-            .not('name_en', 'ilike', '%lot%')
-            .not('name_en', 'ilike', '%binder%')
-            .not('name_en', 'ilike', '%album%')
-            .not('name_en', 'ilike', '%sleeve%')
-            .not('name_en', 'ilike', '%dice%')
-            .not('name_en', 'ilike', '%token%')
-            .not('name_en', 'ilike', '%gift box%')
-            .not('name_en', 'ilike', '%box%')
-            .not('name_en', 'ilike', '%tin%')
-            .not('name_en', 'ilike', '%collection%');
-        
-        console.log(`🔍 [CardTrader] Query completed. Results: ${cards?.length || 0}, Error: ${cardsError ? 'Yes' : 'No'}`);
-        
-        if (cardsError) {
-            console.error('❌ [CardTrader] Error query cards:', cardsError);
-        } else if (cards && cards.length > 0) {
-            console.log(`✅ [CardTrader] Found ${cards.length} cards for ${titleInfo.pokemonName}`);
-            allResults.push(...cards);
-        } else {
-            console.log(`⚠️ [CardTrader] No card found for ${titleInfo.pokemonName}`);
-        }
-        
-        // 2. If there is a collector number, also search variants
-        if (titleInfo.collectorNumber && allResults.length > 0) {
-            console.log(`🔍 [CardTrader] Searching variants by number: ${titleInfo.collectorNumber}`);
-            
-            const blueprintIds = allResults.map(card => card.blueprint_id).filter(id => id);
-            
-            if (blueprintIds.length > 0) {
-                // Search exact number first
-                const { data: variants, error: variantsError } = await supabaseClient
-                    .from('card_variants')
-                    .select('*')
-                    .in('blueprint_id', blueprintIds)
-                    .eq('collector_number', titleInfo.collectorNumber);
-                
-                if (variantsError) {
-                    console.error('❌ [CardTrader] Error query variants:', variantsError);
-                } else if (variants && variants.length > 0) {
-                    console.log(`✅ [CardTrader] Found ${variants.length} variants with number ${titleInfo.collectorNumber}`);
-                    
-                    // Combine variants with card information
-                    const variantResults = variants.map(variant => {
-                        const card = allResults.find(c => c.blueprint_id === variant.blueprint_id);
-                        if (card) {
-                            return {
-                                ...variant,
-                                name_en: card.name_en,
-                                pokemon_name: card.name_en,
-                                expansion_name_en: card.expansion_name_en,
-                                expansion_code: card.expansion_code,
-                                source: 'variant_number_match',
-                                exact_number_match: true
-                            };
-                        }
-                        return null;
-                    }).filter(result => result !== null);
-                    
-                    allResults.push(...variantResults);
-                }
-                
-                // Also search variants with expansion prefixes (es: SWSH307, swsh307)
-                const expansionPrefixes = ['swsh', 'sv', 'sm', 'xy', 'bw', 'dp', 'ss'];
-                for (const prefix of expansionPrefixes) {
-                    const prefixedNumber = prefix + titleInfo.collectorNumber;
-                    console.log(`🔍 [CardTrader] Cercando variants with prefix: ${prefixedNumber}`);
-                    
-                    const { data: prefixedVariants, error: prefixedError } = await supabaseClient
-                        .from('card_variants')
-                        .select('*')
-                        .in('blueprint_id', blueprintIds)
-                        .eq('collector_number', prefixedNumber);
-                    
-                    if (!prefixedError && prefixedVariants && prefixedVariants.length > 0) {
-                        console.log(`✅ [CardTrader] Found ${prefixedVariants.length} variants with number ${prefixedNumber}`);
-                        
-                        const prefixedResults = prefixedVariants.map(variant => {
-                            const card = allResults.find(c => c.blueprint_id === variant.blueprint_id);
-                            if (card) {
-                                return {
-                                    ...variant,
-                                    name_en: card.name_en,
-                                    pokemon_name: card.name_en,
-                                    expansion_name_en: card.expansion_name_en,
-                                    expansion_code: card.expansion_code,
-                                    source: 'variant_prefixed_number_match',
-                                    exact_number_match: true
-                                };
-                            }
-                            return null;
-                        }).filter(result => result !== null);
-                        
-                        allResults.push(...prefixedResults);
-                    }
-                }
+    return {
+        name: titleInfo.pokemonName || titleInfo.name || '',
+        collectorNumber,
+        expansion: titleInfo.expansion || titleInfo.expansionName || '',
+        rarity: titleInfo.rarity || '',
+        variation: String(variation || '').replace(/\s+/g, '').replace(/\./g, '').toLowerCase(),
+        language: 'en',
+        limit: 5,
+    };
+}
 
-                // FUZZY SEARCH: If collector number starts with "svp", also search "sv" (and vice versa)
-                if (titleInfo.collectorNumber && titleInfo.collectorNumber.startsWith('svp')) {
-                    const svNumber = titleInfo.collectorNumber.replace('svp', 'sv');
-                    console.log(`🔍 [CardTrader] Fuzzy search: also searching ${svNumber} for ${titleInfo.collectorNumber}`);
-                    
-                    const { data: svVariants, error: svError } = await supabaseClient
-                        .from('card_variants')
-                        .select('*')
-                        .in('blueprint_id', blueprintIds)
-                        .eq('collector_number', svNumber);
-                    
-                    if (!svError && svVariants && svVariants.length > 0) {
-                        console.log(`✅ [CardTrader] Fuzzy search: found ${svVariants.length} variants with ${svNumber}`);
-                        
-                        const svResults = svVariants.map(variant => {
-                            const card = allResults.find(c => c.blueprint_id === variant.blueprint_id);
-                            if (card) {
-                                return {
-                                    ...variant,
-                                    name_en: card.name_en,
-                                    pokemon_name: card.name_en,
-                                    expansion_name_en: card.expansion_name_en,
-                                    expansion_code: card.expansion_code,
-                                    source: 'fuzzy_number_match',
-                                    exact_number_match: false,
-                                    fuzzy_match: true
-                                };
-                            }
-                            return null;
-                        }).filter(result => result !== null);
-                        
-                        allResults.push(...svResults);
-                    }
-                } else if (titleInfo.collectorNumber && titleInfo.collectorNumber.startsWith('sv')) {
-                    const svpNumber = titleInfo.collectorNumber.replace('sv', 'svp');
-                    console.log(`🔍 [CardTrader] Fuzzy search: also searching ${svpNumber} for ${titleInfo.collectorNumber}`);
-                    
-                    const { data: svpVariants, error: svpError } = await supabaseClient
-                        .from('card_variants')
-                        .select('*')
-                        .in('blueprint_id', blueprintIds)
-                        .eq('collector_number', svpNumber);
-                    
-                    if (!svpError && svpVariants && svpVariants.length > 0) {
-                        console.log(`✅ [CardTrader] Fuzzy search: found ${svpVariants.length} variants with ${svpNumber}`);
-                        
-                        const svpResults = svpVariants.map(variant => {
-                            const card = allResults.find(c => c.blueprint_id === variant.blueprint_id);
-                            if (card) {
-                                return {
-                                    ...variant,
-                                    name_en: card.name_en,
-                                    pokemon_name: card.name_en,
-                                    expansion_name_en: card.expansion_name_en,
-                                    expansion_code: card.expansion_code,
-                                    source: 'fuzzy_number_match',
-                                    exact_number_match: false,
-                                    fuzzy_match: true
-                                };
-                            }
-                            return null;
-                        }).filter(result => result !== null);
-                        
-                        allResults.push(...svpResults);
-                    }
-                }
-            }
-        }
-        
-        // 3. If there is an expansion, filter by it
-        if (titleInfo.expansion && allResults.length > 0) {
-            console.log(`🔍 [CardTrader] Filtro for expansion: ${titleInfo.expansion}`);
-            
-            const expansionLower = titleInfo.expansion.toLowerCase();
-            
-            // Special logic for SWSH promos: do not filter by expansion if it is a promo
-            if (expansionLower.includes('sword & shield black star promos') || 
-                expansionLower.includes('black star promos') ||
-                (titleInfo.collectorNumber && titleInfo.cardType === 'black star')) {
-                console.log(`🎯 [CardTrader] SWSH promo detected, skipping expansion filter`);
-            } 
-            // Special logic for Chinese cards: do not filter by expansion if title contains "chinese"
-            else if (originalTitle.toLowerCase().includes('chinese') || originalTitle.toLowerCase().includes('ptcg')) {
-                console.log(`🎯 [CardTrader] Chinese card detected, skipping expansion filter`);
-            }
-            else {
-                allResults = allResults.filter(card => {
-                    const cardExpansion = (card.expansion_name_en || card.expansion_code || '').toLowerCase();
-                    return cardExpansion.includes(expansionLower) || expansionLower.includes(cardExpansion);
-                });
-            }
-            
-            console.log(`✅ [CardTrader] ${allResults.length} cards after expansion filter`);
-        }
-        
-        // 4. Valida e punteggia i results
-        const validatedResults = scoreAndValidateResults(allResults, titleInfo, originalTitle);
-        
-        // 5. FALLBACK SPECIALE PER CARDMARKET: Se siamo su Cardmarket e not troviamo results, 
-        // NON creare un link di search su Cardmarket (l'utente vuole andare su CardTrader)
-        if (validatedResults.length === 0 && window.location.hostname.includes('cardmarket')) {
-            console.log('🔍 [CardTrader] No result found su Cardmarket, ma siamo already su Cardmarket - not creo fallback');
-            return [];
-        }
-        
-        return validatedResults;
-        
-    } catch (error) {
-        console.error('❌ [CardTrader] Error during search:', error);
+function legacyResultFromPokoinMatch(match) {
+    return {
+        blueprint_id: match.cardId,
+        name_en: match.name,
+        pokemon_name: match.name,
+        expansion_name_en: match.expansionName,
+        collector_number: match.collectorNumber,
+        rarity: match.rarity,
+        image_url: match.imageUrl,
+        preview_image_url: match.previewImageUrl,
+        source: 'pokoin_extension_card_search',
+        search_score: match.score,
+    };
+}
+
+async function searchPokoinCardApi(titleInfo, originalTitle) {
+    const payload = structuredPayloadFromTitleInfo(titleInfo, originalTitle);
+    const response = await fetch('https://pokoin.com/api/extension-card-search', {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        console.warn(`⚠️ [Pokoin] Extension card search failed with HTTP ${response.status}`);
+        return searchPokoinAutocomplete(titleInfo, originalTitle);
+    }
+
+    const data = await response.json();
+    const matches = Array.isArray(data.matches) ? data.matches : [];
+    if (matches.length > 0) {
+        return matches.map(legacyResultFromPokoinMatch);
+    }
+
+    return searchPokoinAutocomplete(titleInfo, originalTitle);
+}
+
+function legacyResultFromAutocompleteRow(row) {
+    return {
+        blueprint_id: row.card_id,
+        name_en: row.name,
+        pokemon_name: row.name,
+        expansion_name_en: row.set_name,
+        collector_number: row.card_number,
+        rarity: row.rarity,
+        image_url: row.image_url || row.cdn_image_url,
+        preview_image_url: row.preview_image_url,
+        source: 'pokoin_marketplace_autocomplete',
+        search_score: row.score,
+    };
+}
+
+function buildPokoinAutocompleteQuery(titleInfo = {}, originalTitle = '') {
+    return [
+        titleInfo.pokemonName || titleInfo.name,
+        titleInfo.cardType,
+        titleInfo.collectorNumber || titleInfo.cardNumber,
+        titleInfo.expansion || titleInfo.expansionName,
+    ].filter(Boolean).join(' ').trim() || originalTitle;
+}
+
+async function searchPokoinAutocomplete(titleInfo, originalTitle) {
+    const searchTerm = buildPokoinAutocompleteQuery(titleInfo, originalTitle);
+    if (!searchTerm) {
         return [];
     }
+
+    const response = await fetch('https://pokoin.com/api/marketplace-autocomplete', {
+        method: 'POST',
+        headers: {
+            'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+            search_term: searchTerm,
+            result_limit: 5,
+            pool_limit: 50,
+            search_language: 'en',
+        }),
+    });
+
+    if (!response.ok) {
+        console.warn(`⚠️ [Pokoin] Autocomplete failed with HTTP ${response.status}`);
+        return [];
+    }
+
+    const payload = await response.json();
+    const rows = Array.isArray(payload) ? payload : payload.rows;
+    return Array.isArray(rows) ? rows.map(legacyResultFromAutocompleteRow) : [];
 }
 
 // Estrai la rarity dall'URL of immagine

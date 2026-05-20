@@ -47,11 +47,11 @@ Glaceon ex Special Illustration Rare #150 Terastal Festival
 - Confirm you are on a supported domain.
 - Refresh the page after enabling/reloading the extension.
 
-### Supabase Errors
+### Pokoin API Errors
 
-- Check Supabase URL/key configuration.
-- Confirm the database is reachable.
-- Verify table names and expected columns exist.
+- Check browser console logs for `extension-card-search` or autocomplete failures.
+- Confirm `https://pokoin.com` is reachable.
+- Reload the extension after changing host permissions or API code.
 
 ## Security Notes
 

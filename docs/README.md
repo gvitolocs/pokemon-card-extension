@@ -7,7 +7,7 @@ Use this folder for technical and maintenance docs:
 - `INSTALLATION.md`: install and verify the extension locally
 - `MODULAR_STRUCTURE.md`: module boundaries and responsibilities
 - `API_INTEGRATION.md`: API behavior and token-based features
-- `DATABASE_STRUCTURE.md`: Supabase schema and query patterns
+- `DATABASE_STRUCTURE.md`: legacy schema and migration context
 - `STANDALONE_SETUP.md`: legacy standalone notes and migration context
 - `ICONS.md`: icon generation and placement instructions
 

@@ -41,7 +41,8 @@ async function autocomplete(searchTerm, options = {}) {
     });
 
     assert.equal(response.status, 200, `${searchTerm} should return HTTP 200`);
-    const rows = await response.json();
+    const payload = await response.json();
+    const rows = Array.isArray(payload) ? payload : payload.rows;
     assert.ok(Array.isArray(rows), `${searchTerm} should return an array`);
     autocompleteCache.set(cacheKey, rows);
     return rows;

@@ -1,14 +1,14 @@
 # 🃏 Pokemon Card Trader Linker
 
-Chrome extension that turns Pokemon card listing titles from eBay, Vinted, and Cardmarket into CardTrader links.
+Chrome extension that turns Pokemon card listing titles from eBay, Vinted, CardTrader, and Cardmarket into Pokoin marketplace links.
 
 ## What It Does
 
 - Detects card listings directly on supported marketplaces
 - Extracts card metadata from listing titles
-- Matches cards against Supabase data (`cards` + `card_variants`)
-- Injects CardTrader buttons into listing UIs
-- Provides a popup to manually search and save cards
+- Matches cards through Pokoin/Cardvault APIs
+- Injects Pokoin buttons into listing UIs
+- Opens matched Pokoin marketplace cards in Chrome side panel
 
 ## Current Architecture
 
@@ -20,7 +20,7 @@ The extension is split into focused modules:
 - `data/`: title parsing (`TitleExtractor`)
 - `ui/`: UI button handling (`ButtonManager`)
 - `utils/`: URL generation (`UrlGenerator`)
-- `config/`: Supabase and API configuration
+- `config/`: Pokoin API and background configuration
 - `ui-pages/`: popup/settings HTML and JS
 
 ## Installation
@@ -43,7 +43,7 @@ cd pokemon-card-extension
 
 1. Open eBay, Vinted, or Cardmarket
 2. Browse card listings
-3. Wait for CardTrader buttons to appear
+3. Wait for Pokoin buttons to appear
 
 Button states:
 - Gray: searching/matching in progress
@@ -53,7 +53,7 @@ Button states:
 
 1. Click the extension icon
 2. Paste a listing title
-3. Generate the CardTrader link
+3. Generate the Pokoin link
 4. Save cards to your local collection if needed
 
 ## Supported Sites
@@ -64,8 +64,7 @@ Button states:
 
 ## Configuration
 
-The extension can run with default Supabase settings from the project config files.  
-You can also provide your own credentials in the settings UI.
+The extension uses Pokoin/Cardvault APIs hosted at `https://pokoin.com`.
 
 ## Development
 
@@ -80,7 +79,6 @@ Primary files:
 
 Testing helpers:
 
-- `tests/test-extension.html`
 - `tests/generate-icons.html`
 - `tests/cardvault-api-smoke.test.js`
 
@@ -98,7 +96,7 @@ Technical documentation lives in `docs/`:
 - `docs/INSTALLATION.md`: setup steps
 - `docs/MODULAR_STRUCTURE.md`: module overview
 - `docs/API_INTEGRATION.md`: API and auth behavior
-- `docs/DATABASE_STRUCTURE.md`: Supabase schema and query notes
+- `docs/DATABASE_STRUCTURE.md`: legacy schema notes
 - `docs/STANDALONE_SETUP.md`: legacy/standalone notes
 - `docs/ICONS.md`: icon generation and placement
 

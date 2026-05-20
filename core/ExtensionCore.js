@@ -10,11 +10,6 @@ class ExtensionCore {
         this.isProcessing = false;
         this.currentUrl = window.location.href;
         
-        // Initialize global variables if needed
-        if (typeof window.supabaseClient === 'undefined') {
-            window.supabaseClient = null;
-        }
-        
         console.log('🃏 Pokemon Card Trader Linker - Core initialized');
     }
     
@@ -34,29 +29,6 @@ class ExtensionCore {
                 });
             } else {
                 console.warn('⚠️ loadConfig function not available');
-            }
-            
-            // Initialize Supabase in background
-            if (typeof initializeSupabase === 'function') {
-                initializeSupabase().then(supabaseReady => {
-                    if (supabaseReady) {
-                        console.log('✅ Supabase connected - switching icon to green');
-                        chrome.runtime.sendMessage({ 
-                            action: 'updateIcon', 
-                            status: 'connected' 
-                        });
-                    } else {
-                        console.warn('⚠️ Supabase not configured, extension will run in limited mode');
-                        chrome.runtime.sendMessage({ 
-                            action: 'updateIcon', 
-                            status: 'error' 
-                        });
-                    }
-                }).catch(error => {
-                    console.warn('⚠️ Error during Supabase initialization:', error);
-                });
-            } else {
-                console.warn('⚠️ initializeSupabase function not available');
             }
             
             console.log('✅ Extension initialized');

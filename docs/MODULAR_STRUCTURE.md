@@ -8,9 +8,7 @@ The extension is organized into modules to keep responsibilities isolated and ea
 pokemon-card-extension/
 ├── config/
 │   ├── api-config.js
-│   ├── background.js
-│   ├── supabase-config.js
-│   └── supabase-integration.js
+│   └── background.js
 ├── core/
 │   ├── ExtensionCore.js
 │   └── CacheManager.js
@@ -31,7 +29,6 @@ pokemon-card-extension/
 ├── utils/
 │   └── UrlGenerator.js
 ├── content.js
-├── content-modular-example.js
 └── manifest.json
 ```
 
@@ -79,10 +76,9 @@ pokemon-card-extension/
 1. Manifest injects config/core/ui/data/utils/processors + `content.js`
 2. `content.js` initializes global runtime behavior
 3. Site processor detects listings and extracts title info
-4. Database lookup resolves best match
+4. Pokoin/Cardvault API lookup resolves best match
 5. Button state is updated with the generated destination URL
 
 ## Notes
 
-- `content-modular-example.js` is a reference implementation and not the active runtime entrypoint.
 - Keep processor logic site-focused and avoid cross-site DOM assumptions.
