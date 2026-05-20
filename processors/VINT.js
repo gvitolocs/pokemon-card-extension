@@ -13,11 +13,35 @@ class VintedProcessor {
         return chrome.runtime.getURL('assets/pokoin-512.png');
     }
 
-    setPokoinButtonLabel(button) {
+    setPokoinButtonLabel(button, matchCount = null) {
+        const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
-            <span>Pokoin</span>
+            <span>Pokoin${suffix}</span>
         `;
+    }
+
+    isHighConfidenceMatch(result = {}) {
+        const rawScore = result.search_score ?? result.relevanceScore ?? result.score ?? result.search_rank;
+        const score = Number(rawScore);
+        if (!Number.isFinite(score)) return false;
+        if (score <= 1) return score >= 0.7;
+        if (score <= 100) return score >= 70;
+        return true;
+    }
+
+    countHighConfidenceMatches(results = []) {
+        return results.filter((result) => this.isHighConfidenceMatch(result)).length;
+    }
+
+    openPokoinSidePanel() {
+        return chrome.runtime.sendMessage({
+            action: 'openSidePanelForCurrentTab',
+            url: window.location.href,
+            title: document.title,
+        }).catch((error) => {
+            console.warn('⚠️ [VINT] Unable to open side panel:', error);
+        });
     }
 
     applyPokoinButtonStyles(button, styles = {}) {
@@ -40,7 +64,8 @@ class VintedProcessor {
             Object.assign(icon.style, {
                 width: '20px',
                 height: '20px',
-                objectFit: 'contain',
+                borderRadius: '50%',
+                objectFit: 'cover',
                 display: 'block',
             });
         }
@@ -134,12 +159,6 @@ class VintedProcessor {
             // Always create a gray fallback button (even for non-Pokemon titles)
             console.log('🔍 [VINT] Creating gray fallback button...');
             this.createFallbackButton(titleElement);
-            
-            // If not a Pokemon card, skip database lookup
-            if (!titleInfo.pokemonName) {
-                console.log('🚫 [VINT] No Pokemon found in title, button stays gray');
-                return;
-            }
             
             // Search in the database
             this.searchCardInDatabase(titleInfo, title).then(results => {
@@ -319,8 +338,8 @@ class VintedProcessor {
             this.currentButton.innerHTML = `
                 <span class="web_ui__Button__content">
                     <span class="web_ui__Button__label">
-                        <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:20px;height:20px;object-fit:contain;margin-right:8px;vertical-align:middle;">
-                        Pokoin
+                        <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:22px;height:22px;border-radius:50%;object-fit:cover;margin-right:8px;vertical-align:middle;">
+                        Pokoin (${this.countHighConfidenceMatches(results)})
                     </span>
                 </span>
             `;
@@ -328,7 +347,7 @@ class VintedProcessor {
             this.currentButton.style.color = 'white';
         } else {
             // If this is a normal button
-            this.setPokoinButtonLabel(this.currentButton);
+            this.setPokoinButtonLabel(this.currentButton, this.countHighConfidenceMatches(results));
             this.currentButton.style.background = '#28a745';
             this.applyPokoinButtonStyles(this.currentButton, { background: '#28a745' });
         }
@@ -344,8 +363,7 @@ class VintedProcessor {
         this.currentButton.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
-            window.open(pokoinUrl, '_blank');
+            this.openPokoinSidePanel();
         });
         
         // Hover effects (green)
@@ -389,8 +407,7 @@ class VintedProcessor {
         button.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
-            window.open(pokoinUrl, '_blank');
+            this.openPokoinSidePanel();
         });
         
         // Hover effects

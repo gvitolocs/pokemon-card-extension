@@ -136,3 +136,12 @@ test('12. CardTrader redirect uses canonical Cardvault redirect endpoint', async
     assert.equal(response.status, 302);
     assert.equal(response.headers.get('location'), 'https://www.cardtrader.com/en/cards/274416');
 });
+
+test('13. Cardvault name table validates Pecharunt from noisy Vinted title token', async () => {
+    const rows = await autocomplete('Pecharunt', { resultLimit: 3, poolLimit: 30 });
+    const exactName = rows.find((row) =>
+        String(row.canonical_name || row.name || '').toLowerCase() === 'pecharunt'
+    );
+
+    assert.ok(exactName, 'Pecharunt should resolve through Cardvault card names');
+});

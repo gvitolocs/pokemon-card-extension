@@ -9,6 +9,71 @@ class CardmarketProcessor {
         this.processedPages = new Set();
     }
 
+    pokoinIconUrl() {
+        return chrome.runtime.getURL('assets/pokoin-512.png');
+    }
+
+    setPokoinButtonLabel(button, matchCount = null) {
+        const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
+        button.innerHTML = `
+            <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
+            <span>Pokoin${suffix}</span>
+        `;
+    }
+
+    isHighConfidenceMatch(result = {}) {
+        const rawScore = result.search_score ?? result.relevanceScore ?? result.score ?? result.search_rank;
+        const score = Number(rawScore);
+        if (!Number.isFinite(score)) return false;
+        if (score <= 1) return score >= 0.7;
+        if (score <= 100) return score >= 70;
+        return true;
+    }
+
+    countHighConfidenceMatches(results = []) {
+        return results.filter((result) => this.isHighConfidenceMatch(result)).length;
+    }
+
+    openPokoinSidePanel() {
+        return chrome.runtime.sendMessage({
+            action: 'openSidePanelForCurrentTab',
+            url: window.location.href,
+            title: document.title,
+        }).catch((error) => {
+            console.warn('⚠️ [CME] Unable to open side panel:', error);
+        });
+    }
+
+    applyPokoinButtonStyles(button, styles = {}) {
+        Object.assign(button.style, {
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            background: '#0ea5e9',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            transition: 'all 0.2s ease',
+            textDecoration: 'none',
+            textAlign: 'center',
+            ...styles,
+        });
+
+        const icon = button.querySelector('img');
+        if (icon) {
+            Object.assign(icon.style, {
+                width: '20px',
+                height: '20px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+                display: 'block',
+            });
+        }
+    }
+
     /**
      * Initialize Cardmarket processor
      */
@@ -74,54 +139,39 @@ class CardmarketProcessor {
             
             // Extract title information
             const titleInfo = this.extractTitleInfo(title);
-            if (!titleInfo.pokemonName) {
-                console.log('🚫 [CME] No Pokemon found in title');
-                return;
-            }
             
             // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
-            button.innerHTML = 'CardTrader';
+            this.setPokoinButtonLabel(button);
             button.style.cssText = `
                 margin: 0;
                 padding: 6px 12px;
-                background: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 6px;
                 font-size: 15px;
-                cursor: pointer;
-                font-weight: bold;
-                min-width: 90px;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-                transition: all 0.2s ease;
-                text-decoration: none;
-                text-align: center;
+                min-width: 100px;
             `;
+            this.applyPokoinButtonStyles(button, { background: '#6c757d' });
             
-            // Look for "Contact Support" link and replace with CardTrader button
+            // Look for "Contact Support" link and replace with Pokoin button
             const supportLink = document.querySelector('a[href*="support/tickets/new"]');
             let buttonInserted = false; // Track whether the button was inserted
             
             // Insert button
             if (supportLink && supportLink.parentNode) {
                 supportLink.parentNode.replaceChild(button, supportLink);
-                console.log(`✅ [CME] Replaced support link with CT button on Cardmarket (loading)`);
+                console.log(`✅ [CME] Replaced support link with Pokoin button on Cardmarket (loading)`);
                 buttonInserted = true;
             } else {
                 // Try support-link container and insert button there
                 const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
                 if (supportContainer) {
                     supportContainer.appendChild(button);
-                    console.log(`✅ [CME] Inserted CT button in support container on Cardmarket (loading)`);
+                    console.log(`✅ [CME] Inserted Pokoin button in support container on Cardmarket (loading)`);
                     buttonInserted = true;
                 } else {
                     // Fallback: insert directly in h1
                     titleElement.appendChild(button);
-                    console.log(`✅ [CME] Added CT button to Cardmarket product page (loading fallback)`);
+                    console.log(`✅ [CME] Added Pokoin button to Cardmarket product page (loading fallback)`);
                     buttonInserted = true;
                 }
             }
@@ -131,20 +181,19 @@ class CardmarketProcessor {
             let targetButton = button;
             
             // Always run database lookup if button exists (new or already present)
-            console.log('🔍 [CME] Starting database lookup for:', titleInfo.pokemonName);
+            console.log('🔍 [CME] Starting database lookup for:', titleInfo.pokemonName || title);
             this.searchCardInDatabase(titleInfo, title).then(results => {
                 if (results && results.length > 0) {
                     // Turn button green when link is found
                     targetButton.style.background = '#28a745';
+                    this.setPokoinButtonLabel(targetButton, this.countHighConfidenceMatches(results));
                     console.log(`✅ [CME] Link found, button turned green`);
                     
-                    // Open CardTrader link on click
+                    // Open Pokoin link on click
                     targetButton.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const bestResult = results[0];
-                        const cardTraderUrl = this.generateCardTraderLink(bestResult.blueprint_id);
-                        window.open(cardTraderUrl, '_blank');
+                        this.openPokoinSidePanel();
                     });
                     
                     // Enhanced hover effects (green)
@@ -261,43 +310,35 @@ class CardmarketProcessor {
             if (!title) return;
             
             const titleInfo = this.extractTitleInfo(title);
-            if (!titleInfo.pokemonName) return;
             
             // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
-            button.innerHTML = 'CardTrader';
+            this.setPokoinButtonLabel(button);
             button.style.cssText = `
                 margin-top: 8px;
                 margin-left: 8px;
                 padding: 8px 16px;
-                background: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 8px;
                 font-size: 17px;
-                cursor: pointer;
-                font-weight: bold;
                 min-width: 100px;
-                display: inline-block;
-                transition: all 0.2s ease;
             `;
+            this.applyPokoinButtonStyles(button, { background: '#6c757d' });
             
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
             if (inserted) {
-                console.log(`✅ [CME] Added button for ${titleInfo.pokemonName}`);
+                console.log(`✅ [CME] Added button for ${titleInfo.pokemonName || title}`);
                 
                 // Search database
                 const results = await this.searchCardInDatabase(titleInfo, title);
                 if (results && results.length > 0) {
                     button.style.background = '#28a745';
+                    this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
                     const bestResult = results[0];
                     button.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const cardTraderUrl = this.generateCardTraderLink(bestResult.blueprint_id);
-                        window.open(cardTraderUrl, '_blank');
+                        this.openPokoinSidePanel();
                     });
                 }
             }
@@ -386,10 +427,10 @@ class CardmarketProcessor {
     }
 
     /**
-     * Generate CardTrader link
+     * Generate Pokoin link
      */
-    generateCardTraderLink(blueprintId) {
-        return `https://www.cardtrader.com/cards/${blueprintId}`;
+    generatePokoinLink(blueprintId) {
+        return `https://pokoin.com/marketplace/en/cards/${blueprintId}`;
     }
 }
 

@@ -13,13 +13,13 @@ async function updateIcon(status) {
         let iconPath;
         switch (status) {
             case 'connected':
-                iconPath = 'icon-green.png';
+                iconPath = 'icons/icon-32.png';
                 break;
             case 'error':
-                iconPath = 'icon-red.png';
+                iconPath = 'icons/icon-32.png';
                 break;
             default:
-                iconPath = 'icon-default.png';
+                iconPath = 'icons/icon-32.png';
                 break;
         }
         
@@ -135,7 +135,10 @@ async function extractTitleFromPage() {
     }
 
     const finalTitle = title || document.title.replace(/\s+/g, ' ').trim();
-    const structuredCard = scrapeStructuredCardFields(finalTitle);
+    const cardmarketContext = hostname.includes('cardmarket')
+        ? scrapeCardmarketContext(finalTitle)
+        : null;
+    const structuredCard = scrapeStructuredCardFields(finalTitle, cardmarketContext);
 
     return {
         title: finalTitle,
@@ -153,15 +156,69 @@ async function extractTitleFromPage() {
             documentTitle: document.title.replace(/\s+/g, ' ').trim(),
             readyState: document.readyState,
             bodyTextSample: document.body?.innerText?.replace(/\s+/g, ' ').slice(0, 300) || '',
+            cardmarketContext,
         },
     };
 }
 
-function scrapeStructuredCardFields(title = '') {
+function cleanCardmarketText(value = '') {
+    return String(value || '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s+-\s+Singles?\s*$/i, '')
+        .trim();
+}
+
+function scrapeCardmarketContext(title = '') {
+    const subtitle = cleanCardmarketText(
+        document.querySelector('.page-title-container h1 + div, .page-title-container .font-italic, .page-title-container em, .page-title-container small')
+            ?.textContent || ''
+    );
+    const breadcrumbParts = [...document.querySelectorAll('.breadcrumb a, nav a')]
+        .map((element) => cleanCardmarketText(element.textContent))
+        .filter(Boolean);
+    const expansionFromBreadcrumb = breadcrumbParts
+        .slice()
+        .reverse()
+        .find((part) =>
+            !/^(products?|pok[eé]mon|singles?|all)$/i.test(part) &&
+            cleanCardmarketText(title).toLowerCase().indexOf(part.toLowerCase()) === -1
+        ) || '';
+    const documentTitleExpansion = cleanCardmarketText(title)
+        .replace(/\s*\|\s*Cardmarket\s*$/i, '')
+        .match(/\)\s*[-–]\s*(.+?)(?:\s*[-–]\s*Singles?)?$/i)?.[1] || '';
+
+    return {
+        subtitle,
+        breadcrumbParts,
+        expansion: subtitle || expansionFromBreadcrumb || cleanCardmarketText(documentTitleExpansion),
+    };
+}
+
+function scrapeStructuredCardFields(title = '', context = null) {
     const cleanTitle = String(title || '')
         .replace(/\s*\|\s*Vinted\s*$/i, '')
+        .replace(/\s*\|\s*Cardmarket\s*$/i, '')
         .replace(/\s+/g, ' ')
         .trim();
+    const cardmarketMatch = cleanTitle.match(/^(.+?)\s*\((?:[A-Z0-9]{2,6}\s*)?(\d{1,4}[a-z]?)\)\s*(?:[-–]\s*(.+?))?$/i);
+    if (cardmarketMatch) {
+        const [, cardName, cardNumber, trailingExpansion] = cardmarketMatch;
+        const expansion = cleanCardmarketText(
+            context?.expansion ||
+            trailingExpansion ||
+            ''
+        );
+
+        return {
+            rawTitle: cleanTitle,
+            name: removeMarketplaceSearchNoise(cardName),
+            collectorNumber: cardNumber,
+            expansion,
+            rarity: '',
+            variation: '',
+        };
+    }
+
     const withoutMarketplaceNoise = cleanTitle
         .replace(/\b(Carte|Carta|Card|Pok[eé]mon|Pokemon)\b/gi, ' ')
         .replace(/\b(Stamp|Stampa|Stamped)\b/gi, ' ')
@@ -211,11 +268,105 @@ function scrapeStructuredCardFields(title = '') {
 
     return {
         rawTitle: cleanTitle,
-        name,
+        name: removeMarketplaceSearchNoise(name),
         collectorNumber,
         expansion,
         rarity,
         variation,
+    };
+}
+
+function removeMarketplaceSearchNoise(value = '') {
+    return String(value || '')
+        .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
+        .replace(/\b(?:sealed|seal(?:ed)?|salead|saled|sigillat[aoe]?|pack|booster|lot)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function compactSearchValue(value = '') {
+    return removeMarketplaceSearchNoise(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+}
+
+function candidateNameTermsFromTitle(title = '') {
+    const cleaned = removeMarketplaceSearchNoise(String(title || '')
+        .replace(/\s*\|\s*(?:Vinted|Cardmarket)\s*$/i, '')
+        .replace(/[()"'’`.,:;!?/\\[\]{}|]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim());
+    const stopWords = new Set([
+        'carte', 'carta', 'card', 'cards', 'promo', 'promos', 'rare', 'holo',
+        'stamp', 'stampa', 'stamped', 'black', 'star', 'treasure', 'treasures',
+        'legendary', 'ottime', 'condizioni', 'condition', 'near', 'mint',
+    ]);
+    const words = cleaned
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter((word) => word && !stopWords.has(word.toLowerCase()));
+    const terms = [];
+
+    for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
+        for (let index = 0; index <= words.length - size; index += 1) {
+            terms.push(words.slice(index, index + size).join(' '));
+        }
+    }
+
+    return [...new Set(terms)].slice(0, 18);
+}
+
+async function resolveNameFromCardvaultTitle(title = '') {
+    const attemptedTerms = [];
+
+    for (const term of candidateNameTermsFromTitle(title)) {
+        const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                search_term: term,
+                result_limit: 3,
+                pool_limit: 30,
+                search_language: 'en',
+            }),
+        });
+
+        if (!response.ok) {
+            attemptedTerms.push({ term, error: `HTTP ${response.status}` });
+            continue;
+        }
+
+        const payload = await response.json();
+        const rows = normalizeCardvaultRows(payload);
+        const compactTerm = compactSearchValue(term);
+        const exactRow = rows.find((row) => {
+            const canonical = compactSearchValue(row.canonical_name || '');
+            const display = compactSearchValue(row.name || '');
+            return canonical === compactTerm || display === compactTerm;
+        });
+
+        attemptedTerms.push({
+            term,
+            rowCount: rows.length,
+            acceptedName: exactRow?.canonical_name || exactRow?.name || '',
+        });
+
+        if (exactRow) {
+            return {
+                name: exactRow.canonical_name || exactRow.name,
+                source: 'marketplace_card_names_for_language',
+                term,
+                attemptedTerms,
+            };
+        }
+    }
+
+    return {
+        name: '',
+        source: 'marketplace_card_names_for_language',
+        attemptedTerms,
     };
 }
 
@@ -242,7 +393,7 @@ async function getActivePageInfo(tab) {
 }
 
 function buildCardvaultQueries(title) {
-    const cleanTitle = title.replace(/\s*\|\s*Vinted\s*$/i, '').trim();
+    const cleanTitle = removeMarketplaceSearchNoise(title.replace(/\s*\|\s*Vinted\s*$/i, '')).trim();
     const queries = [cleanTitle];
     const promoCode = cleanTitle.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+\b/i)?.[0]?.replace(/\s+/g, '');
 
@@ -252,7 +403,7 @@ function buildCardvaultQueries(title) {
         queries.push(promoCode);
 
         const withoutNoise = cleanTitle
-            .replace(/\b(Carte|Pok[eé]mon|Pokemon|Stamp|Stampa|Legendary|Treasure|Treasures)\b/gi, ' ')
+            .replace(/\b(Carte|Stamp|Stampa|Legendary|Treasure|Treasures)\b/gi, ' ')
             .replace(/\s+/g, ' ')
             .trim();
         if (withoutNoise) {
@@ -350,6 +501,22 @@ function rowFromExtensionMatch(match) {
     };
 }
 
+function rowMatchesStructuredName(row, structuredCard) {
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    if (!requestedName) {
+        return true;
+    }
+
+    const rowName = compactSearchValue(row?.name || '');
+    if (!rowName) {
+        return false;
+    }
+
+    return rowName === requestedName ||
+        rowName.includes(requestedName) ||
+        requestedName.includes(rowName);
+}
+
 async function searchExtensionCard(structuredCard) {
     if (!structuredCard?.name && !structuredCard?.collectorNumber) {
         return { rows: [], debug: { endpoint: '/api/extension-card-search', skipped: true } };
@@ -378,8 +545,13 @@ async function searchExtensionCard(structuredCard) {
     }
 
     const data = await response.json();
+    const rows = (data.matches || [])
+        .map(rowFromExtensionMatch)
+        .filter(Boolean)
+        .filter((row) => rowMatchesStructuredName(row, structuredCard));
+
     return {
-        rows: (data.matches || []).map(rowFromExtensionMatch).filter(Boolean),
+        rows,
         debug: {
             endpoint: '/api/extension-card-search',
             payload,
@@ -387,6 +559,7 @@ async function searchExtensionCard(structuredCard) {
             source: data.source || '',
             input: data.input || {},
             matchCount: data.matches?.length || 0,
+            acceptedMatchCount: rows.length,
         },
     };
 }
@@ -471,6 +644,22 @@ async function resolveActiveTabForSidePanel(tab) {
         try {
             debug.searched = true;
             try {
+                const nameResolution = await resolveNameFromCardvaultTitle(pageInfo.title);
+                debug.nameResolution = nameResolution;
+                if (nameResolution.name) {
+                    pageInfo.structuredCard = {
+                        ...(pageInfo.structuredCard || {}),
+                        name: nameResolution.name,
+                    };
+                }
+            } catch (nameResolutionError) {
+                debug.nameResolution = {
+                    source: 'marketplace_card_names_for_language',
+                    error: nameResolutionError.message || 'Card name resolution failed.',
+                };
+            }
+
+            try {
                 const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
                 rows = extensionSearchResult.rows;
                 debug.extensionSearch = extensionSearchResult.debug;
@@ -541,6 +730,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then((result) => sendResponse({ success: true, result }))
             .catch((error) => {
                 sendResponse({ success: false, error: error.message || 'Unable to refresh match.' });
+            });
+    } else if (request.action === 'openSidePanelForCurrentTab') {
+        const tab = sender.tab;
+        if (!tab?.id) {
+            sendResponse({ success: false, error: 'No sender tab found.' });
+            return false;
+        }
+
+        chrome.sidePanel?.open({ tabId: tab.id })
+            .then(() => resolveActiveTabForSidePanel(tab))
+            .then((result) => sendResponse({ success: true, result }))
+            .catch((error) => {
+                sendResponse({ success: false, error: error.message || 'Unable to open side panel.' });
             });
     } else if (request.action === 'marketplaceNavigationChanged') {
         const tab = sender.tab;

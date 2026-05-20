@@ -20,17 +20,6 @@ class ExtensionCore {
         try {
             console.log('🃏 Pokemon Card Trader Linker - Fast initialization...');
             
-            // Load configuration in background
-            if (typeof loadConfig === 'function') {
-                loadConfig().then(() => {
-                    console.log('✅ Configuration loaded');
-                }).catch(error => {
-                    console.warn('⚠️ Error loading configuration:', error);
-                });
-            } else {
-                console.warn('⚠️ loadConfig function not available');
-            }
-            
             console.log('✅ Extension initialized');
             
         } catch (error) {

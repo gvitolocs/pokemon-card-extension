@@ -97,6 +97,60 @@ function sortCandidates(rows = []) {
     });
 }
 
+function firstCollectorNumber(value = '') {
+    const cleanValue = String(value || '');
+    const slashNumber = cleanValue.match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)\s*\/\s*\d{1,4}[a-z]?\b/i);
+    if (slashNumber) {
+        return slashNumber[1].replace(/\s+/g, '');
+    }
+
+    const pipeNumber = cleanValue.match(/\|\s*(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)\b/i);
+    if (pipeNumber) {
+        return pipeNumber[1].replace(/\s+/g, '');
+    }
+
+    const promoNumber = cleanValue.match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)\b/i);
+    return promoNumber ? promoNumber[1].replace(/\s+/g, '') : '';
+}
+
+function collectorPrefix(value = '') {
+    const cleanValue = String(value || '');
+    return (
+        cleanValue.match(/\b([A-Z]{1,6})\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i)?.[1] ||
+        cleanValue.match(/\|\s*([A-Z]{1,6})\s?\d{1,4}[a-z]?\b/i)?.[1] ||
+        cleanValue.match(/\b([A-Z]{1,6})\s?\d{1,4}[a-z]?\b/i)?.[1] ||
+        ''
+    ).toUpperCase();
+}
+
+function expansionShortName(row = {}) {
+    const explicit = row.expansion_code || row.expansionCode || row.set_code || row.setCode || '';
+    if (explicit) {
+        return explicit;
+    }
+
+    const setName = String(row.set_name || row.expansion_name || '').trim();
+    const promoPrefix = collectorPrefix(row.card_number);
+    if (promoPrefix) {
+        return promoPrefix.toUpperCase();
+    }
+
+    const initials = setName
+        .replace(/\b(?:and|of|the|a|an)\b/gi, ' ')
+        .split(/\s+/)
+        .map((part) => part[0])
+        .join('')
+        .toUpperCase();
+
+    return initials.length >= 2 && initials.length <= 5 ? initials : setName;
+}
+
+function compactCandidateMeta(row = {}) {
+    const collector = firstCollectorNumber(row.card_number);
+    const expansion = expansionShortName(row);
+    return [collector, expansion].filter(Boolean).join(' · ');
+}
+
 function renderCandidate(row, isBest = false) {
     const link = document.createElement('a');
     link.className = `candidate${isBest ? ' candidate-best' : ''}`;
@@ -105,6 +159,9 @@ function renderCandidate(row, isBest = false) {
     link.rel = 'noreferrer';
 
     const logoUrl = expansionLogoUrl(row);
+    const logoSlot = document.createElement('span');
+    logoSlot.className = 'candidate-logo-slot';
+
     const logo = document.createElement('img');
     logo.className = 'candidate-logo';
     logo.alt = '';
@@ -112,10 +169,12 @@ function renderCandidate(row, isBest = false) {
     if (logoUrl) {
         logo.src = logoUrl;
         logo.addEventListener('error', () => {
-            logo.hidden = true;
+            logo.remove();
+            logoSlot.classList.add('candidate-logo-empty');
         }, { once: true });
+        logoSlot.appendChild(logo);
     } else {
-        logo.hidden = true;
+        logoSlot.classList.add('candidate-logo-empty');
     }
 
     const copy = document.createElement('span');
@@ -125,15 +184,12 @@ function renderCandidate(row, isBest = false) {
     title.textContent = row.name || `Blueprint ${row.card_id}`;
 
     const meta = document.createElement('span');
-    meta.textContent = [row.set_name, row.card_number].filter(Boolean).join(' · ');
+    meta.className = 'candidate-meta';
+    meta.textContent = compactCandidateMeta(row);
 
     copy.append(title, meta);
 
-    const action = document.createElement('span');
-    action.className = 'candidate-action';
-    action.textContent = isBest ? 'Open' : 'View';
-
-    link.append(logo, copy, action);
+    link.append(logoSlot, copy);
     return link;
 }
 

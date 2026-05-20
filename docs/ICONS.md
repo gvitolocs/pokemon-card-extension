@@ -18,7 +18,10 @@ Required sizes:
 
 Current manifest references:
 
-- `icons/icon-default.png` for `16`, `32`, `48`, `128`
+- `icons/icon-16.png`
+- `icons/icon-32.png`
+- `icons/icon-48.png`
+- `icons/icon-128.png`
 
 If you add per-size icons, update the manifest mapping accordingly.
 

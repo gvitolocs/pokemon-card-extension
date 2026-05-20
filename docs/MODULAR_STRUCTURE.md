@@ -79,6 +79,23 @@ pokemon-card-extension/
 4. Pokoin/Cardvault API lookup resolves best match
 5. Button state is updated with the generated destination URL
 
+## Side Panel Matching Workflow
+
+1. `config/background.js` scrapes the active marketplace page title with site-specific selectors.
+2. The title is normalized into structured fields (`name`, `collectorNumber`, `expansion`, `rarity`, `variation`).
+3. Marketplace noise is removed before search. Vinted terms such as `pokemon`, `pokémon`, `pkkmn`, `pkn`, `pokn`, `sealed`, `salead`, `pack`, `booster`, and `lot` are ignored.
+4. Before card search, the side panel resolves candidate title terms through Cardvault autocomplete, which uses `marketplace_card_names_for_language(...)` behind the API. If a term returns an exact canonical card name, that Cardvault name replaces the locally guessed name.
+5. `/api/extension-card-search` is tried first with the Cardvault-resolved name. Returned rows are accepted only if the returned card name matches the resolved structured name, preventing weak fuzzy matches like unrelated promo cards.
+6. If structured search has no accepted rows, the extension falls back to `/api/marketplace-autocomplete`.
+7. The side panel and injected marketplace buttons resolve names from the same Cardvault-backed data, so they do not depend on the old local Pokémon-name list or disagree on the best card.
+
+## Local Display Workflow
+
+1. Injected Pokoin buttons open the Chrome side panel for the current tab instead of opening a new Pokoin tab.
+2. The side panel iframe remains the place where Pokoin is shown, preserving the user's logged-in Pokoin session.
+3. Candidate rows use compact metadata: first collector number only (`129` from `SVP 129`, `232` from `232/091`) plus an expansion shortname.
+4. If Cardvault rows expose an explicit expansion code, use it. Otherwise derive one from the promo/collector prefix or expansion initials; if no useful shortname is available, show the expansion name.
+
 ## Notes
 
 - Keep processor logic site-focused and avoid cross-site DOM assumptions.

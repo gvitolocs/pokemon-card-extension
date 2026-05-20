@@ -10,14 +10,38 @@ class EbayProcessor {
     }
 
     pokoinIconUrl() {
-        return chrome.runtime.getURL('assets/pokoin.svg');
+        return chrome.runtime.getURL('assets/pokoin-512.png');
     }
 
-    setPokoinButtonLabel(button, suffix = '') {
+    setPokoinButtonLabel(button, matchCount = null) {
+        const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
-            <span>Pokoin${suffix ? ` ${suffix}` : ''}</span>
+            <span>Pokoin${suffix}</span>
         `;
+    }
+
+    isHighConfidenceMatch(result = {}) {
+        const rawScore = result.search_score ?? result.relevanceScore ?? result.score ?? result.search_rank;
+        const score = Number(rawScore);
+        if (!Number.isFinite(score)) return false;
+        if (score <= 1) return score >= 0.7;
+        if (score <= 100) return score >= 70;
+        return true;
+    }
+
+    countHighConfidenceMatches(results = []) {
+        return results.filter((result) => this.isHighConfidenceMatch(result)).length;
+    }
+
+    openPokoinSidePanel() {
+        return chrome.runtime.sendMessage({
+            action: 'openSidePanelForCurrentTab',
+            url: window.location.href,
+            title: document.title,
+        }).catch((error) => {
+            console.warn('⚠️ [EBAYE] Unable to open side panel:', error);
+        });
     }
 
     applyPokoinButtonStyles(button, styles = {}) {
@@ -38,10 +62,11 @@ class EbayProcessor {
         const icon = button.querySelector('img');
         if (icon) {
             Object.assign(icon.style, {
-                width: '18px',
-                height: '18px',
+                width: '22px',
+                height: '22px',
                 borderRadius: '50%',
                 objectFit: 'cover',
+                display: 'block',
             });
         }
     }
@@ -113,10 +138,6 @@ class EbayProcessor {
             
             // Extract metadata from title
             const titleInfo = this.extractTitleInfo(title);
-            if (!titleInfo.pokemonName) {
-                console.log('🚫 [EBAYE] No Pokemon found in title');
-                return;
-            }
             
             // Create button
             const button = document.createElement('button');
@@ -144,15 +165,14 @@ class EbayProcessor {
                 if (results && results.length > 0) {
                     // Turn button green when a link is found
                     button.style.background = '#28a745';
+                    this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
                     console.log(`✅ [EBAYE] Link found, button turned green`);
                     
                     // Open Pokoin card page on click
-                    const bestResult = results[0];
                     button.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
-                        window.open(pokoinUrl, '_blank');
+                        this.openPokoinSidePanel();
                     });
                     
                     // Enhanced hover effects (green)
@@ -269,7 +289,6 @@ class EbayProcessor {
             if (!title) return;
             
             const titleInfo = this.extractTitleInfo(title);
-            if (!titleInfo.pokemonName) return;
             
             // Create button
             const button = document.createElement('button');
@@ -287,18 +306,18 @@ class EbayProcessor {
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
             if (inserted) {
-                console.log(`✅ [EBAYE] Added button for ${titleInfo.pokemonName}`);
+                console.log(`✅ [EBAYE] Added button for ${titleInfo.pokemonName || title}`);
                 
                 // Search database
                 const results = await this.searchCardInDatabase(titleInfo, title);
                 if (results && results.length > 0) {
                     button.style.background = '#28a745';
+                    this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
                     const bestResult = results[0];
                     button.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
-                        window.open(pokoinUrl, '_blank');
+                        this.openPokoinSidePanel();
                     });
                 }
             }

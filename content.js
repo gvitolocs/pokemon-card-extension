@@ -71,17 +71,6 @@ class PokemonCardTraderLinker {
             // Start the observer immediately for fast insertion
             this.startObserver();
             
-            // Load configuration in background
-            if (typeof loadConfig === 'function') {
-                loadConfig().then(() => {
-                    console.log('✅ Configuration loaded');
-                }).catch(error => {
-                    console.warn('⚠️ Error loading configuration:', error);
-                });
-            } else {
-                console.warn('⚠️ loadConfig function not available');
-            }
-            
             console.log('✅ Extension initialized quickly');
             
             // Expose global functions for processors
@@ -341,14 +330,34 @@ class PokemonCardTraderLinker {
 let pokemonCardTraderInstance = null;
 
 function pokoinIconUrl() {
-    return chrome.runtime.getURL('assets/pokoin.svg');
+    return chrome.runtime.getURL('assets/pokoin-512.png');
 }
 
-function setPokoinButtonLabel(button, suffix = '') {
+function setPokoinButtonLabel(button, matchCount = null) {
+    const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
     button.innerHTML = `
         <img src="${pokoinIconUrl()}" alt="" aria-hidden="true">
-        <span>Pokoin${suffix ? ` ${suffix}` : ''}</span>
+        <span>Pokoin${suffix}</span>
     `;
+}
+
+function isHighConfidenceMatch(result = {}) {
+    const rawScore = result.search_score ?? result.relevanceScore ?? result.score ?? result.search_rank;
+    const score = Number(rawScore);
+    if (!Number.isFinite(score)) {
+        return false;
+    }
+    if (score <= 1) {
+        return score >= 0.7;
+    }
+    if (score <= 100) {
+        return score >= 70;
+    }
+    return true;
+}
+
+function countHighConfidenceMatches(results = []) {
+    return results.filter(isHighConfidenceMatch).length;
 }
 
 function applyPokoinButtonStyles(button, styles = {}) {
@@ -370,10 +379,11 @@ function applyPokoinButtonStyles(button, styles = {}) {
     const icon = button.querySelector('img');
     if (icon) {
         Object.assign(icon.style, {
-            width: '18px',
-            height: '18px',
+            width: '22px',
+            height: '22px',
             borderRadius: '50%',
             objectFit: 'cover',
+            display: 'block',
         });
     }
 }
@@ -402,8 +412,7 @@ function patchCardTraderCardPage() {
 
     const link = document.createElement('a');
     link.setAttribute('data-pokoin-cardtrader-button', 'true');
-    link.href = generatePokoinLink(blueprintId);
-    link.target = '_blank';
+    link.href = '#';
     link.rel = 'noreferrer';
     setPokoinButtonLabel(link);
     Object.assign(link.style, {
@@ -428,6 +437,11 @@ function patchCardTraderCardPage() {
         link.style.background = '#0ea5e9';
         link.style.transform = 'translateY(0)';
         link.style.boxShadow = '0 2px 8px rgba(14, 165, 233, 0.28)';
+    });
+    link.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openPokoinSidePanel();
     });
 
     titleElement.insertAdjacentElement('afterend', link);
@@ -465,6 +479,17 @@ function notifySidePanelNavigation() {
         title: document.title,
     }).catch(() => {
         // The background service worker may be asleep; tabs.onUpdated is a fallback.
+    });
+}
+
+function openPokoinSidePanel() {
+    return chrome.runtime.sendMessage({
+        action: 'openSidePanelForCurrentTab',
+        url: window.location.href,
+        title: document.title,
+    }).catch((error) => {
+        console.warn('⚠️ [Pokoin] Unable to open side panel:', error);
+        return { success: false, error: error.message };
     });
 }
 
@@ -545,17 +570,6 @@ async function initializeExtension() {
         
         // Start the observer immediately for fast insertion
         startObserver();
-        
-        // Load configuration in background
-        if (typeof loadConfig === 'function') {
-            loadConfig().then(() => {
-                console.log('✅ Configuration loaded');
-            }).catch(error => {
-                console.warn('⚠️ Error loading configuration:', error);
-            });
-        } else {
-            console.warn('⚠️ loadConfig function not available');
-        }
         
         console.log('✅ Extension initialized quickly');
         
@@ -1091,12 +1105,8 @@ async function processListing(listingElement) {
         
         // Extract info from title
         const titleInfo = extractTitleInfo(title);
-        if (!titleInfo.pokemonName) {
-            console.log('🚫 [CardTrader] No Pokemon found in title, skipping');
-            return;
-        }
         
-        console.log(`🎯 [CardTrader] Pokemon found: ${titleInfo.pokemonName}`);
+        console.log(`🎯 [CardTrader] Local title info:`, titleInfo);
         
 
         
@@ -1117,7 +1127,7 @@ async function processListing(listingElement) {
         const inseriscied = inserisciLinkContainer(listingElement, button);
         
         if (inseriscied) {
-            console.log(`✅ [CardTrader] Added Pokoin button (loading) for ${titleInfo.pokemonName}`);
+            console.log(`✅ [CardTrader] Added Pokoin button (loading) for ${titleInfo.pokemonName || title}`);
             
             // Search in database
             console.log(`🔍 [CardTrader] Starting search for: "${title}"`);
@@ -1141,15 +1151,14 @@ async function processListing(listingElement) {
                 
                 // Change color to green
                 button.style.background = '#28a745';
-                console.log(`✅ [CardTrader] Link found, button turned green for: ${titleInfo.pokemonName}`);
+                setPokoinButtonLabel(button, countHighConfidenceMatches(results));
+                console.log(`✅ [CardTrader] Link found, button turned green for: ${titleInfo.pokemonName || title}`);
                 
                 // Add click handler
-                const bestResult = results[0];
                 button.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const pokoinUrl = generatePokoinLink(bestResult.blueprint_id);
-                    window.open(pokoinUrl, '_blank');
+                    openPokoinSidePanel();
                 });
                 
                 // Hover effects (green)
@@ -1321,14 +1330,14 @@ function inserisciLinkContainer(listingElement, button) {
             const element = listingElement.querySelector(selector);
             if (element && element.parentNode) {
                 const parent = element.parentNode;
-                parent.inserisciBefore(button, element.nextSibling);
+                parent.insertBefore(button, element.nextSibling);
                 return true;
             }
         }
         
         // Fallback: inserisci after l'elemento
         if (listingElement.parentNode) {
-            listingElement.parentNode.inserisciBefore(button, listingElement.nextSibling);
+            listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
             return true;
         }
         return false;
@@ -1345,14 +1354,14 @@ function inserisciLinkContainer(listingElement, button) {
             const element = listingElement.querySelector(selector);
             if (element && element.parentNode) {
                 const parent = element.parentNode;
-                parent.inserisciBefore(button, element.nextSibling);
+                parent.insertBefore(button, element.nextSibling);
                 return true;
             }
         }
         
         // Fallback: inserisci after l'elemento
         if (listingElement.parentNode) {
-            listingElement.parentNode.inserisciBefore(button, listingElement.nextSibling);
+            listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
             return true;
         }
         return false;
@@ -1371,14 +1380,14 @@ function inserisciLinkContainer(listingElement, button) {
             const element = listingElement.querySelector(selector);
             if (element && element.parentNode) {
                 const parent = element.parentNode;
-                parent.inserisciBefore(button, element.nextSibling);
+                parent.insertBefore(button, element.nextSibling);
                 return true;
             }
         }
         
         // Fallback: inserisci after l'elemento
         if (listingElement.parentNode) {
-            listingElement.parentNode.inserisciBefore(button, listingElement.nextSibling);
+            listingElement.parentNode.insertBefore(button, listingElement.nextSibling);
             return true;
         }
         return false;
@@ -1562,10 +1571,6 @@ function patchEbayProductPage() {
         
         // Extract info from title
         const titleInfo = extractTitleInfo(title);
-        if (!titleInfo.pokemonName) {
-            console.log('🚫 [CardTrader] No Pokemon found in product title');
-            return;
-        }
         
 
         
@@ -1583,7 +1588,7 @@ function patchEbayProductPage() {
         
         // Insert the button after the title
         if (titleElement.parentNode) {
-            titleElement.parentNode.inserisciBefore(button, titleElement.nextSibling);
+            titleElement.parentNode.insertBefore(button, titleElement.nextSibling);
             console.log(`✅ [CardTrader] Added button CT (loading) to the eBay product page`);
             
             // Mark the page as processed
@@ -1598,15 +1603,14 @@ function patchEbayProductPage() {
             if (results && results.length > 0) {
                 // Change color to green when a link is found
                 button.style.background = '#28a745';
+                setPokoinButtonLabel(button, countHighConfidenceMatches(results));
                 console.log(`✅ [CardTrader] Link found, button turned green su eBay`);
                 
                 // Open the CardTrader link directly when clicked
-                const bestResult = results[0];
                 button.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const pokoinUrl = generatePokoinLink(bestResult.blueprint_id);
-                    window.open(pokoinUrl, '_blank');
+                    openPokoinSidePanel();
                 });
                 
                 // Enhanced hover effects (green)
@@ -1681,10 +1685,6 @@ function patchVintedProductPage() {
         
         // Extract info from title
         const titleInfo = extractTitleInfo(title);
-        if (!titleInfo.pokemonName) {
-            console.log('🚫 [CardTrader] No Pokemon found in product title');
-            return;
-        }
         
         // Search in database
         searchCardInDatabase(titleInfo, title).then(results => {
@@ -1745,9 +1745,9 @@ function patchVintedProductPage() {
                 console.log(`🔍 [CardTrader] titleElement.parentNode:`, titleElement.parentNode);
                 console.log(`🔍 [CardTrader] linkContainer:`, linkContainer);
                 
-                if (titleElement.parentNode && !titleElement.parentNode.contiene(linkContainer)) {
+                if (titleElement.parentNode && !titleElement.parentNode.contains(linkContainer)) {
                     console.log(`✅ [CardTrader] Standard insertion in parentNode`);
-                    titleElement.parentNode.inserisciBefore(linkContainer, titleElement.nextSibling);
+                    titleElement.parentNode.insertBefore(linkContainer, titleElement.nextSibling);
                 } else {
                     console.log('⚠️ [CardTrader] Impossibile inserire link container, fallback...');
                     console.log(`🔍 [CardTrader] titleElement.parentNode:`, titleElement.parentNode);
@@ -1756,7 +1756,7 @@ function patchVintedProductPage() {
                     // Fallback sicuro: inserisci after l'elemento padre del title
                     if (titleElement.parentNode && titleElement.parentNode.parentNode) {
                         console.log(`✅ [CardTrader] Fallback 1: inserted into parentNode.parentNode`);
-                        titleElement.parentNode.parentNode.inserisciBefore(linkContainer, titleElement.parentNode.nextSibling);
+                        titleElement.parentNode.parentNode.insertBefore(linkContainer, titleElement.parentNode.nextSibling);
                     } else {
                         // Ultimo fallback: inserisci alla fine del body
                         console.log(`✅ [CardTrader] Fallback 2: inserted into body`);
@@ -1813,53 +1813,38 @@ function patchCardmarketProductPage() {
         
         // Extract info from title
         const titleInfo = extractTitleInfo(title);
-        if (!titleInfo.pokemonName) {
-            console.log('🚫 [CardTrader] No Pokemon found in product title');
-            return;
-        }
         
         // Create gray loading button immediately
         const button = document.createElement('button');
-        button.innerHTML = 'CardTrader';
+        setPokoinButtonLabel(button);
         button.style.cssText = `
             margin: 0;
             padding: 6px 12px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 6px;
             font-size: 15px;
-            cursor: pointer;
-            font-weight: bold;
-            min-width: 90px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            text-align: center;
+            min-width: 100px;
         `;
+        applyPokoinButtonStyles(button, { background: '#6c757d' });
         
-        // Search il link "Contact Support" e sostituiscilo with il button CardTrader
+        // Search il link "Contact Support" e sostituiscilo with il button Pokoin
         const supportLink = document.querySelector('a[href*="support/tickets/new"]');
         let buttonInserted = false; // Flag to track whether the button was inserted
         
         // Inserisci il button
         if (supportLink && supportLink.parentNode) {
             supportLink.parentNode.replaceChild(button, supportLink);
-            console.log(`✅ [CardTrader] Replaced support link with CT button on Cardmarket (loading)`);
+            console.log(`✅ [CardTrader] Replaced support link with Pokoin button on Cardmarket (loading)`);
             buttonInserted = true;
         } else {
             // Find the support link container and insert the button there
             const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
             if (supportContainer) {
                 supportContainer.appendChild(button);
-                console.log(`✅ [CardTrader] Inserted CT button in support container on Cardmarket (loading)`);
+                console.log(`✅ [CardTrader] Inserted Pokoin button in support container on Cardmarket (loading)`);
                 buttonInserted = true;
             } else {
                 // Fallback: inserisci direttamente in h1
                 titleElement.appendChild(button);
-                console.log(`✅ [CardTrader] Added button CT to the product page Cardmarket (loading fallback)`);
+                console.log(`✅ [CardTrader] Added Pokoin button to the product page Cardmarket (loading fallback)`);
                 buttonInserted = true;
             }
         }
@@ -1869,20 +1854,19 @@ function patchCardmarketProductPage() {
         let targetButton = button;
         
         // Esegui sempre la search database se il button esiste (nuovo o already presente)
-        console.log('🔍 [CardTrader] Avvio search database for:', titleInfo.pokemonName);
+        console.log('🔍 [CardTrader] Avvio search database for:', titleInfo.pokemonName || title);
         searchCardInDatabase(titleInfo, title).then(results => {
             if (results && results.length > 0) {
                 // Change color to green when a link is found
                 targetButton.style.background = '#28a745';
+                setPokoinButtonLabel(targetButton, countHighConfidenceMatches(results));
                 console.log(`✅ [CardTrader] Link found, button turned green`);
                 
-                // Open the CardTrader link directly when clicked
+                // Open the Pokoin link directly when clicked
                 targetButton.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const bestResult = results[0];
-                    const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
-                    window.open(cardTraderUrl, '_blank');
+                    openPokoinSidePanel();
                 });
                 
                 // Enhanced hover effects (green)
@@ -2251,11 +2235,11 @@ function extractTitleInfo(title) {
     // Estrazione specifica for Cardmarket: search pattern come "Pokemon (SET 123)" o "Pokemon (SET123)"
     // SOLO se siamo su cardmarket.com
     if (window.location.hostname.includes('cardmarket')) {
-        cardmarketMatch = title.match(/([a-z]+)\s+\(([a-z]{2,4})\s*(\d+)\)/i);
+        cardmarketMatch = title.match(/([a-z]+)\s+\(([a-z0-9]{2,6})\s*(\d+)\)/i);
         
         // Se not trova il pattern with parentesi, search senza parentesi: "Pokemon SET 123"
         if (!cardmarketMatch) {
-            cardmarketMatch = title.match(/([a-z]+)\s+([a-z]{2,4})\s+(\d+)/i);
+            cardmarketMatch = title.match(/([a-z]+)\s+([a-z0-9]{2,6})\s+(\d+)/i);
         }
         
         if (cardmarketMatch) {
@@ -2403,9 +2387,9 @@ function extractTitleInfo(title) {
                     // Search Cardmarket-specific pattern like "Pokemon (SET 123)" or "Pokemon (SET123)"
                     // SOLO se siamo su cardmarket.com
                     if (window.location.hostname.includes('cardmarket')) {
-                        cardmarketMatch = title.match(/([a-z]+)\s+\(([a-z]{2,4})\s*(\d+)\)/i);
+                        cardmarketMatch = title.match(/([a-z]+)\s+\(([a-z0-9]{2,6})\s*(\d+)\)/i);
                         if (!cardmarketMatch) {
-                            cardmarketMatch = title.match(/([a-z]+)\s+([a-z]{2,4})\s+(\d+)/i);
+                            cardmarketMatch = title.match(/([a-z]+)\s+([a-z0-9]{2,6})\s+(\d+)/i);
                         }
                         if (cardmarketMatch) {
                             const [, extractedPokemon, setCode, cardNumber] = cardmarketMatch;
@@ -2816,7 +2800,8 @@ function extractTitleInfo(title) {
             'ul': 'unleashed',
             'ud': 'undone',
             'tm': 'triumphant',
-            'cl': 'call of legends'
+            'cl': 'call of legends',
+            'cp6': 'expansion pack 20th anniversary'
         };
         
         if (setCodeMap[setCode.toLowerCase()]) {
@@ -2964,7 +2949,8 @@ function extractTitleInfo(title) {
 // Search cards in database
 async function searchCardInDatabase(titleInfo, originalTitle = '') {
     try {
-        return searchPokoinCardApi(titleInfo, originalTitle);
+        const enrichedTitleInfo = await enrichTitleInfoWithCardvaultName(titleInfo, originalTitle);
+        return searchPokoinCardApi(enrichedTitleInfo, originalTitle);
     } catch (error) {
         console.error('❌ [CardTrader] Error during search:', error);
         return [];
@@ -2991,6 +2977,124 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
         language: 'en',
         limit: 5,
     };
+}
+
+function removeMarketplaceSearchNoise(value = '') {
+    return String(value || '')
+        .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
+        .replace(/\b(?:sealed|seal(?:ed)?|salead|saled|sigillat[aoe]?|pack|booster|lot)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function compactSearchValue(value = '') {
+    return removeMarketplaceSearchNoise(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeCardvaultRows(payload) {
+    if (Array.isArray(payload)) {
+        return payload;
+    }
+
+    if (payload && typeof payload === 'object') {
+        return payload.rows || payload.results || payload.data || [];
+    }
+
+    return [];
+}
+
+function candidateNameTermsFromTitle(title = '') {
+    const cleaned = removeMarketplaceSearchNoise(String(title || '')
+        .replace(/\s*\|\s*(?:Vinted|Cardmarket)\s*$/i, '')
+        .replace(/[()"'’`.,:;!?/\\[\]{}|]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim());
+    const stopWords = new Set([
+        'carte', 'carta', 'card', 'cards', 'promo', 'promos', 'rare', 'holo',
+        'stamp', 'stampa', 'stamped', 'black', 'star', 'treasure', 'treasures',
+        'legendary', 'ottime', 'condizioni', 'condition', 'near', 'mint',
+    ]);
+    const words = cleaned
+        .split(/\s+/)
+        .map((word) => word.trim())
+        .filter((word) => word && !stopWords.has(word.toLowerCase()));
+    const terms = [];
+
+    for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
+        for (let index = 0; index <= words.length - size; index += 1) {
+            terms.push(words.slice(index, index + size).join(' '));
+        }
+    }
+
+    return [...new Set(terms)].slice(0, 18);
+}
+
+async function resolveNameFromCardvaultTitle(title = '') {
+    for (const term of candidateNameTermsFromTitle(title)) {
+        const response = await fetch('https://pokoin.com/api/marketplace-autocomplete', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                search_term: term,
+                result_limit: 3,
+                pool_limit: 30,
+                search_language: 'en',
+            }),
+        });
+
+        if (!response.ok) {
+            continue;
+        }
+
+        const payload = await response.json();
+        const rows = normalizeCardvaultRows(payload);
+        const compactTerm = compactSearchValue(term);
+        const exactRow = rows.find((row) => {
+            const canonical = compactSearchValue(row.canonical_name || '');
+            const display = compactSearchValue(row.name || '');
+            return canonical === compactTerm || display === compactTerm;
+        });
+
+        if (exactRow) {
+            return exactRow.canonical_name || exactRow.name;
+        }
+    }
+
+    return '';
+}
+
+async function enrichTitleInfoWithCardvaultName(titleInfo = {}, originalTitle = '') {
+    const resolvedName = await resolveNameFromCardvaultTitle(originalTitle || titleInfo.originalTitle || '');
+    if (!resolvedName) {
+        return titleInfo;
+    }
+
+    return {
+        ...titleInfo,
+        pokemonName: resolvedName,
+        name: resolvedName,
+        cardvaultResolvedName: resolvedName,
+    };
+}
+
+function matchMatchesStructuredName(match, payload) {
+    const requestedName = compactSearchValue(payload?.name || '');
+    if (!requestedName) {
+        return true;
+    }
+
+    const matchName = compactSearchValue(match?.name || '');
+    if (!matchName) {
+        return false;
+    }
+
+    return matchName === requestedName ||
+        matchName.includes(requestedName) ||
+        requestedName.includes(matchName);
 }
 
 function legacyResultFromPokoinMatch(match) {
@@ -3025,8 +3129,9 @@ async function searchPokoinCardApi(titleInfo, originalTitle) {
 
     const data = await response.json();
     const matches = Array.isArray(data.matches) ? data.matches : [];
-    if (matches.length > 0) {
-        return matches.map(legacyResultFromPokoinMatch);
+    const acceptedMatches = matches.filter((match) => matchMatchesStructuredName(match, payload));
+    if (acceptedMatches.length > 0) {
+        return acceptedMatches.map(legacyResultFromPokoinMatch);
     }
 
     return searchPokoinAutocomplete(titleInfo, originalTitle);
@@ -3043,17 +3148,19 @@ function legacyResultFromAutocompleteRow(row) {
         image_url: row.image_url || row.cdn_image_url,
         preview_image_url: row.preview_image_url,
         source: 'pokoin_marketplace_autocomplete',
-        search_score: row.score,
+        search_score: row.score ?? row.search_rank,
     };
 }
 
 function buildPokoinAutocompleteQuery(titleInfo = {}, originalTitle = '') {
-    return [
+    const structuredQuery = [
         titleInfo.pokemonName || titleInfo.name,
         titleInfo.cardType,
         titleInfo.collectorNumber || titleInfo.cardNumber,
         titleInfo.expansion || titleInfo.expansionName,
-    ].filter(Boolean).join(' ').trim() || originalTitle;
+    ].filter(Boolean).join(' ').trim();
+
+    return removeMarketplaceSearchNoise(structuredQuery || originalTitle);
 }
 
 async function searchPokoinAutocomplete(titleInfo, originalTitle) {
