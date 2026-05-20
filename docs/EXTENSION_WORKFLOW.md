@@ -7,6 +7,7 @@
 3. Clicking the button opens the Chrome side panel for the current tab instead of opening a new browser tab.
 4. The background service worker refreshes the side panel state for the sender tab.
 5. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.
+6. If a marketplace content script cannot fetch Cardvault results directly, it asks the background service worker to run the same resolver so the button can still update.
 
 ## Match Resolution Flow
 
@@ -33,3 +34,4 @@
 4. If no explicit expansion code exists, use the collector prefix such as `SVP` or `XY`.
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
+7. Vinted's in-page preview can show up to eight candidates under the `Pokoin.com` button.

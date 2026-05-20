@@ -622,7 +622,7 @@ async function searchExtensionCard(structuredCard) {
         variation: structuredCard.variation,
         editionHint: structuredCard.editionHint,
         language: 'en',
-        limit: 3,
+        limit: 8,
     };
 
     const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
@@ -675,6 +675,21 @@ async function searchExtensionCard(structuredCard) {
             matchCount: data.matches?.length || 0,
             acceptedMatchCount: rows.length,
         },
+    };
+}
+
+function legacyResultFromRow(row) {
+    return {
+        blueprint_id: row.card_id,
+        name_en: row.name,
+        pokemon_name: row.name,
+        expansion_name_en: row.set_name,
+        collector_number: row.card_number,
+        rarity: row.rarity,
+        image_url: row.image_url || row.cdn_image_url,
+        preview_image_url: row.preview_image_url,
+        source: row.source || 'background_card_search',
+        search_score: row.search_rank,
     };
 }
 
@@ -857,6 +872,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch((error) => {
                 sendResponse({ success: false, error: error.message || 'Unable to refresh match.' });
             });
+    } else if (request.action === 'searchCardForTitle') {
+        const tab = sender.tab;
+        const title = request.title || tab?.title || '';
+        Promise.resolve()
+            .then(async () => {
+                if (!title) {
+                    return [];
+                }
+                const structuredCard = scrapeStructuredCardFields(title);
+                const nameResolution = await resolveNameFromCardvaultTitle(title);
+                if (nameResolution.name) {
+                    structuredCard.name = nameResolution.name;
+                }
+                const searchResult = await searchExtensionCard(structuredCard);
+                return searchResult.rows.map(legacyResultFromRow);
+            })
+            .then((results) => sendResponse({ success: true, results }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
     } else if (request.action === 'openSidePanelForCurrentTab') {
         const tab = sender.tab;
         if (!tab?.id) {

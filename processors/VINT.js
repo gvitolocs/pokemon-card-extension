@@ -76,7 +76,7 @@ class VintedProcessor {
         title.style.cssText = 'font-size:13px;font-weight:800;margin-bottom:8px;';
         preview.appendChild(title);
 
-        results.slice(0, 4).forEach((result) => {
+        results.slice(0, 8).forEach((result) => {
             const row = document.createElement('button');
             row.type = 'button';
             row.style.cssText = `
@@ -114,6 +114,15 @@ class VintedProcessor {
         }).catch((error) => {
             console.warn('⚠️ [VINT] Unable to open side panel:', error);
         });
+    }
+
+    async searchCardWithBackground(title) {
+        const response = await chrome.runtime.sendMessage({
+            action: 'searchCardForTitle',
+            title,
+            url: window.location.href,
+        });
+        return response?.success && Array.isArray(response.results) ? response.results : [];
     }
 
     applyPokoinButtonStyles(button, styles = {}) {
@@ -239,10 +248,24 @@ class VintedProcessor {
                     console.log(`✅ [VINT] Updating button with ${results.length} results`);
                     this.updateButtonWithResults(results);
                 } else {
-                    console.log('⚠️ [VINT] No database result found, button stays gray');
+                    console.log('⚠️ [VINT] No content-script result found, trying background search');
+                    this.searchCardWithBackground(title).then((backgroundResults) => {
+                        if (backgroundResults.length > 0) {
+                            console.log(`✅ [VINT] Background search returned ${backgroundResults.length} results`);
+                            this.updateButtonWithResults(backgroundResults);
+                        } else {
+                            console.log('⚠️ [VINT] No database result found, button stays gray');
+                        }
+                    });
                 }
             }).catch(error => {
                 console.error('❌ [VINT] Database lookup error:', error);
+                this.searchCardWithBackground(title).then((backgroundResults) => {
+                    if (backgroundResults.length > 0) {
+                        console.log(`✅ [VINT] Background fallback returned ${backgroundResults.length} results`);
+                        this.updateButtonWithResults(backgroundResults);
+                    }
+                });
             });
             
             // Mark page as processed
