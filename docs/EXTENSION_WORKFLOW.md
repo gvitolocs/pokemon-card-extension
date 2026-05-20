@@ -27,7 +27,8 @@
 10. Plain `Nidoran` is treated as a special ambiguous name: keep both male and female candidates visible, and use expansion/collector evidence to rank the best one.
 11. First-edition wording is a local ordering hint, not a hard expansion filter: boost the Base Set family (`Base Set`, `Base Set 2`, `Base Set Shadowless`) first, but keep newer Japanese/modern edition candidates available afterward.
 12. Variation text such as `V`, `ex`, `VMAX`, and `VSTAR` is preserved in the Cardvault search name so the side panel uses the same more-specific matching behavior as the injected button.
-13. On Vinted pages, compact clue chips are extracted from the item title and description. Useful clues include collector numbers, promo codes, rarity/variation words, and known expansion names; generic marketplace words like `carta`, `carte`, `card`, and `cards` are never shown as chips and never sent as search clues.
+13. On Vinted pages, compact clue chips are extracted from the item title and description. Useful clues include real Pokemon-name-like terms such as `Reshiram`, collector numbers, promo codes, rarity/variation words, and known expansion names; generic marketplace words like `carta`, `carte`, `card`, and `cards` are never shown as chips and never sent as search clues.
+14. Vinted clue chips that validate as Pokemon names through the existing title/name resolver are selected by default. Other useful but non-name-like clues still render as chips, but start off and only affect search after the user toggles them on.
 
 ## Candidate Display Flow
 
@@ -41,7 +42,7 @@
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
 7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
-8. Vinted clue chips render near the injected Pokoin button as compact user-selectable toggles. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
+8. Vinted clue chips render near the injected Pokoin button as compact user-selectable toggles. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
 
 ## CardTrader Direct Path
 

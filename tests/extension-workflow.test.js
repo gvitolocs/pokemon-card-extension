@@ -181,6 +181,111 @@ test('Vinted description keywords ignore generic card words and keep useful clue
     assert.ok(labels.includes('192/203'), 'collector number should be extracted');
 });
 
+test('Vinted keyword defaults select Pokemon-name-like clues only', () => {
+    const appended = [];
+    const chips = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: (title) => ({
+                pokemonName: /^reshiram$/i.test(String(title || '').trim()) ? 'reshiram' : null,
+            }),
+        },
+        document: {
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => {
+                const node = {
+                    tagName: tagName.toUpperCase(),
+                    style: {},
+                    attributes: {},
+                    children: [],
+                    textContent: '',
+                    type: '',
+                    setAttribute(name, value) {
+                        this.attributes[name] = value;
+                    },
+                    appendChild(child) {
+                        this.children.push(child);
+                        if (child.attributes?.['data-pokoin-vinted-keyword']) {
+                            chips.push(child);
+                        }
+                    },
+                    addEventListener() {},
+                    querySelector() {
+                        return { style: {} };
+                    },
+                };
+                return node;
+            },
+            body: {
+                appendChild(element) {
+                    appended.push(element);
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentButton = createButtonStub();
+
+    processor.renderKeywordToggles(
+        'Carta Pokemon Reshiram',
+        'Carte perfetta.'
+    );
+
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const selectedLabels = processor.selectedKeywordLabels();
+
+    assert.ok(labels.includes('Reshiram'), 'Reshiram should be extracted from description text');
+    assert.equal(processor.currentKeywords.find((keyword) => keyword.label === 'Reshiram').selectedByDefault, true);
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.label === 'perfetta' && keyword.selectedByDefault === false));
+    assert.equal(labels.includes('Carta'), false);
+    assert.equal(labels.includes('Carte'), false);
+    assert.deepEqual([...selectedLabels], ['Reshiram']);
+    assert.equal(chips.find((chip) => chip.textContent === 'Reshiram').attributes['aria-pressed'], 'true');
+    assert.equal(chips.find((chip) => chip.textContent === 'perfetta').attributes['aria-pressed'], 'false');
+    assert.equal(appended.length, 1, 'keyword chip container should render');
+});
+
+test('Vinted default-off clues are omitted from background search query', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/4-reshiram', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^reshiram$/i.test(String(title || '').trim()) ? 'reshiram' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokemon';
+    processor.currentKeywords = processor.extractVintedKeywords(
+        processor.currentTitle,
+        'Reshiram card perfetta condizioni 114/113'
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    assert.deepEqual([...messages[0].clues], ['Reshiram']);
+    assert.match(messages[0].title, /Reshiram/);
+    assert.doesNotMatch(messages[0].title, /perfetta/i);
+    assert.doesNotMatch(messages[0].title, /114\/113/);
+    assert.doesNotMatch(messages[0].title, /\b(?:carta|card|carte|cards)\b/i);
+});
+
 test('Vinted selected keyword toggles shape background and side-panel messages', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {

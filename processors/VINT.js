@@ -88,6 +88,53 @@ class VintedProcessor {
         }
     }
 
+    isPokemonNameLikeClue(value = '') {
+        const label = this.removeVintedMarketplaceNoise(typeof value === 'object' ? value.label || value.value : value);
+        const compact = this.compactClueValue(label);
+        if (!label || compact.length < 3 || /\d/.test(label)) {
+            return false;
+        }
+
+        const normalizedParts = label.split(/\s+/).filter(Boolean);
+        if (normalizedParts.length > 3) {
+            return false;
+        }
+
+        if (typeof window.extractTitleInfo !== 'function') {
+            return false;
+        }
+
+        try {
+            const titleInfo = window.extractTitleInfo(label) || {};
+            const resolvedName = titleInfo.pokemonName || titleInfo.name || '';
+            return Boolean(resolvedName && this.compactClueValue(resolvedName) === compact);
+        } catch (error) {
+            console.warn('⚠️ [VINT] Unable to validate clue as Pokemon name:', error);
+            return false;
+        }
+    }
+
+    prepareVintedKeywordCandidates(candidates = []) {
+        return candidates
+            .map((candidate, index) => {
+                const nameLike = this.isPokemonNameLikeClue(candidate);
+                return {
+                    ...candidate,
+                    nameLike,
+                    selectedByDefault: nameLike,
+                    _index: index,
+                };
+            })
+            .sort((left, right) => {
+                if (left.selectedByDefault !== right.selectedByDefault) {
+                    return left.selectedByDefault ? -1 : 1;
+                }
+                return left._index - right._index;
+            })
+            .slice(0, 10)
+            .map(({ _index, ...keyword }) => keyword);
+    }
+
     extractVintedDescription() {
         const selectors = [
             '[data-testid="item-description"]',
@@ -163,7 +210,7 @@ class VintedProcessor {
             }
         }
 
-        return candidates.slice(0, 10);
+        return this.prepareVintedKeywordCandidates(candidates);
     }
 
     selectedKeywordLabels() {
@@ -403,7 +450,11 @@ class VintedProcessor {
     renderKeywordToggles(title, description) {
         document.querySelectorAll('[data-pokoin-vinted-keywords]').forEach((element) => element.remove());
         this.currentKeywords = this.extractVintedKeywords(title, description);
-        this.selectedKeywordValues = new Set(this.currentKeywords.map((keyword) => keyword.compact));
+        this.selectedKeywordValues = new Set(
+            this.currentKeywords
+                .filter((keyword) => keyword.selectedByDefault)
+                .map((keyword) => keyword.compact)
+        );
         if (!this.currentButton || this.currentKeywords.length === 0) {
             return;
         }
@@ -431,7 +482,8 @@ class VintedProcessor {
             chip.type = 'button';
             chip.textContent = keyword.label;
             chip.setAttribute('data-pokoin-vinted-keyword', keyword.compact);
-            this.applyKeywordChipStyle(chip, true);
+            chip.setAttribute('data-pokoin-vinted-keyword-name-like', keyword.nameLike ? 'true' : 'false');
+            this.applyKeywordChipStyle(chip, this.selectedKeywordValues.has(keyword.compact));
             chip.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
