@@ -87,28 +87,8 @@ class PokemonCardTraderLinker {
                 console.warn('⚠️ loadConfig function not available');
             }
             
-            // Initialize Supabase in background
-            if (typeof initializeSupabase === 'function') {
-                initializeSupabase().then(supabaseReady => {
-                    if (supabaseReady) {
-                        console.log('✅ Supabase connected - switching icon to green');
-                        chrome.runtime.sendMessage({ 
-                            action: 'updateIcon', 
-                            status: 'connected' 
-                        });
-                    } else {
-                        console.warn('⚠️ Supabase not configured, extension will run in limited mode');
-                        chrome.runtime.sendMessage({ 
-                            action: 'updateIcon', 
-                            status: 'error' 
-                        });
-                    }
-                }).catch(error => {
-                    console.warn('⚠️ Error nell\'initialization Supabase:', error);
-                });
-            } else {
-                console.warn('⚠️ initializeSupabase function not available');
-            }
+            // Marketplace matching now uses Pokoin/Cardvault APIs. Do not start
+            // the legacy Supabase client on third-party marketplace pages.
             
             console.log('✅ Extension initialized quickly');
             
@@ -542,30 +522,8 @@ async function initializeExtension() {
             console.warn('⚠️ loadConfig function not available');
         }
         
-        // Initialize Supabase in background
-        // NOTE: On Vinted this function is called multiple times due to SPA navigation
-        // The singleton pattern in supabase-config.js ensures that only one client is created
-        if (typeof initializeSupabase === 'function') {
-            initializeSupabase().then(supabaseReady => {
-                if (supabaseReady) {
-                    console.log('✅ Supabase connected - switching icon to green');
-                    chrome.runtime.sendMessage({ 
-                        action: 'updateIcon', 
-                        status: 'connected' 
-                    });
-                } else {
-                    console.warn('⚠️ Supabase not configured, extension will run in limited mode');
-                    chrome.runtime.sendMessage({ 
-                        action: 'updateIcon', 
-                        status: 'error' 
-                    });
-                }
-            }).catch(error => {
-                console.warn('⚠️ Error nell\'initialization Supabase:', error);
-            });
-        } else {
-            console.warn('⚠️ initializeSupabase function not available');
-        }
+        // Marketplace matching now uses Pokoin/Cardvault APIs. Do not start
+        // the legacy Supabase client on third-party marketplace pages.
         
         console.log('✅ Extension initialized quickly');
         

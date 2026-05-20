@@ -86,17 +86,6 @@ function isSupabaseConfigured() {
     return supabaseClient !== null;
 }
 
-// Initialize Supabase when DOM is ready (only once)
-// EXTRA SAFETY CHECK: verify client does not already exist
-// Needed because on Vinted the DOM can become "ready" more than once
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        if (!supabaseClient) {
-            initializeSupabase();
-        }
-    });
-} else {
-    if (!supabaseClient) {
-        initializeSupabase();
-    }
-} 
+// Legacy Supabase marketplace lookup is intentionally not auto-started.
+// Pokoin/Cardvault APIs now power marketplace matching; calling Supabase here
+// causes noisy connection errors on supported marketplace pages.
