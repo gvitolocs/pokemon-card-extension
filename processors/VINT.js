@@ -219,8 +219,24 @@ class VintedProcessor {
             .map((keyword) => keyword.value);
     }
 
+    selectedPrimaryClues(clues = this.selectedKeywordLabels()) {
+        const selectedCompacts = new Set(
+            this.currentKeywords
+                .filter((keyword) => this.selectedKeywordValues.has(keyword.compact))
+                .filter((keyword) => keyword.nameLike)
+                .map((keyword) => keyword.compact)
+        );
+
+        return clues.filter((clue) => selectedCompacts.has(this.compactClueValue(clue)));
+    }
+
     buildVintedSearchTitle(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
-        return [this.removeVintedMarketplaceNoise(title), ...clues]
+        const primaryClues = this.selectedPrimaryClues(clues);
+        const searchParts = primaryClues.length > 0
+            ? primaryClues
+            : [this.removeVintedMarketplaceNoise(title), ...clues];
+
+        return searchParts
             .map((part) => this.removeVintedMarketplaceNoise(part))
             .filter(Boolean)
             .filter((part, index, all) => all.findIndex((candidate) => this.compactClueValue(candidate) === this.compactClueValue(part)) === index)
@@ -296,26 +312,58 @@ class VintedProcessor {
 
     openPokoinSidePanel() {
         const clues = this.selectedKeywordLabels();
+        const primaryClues = this.selectedPrimaryClues(clues);
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
             url: window.location.href,
             title: this.buildVintedSearchTitle(this.currentTitle || document.title, clues),
             originalTitle: this.currentTitle || document.title,
             clues,
+            primaryClues,
         }).catch((error) => {
             console.warn('⚠️ [VINT] Unable to open side panel:', error);
         });
     }
 
     async searchCardWithBackground(title, clues = this.selectedKeywordLabels()) {
+        const primaryClues = this.selectedPrimaryClues(clues);
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: this.buildVintedSearchTitle(title, clues),
             originalTitle: title,
             clues,
+            primaryClues,
             url: window.location.href,
         });
         return response?.success && Array.isArray(response.results) ? response.results : [];
+    }
+
+    vintedFloatingPanelStyles() {
+        return {
+            position: 'fixed',
+            top: '12px',
+            right: '12px',
+            zIndex: '9999',
+            width: 'min(260px, calc(100vw - 24px))',
+            maxWidth: '260px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '8px',
+            pointerEvents: 'auto',
+            fontFamily: 'Arial, sans-serif',
+        };
+    }
+
+    ensureVintedFloatingPanel() {
+        let panel = document.querySelector?.('[data-pokoin-vinted-panel]');
+        if (!panel) {
+            panel = document.createElement('div');
+            panel.setAttribute('data-pokoin-vinted-panel', 'true');
+            Object.assign(panel.style, this.vintedFloatingPanelStyles());
+            document.body.appendChild(panel);
+        }
+        return panel;
     }
 
     applyPokoinButtonStyles(button, styles = {}) {
@@ -462,11 +510,6 @@ class VintedProcessor {
         const container = document.createElement('div');
         container.setAttribute('data-pokoin-vinted-keywords', 'true');
         container.style.cssText = `
-            position: fixed;
-            top: 154px;
-            right: 20px;
-            z-index: 9999;
-            width: min(320px, calc(100vw - 40px));
             display: flex;
             flex-wrap: wrap;
             gap: 6px;
@@ -499,7 +542,7 @@ class VintedProcessor {
             container.appendChild(chip);
         });
 
-        document.body.appendChild(container);
+        this.ensureVintedFloatingPanel().appendChild(container);
     }
 
     applyKeywordChipStyle(chip, selected) {
@@ -574,7 +617,7 @@ class VintedProcessor {
      * Create fixed top-right button
      */
     createFixedPositionButton() {
-        console.log('🔄 [VINT] Creating fixed top-right button...');
+        console.log('🔄 [VINT] Creating compact Vinted action panel...');
         
         // Create gray fixed-position button
         const button = document.createElement('button');
@@ -582,13 +625,10 @@ class VintedProcessor {
         button.setAttribute('data-pokemon-linker-fallback', 'true');
         this.setPokoinButtonLabel(button);
         button.style.cssText = `
-            position: fixed;
-            top: 100px;
-            right: 20px;
-            z-index: 9999;
-            padding: 12px 24px;
-            font-size: 16px;
-            min-width: 120px;
+            width: 100%;
+            padding: 10px 14px;
+            font-size: 14px;
+            min-width: 0;
             font-family: Arial, sans-serif;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         `;
@@ -607,9 +647,13 @@ class VintedProcessor {
             button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
         });
         
-        // Insert into body
-        document.body.appendChild(button);
-        console.log(`✅ [VINT] Added fixed top-right button`);
+        const panel = this.ensureVintedFloatingPanel();
+        if (typeof panel.prepend === 'function') {
+            panel.prepend(button);
+        } else {
+            panel.appendChild(button);
+        }
+        console.log(`✅ [VINT] Added compact panel button`);
         this.currentButton = button;
         button.addEventListener('click', (e) => {
             e.preventDefault();

@@ -376,6 +376,14 @@ function buildTitleWithRequestClues(title = '', clues = []) {
         .join(' ');
 }
 
+function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) {
+    const normalizedPrimaryClues = normalizeRequestClues(primaryClues);
+    if (normalizedPrimaryClues.length > 0) {
+        return buildTitleWithRequestClues('', normalizedPrimaryClues);
+    }
+    return buildTitleWithRequestClues(title, clues);
+}
+
 function compactSearchValue(value = '') {
     return removeMarketplaceSearchNoise(value)
         .toLowerCase()
@@ -828,11 +836,13 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     const pageInfo = await getActivePageInfo(tab);
     const requestClues = normalizeRequestClues(requestContext.clues);
+    const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
     if (requestClues.length > 0) {
         const originalTitle = requestContext.originalTitle || pageInfo.title || tab?.title || '';
         pageInfo.originalTitle = originalTitle;
         pageInfo.clues = requestClues;
-        pageInfo.title = buildTitleWithRequestClues(originalTitle, requestClues);
+        pageInfo.primaryClues = requestPrimaryClues;
+        pageInfo.title = buildPrimaryClueSearchTitle(originalTitle, requestClues, requestPrimaryClues);
         pageInfo.structuredCard = scrapeStructuredCardFields(pageInfo.title);
     }
     let rows = [];
@@ -965,7 +975,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const tab = sender.tab;
         const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
         const clues = normalizeRequestClues(request.clues);
-        const title = buildTitleWithRequestClues(request.originalTitle || request.title || tab?.title || '', clues);
+        const primaryClues = normalizeRequestClues(request.primaryClues);
+        const title = buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
         Promise.resolve()
             .then(async () => {
                 if (directCardTraderBlueprintId) {
@@ -1014,7 +1025,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 clearTimeout(sidePanelRefreshTimers.get(tab.id));
                 await chrome.sidePanel?.open({ tabId: tab.id });
                 const requestClues = normalizeRequestClues(request.clues);
-                const requestTitle = buildTitleWithRequestClues(request.originalTitle || currentTitle, requestClues);
+                const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
+                const requestTitle = buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
                 if (directCardTraderBlueprintId) {
                     const directName = currentTitle || `CardTrader card ${directCardTraderBlueprintId}`;
                     const directRow = {
@@ -1077,6 +1089,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             hostname: currentUrl ? new URL(currentUrl).hostname : '',
                             originalTitle: request.originalTitle || currentTitle,
                             clues: requestClues,
+                            primaryClues: requestPrimaryClues,
                         },
                         rows: [],
                         best: null,
@@ -1092,6 +1105,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }, {
                     originalTitle: request.originalTitle || currentTitle,
                     clues: requestClues,
+                    primaryClues: requestPrimaryClues,
                 });
             })
             .then((result) => sendResponse({ success: true, result }))

@@ -10,7 +10,7 @@
 6. If a marketplace content script cannot fetch Cardvault results directly, it asks the background service worker to run the same resolver so the button can still update without logging expected page-context fetch failures as extension errors.
 7. Button clicks always force a fresh side-panel loading state and resolve the clicked tab URL/title, avoiding stale candidates from previous pages.
 8. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
-9. Vinted can pass selected item-description clues with the button click; the background service worker merges those clues into the side-panel search context before resolving candidates.
+9. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
 10. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
 
 ## Match Resolution Flow
@@ -28,7 +28,7 @@
 11. First-edition wording is a local ordering hint, not a hard expansion filter: boost the Base Set family (`Base Set`, `Base Set 2`, `Base Set Shadowless`) first, but keep newer Japanese/modern edition candidates available afterward.
 12. Variation text such as `V`, `ex`, `VMAX`, and `VSTAR` is preserved in the Cardvault search name so the side panel uses the same more-specific matching behavior as the injected button.
 13. On Vinted pages, compact clue chips are extracted from the item title and description. Useful clues include real Pokemon-name-like terms such as `Reshiram`, collector numbers, promo codes, rarity/variation words, and known expansion names; generic marketplace words like `carta`, `carte`, `card`, and `cards` are never shown as chips and never sent as search clues.
-14. Vinted clue chips that validate as Pokemon names through the existing title/name resolver are selected by default. Other useful but non-name-like clues still render as chips, but start off and only affect search after the user toggles them on.
+14. Vinted clue chips that validate as Pokemon names through the existing title/name resolver are selected by default and become the primary search title. Other useful but non-name-like clues still render as chips, but start off and only affect search after the user toggles them on.
 
 ## Candidate Display Flow
 
@@ -42,7 +42,7 @@
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
 7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
-8. Vinted clue chips render near the injected Pokoin button as compact user-selectable toggles. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
+8. Vinted renders the Pokoin button and clue chips inside one compact fixed panel with spacing between the button and chips, avoiding the old independent `top: 154px; right: 20px` chip overlay that could cover the Vinted product details column. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
 
 ## CardTrader Direct Path
 

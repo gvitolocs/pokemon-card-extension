@@ -286,6 +286,49 @@ test('Vinted default-off clues are omitted from background search query', async 
     assert.doesNotMatch(messages[0].title, /\b(?:carta|card|carte|cards)\b/i);
 });
 
+test('Vinted selected Pokemon clue overrides noisy title terms', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/5-reshiram', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^reshiram$/i.test(String(title || '').trim()) ? 'reshiram' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokémon reshiram B/N ita';
+    processor.currentKeywords = processor.extractVintedKeywords(
+        processor.currentTitle,
+        'Nita trainer card in condizioni perfette'
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+    await processor.openPokoinSidePanel();
+
+    assert.deepEqual([...messages[0].clues], ['reshiram']);
+    assert.deepEqual([...messages[0].primaryClues], ['reshiram']);
+    assert.equal(messages[0].title, 'reshiram');
+    assert.doesNotMatch(messages[0].title, /Nita|B\/N|ita/i);
+    assert.equal(messages[1].action, 'openSidePanelForCurrentTab');
+    assert.deepEqual([...messages[1].clues], ['reshiram']);
+    assert.deepEqual([...messages[1].primaryClues], ['reshiram']);
+});
+
 test('Vinted selected keyword toggles shape background and side-panel messages', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -326,6 +369,61 @@ test('Vinted selected keyword toggles shape background and side-panel messages',
     assert.doesNotMatch(messages[0].title, /\b(?:carta|card|carte|cards)\b/i);
     assert.equal(messages[1].action, 'openSidePanelForCurrentTab');
     assert.deepEqual([...messages[1].clues], ['Evolving Skies', 'SWSH154']);
+    assert.deepEqual([...messages[1].primaryClues], []);
+});
+
+test('Vinted keyword panel is compact and anchored to button container', () => {
+    const appended = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: () => ({ pokemonName: null }),
+        },
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => ({
+                tagName: tagName.toUpperCase(),
+                style: {},
+                attributes: {},
+                children: [],
+                textContent: '',
+                type: '',
+                setAttribute(name, value) {
+                    this.attributes[name] = value;
+                },
+                appendChild(child) {
+                    this.children.push(child);
+                },
+                prepend(child) {
+                    this.children.unshift(child);
+                },
+                addEventListener() {},
+                querySelector() {
+                    return { style: {} };
+                },
+            }),
+            body: {
+                appendChild(element) {
+                    appended.push(element);
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentButton = createButtonStub();
+
+    const panelStyles = processor.vintedFloatingPanelStyles();
+    processor.renderKeywordToggles('Carta Pokemon Dragonite', 'SWSH154 Evolving Skies');
+
+    assert.equal(panelStyles.top, '12px');
+    assert.equal(panelStyles.right, '12px');
+    assert.equal(panelStyles.width, 'min(260px, calc(100vw - 24px))');
+    assert.notEqual(panelStyles.top, '154px');
+    assert.notEqual(panelStyles.right, '20px');
+    assert.equal(appended.length, 1, 'one shared panel should be appended');
+    assert.equal(appended[0].attributes['data-pokoin-vinted-panel'], 'true');
+    assert.ok(appended[0].children.some((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true'));
 });
 
 test('Vinted background candidates turn button green and render preview', async () => {
@@ -372,15 +470,20 @@ test('background clue helpers remove generic card words from request titles', ()
     const compact = extractFunctionSource(source, 'compactSearchValue');
     const normalize = extractFunctionSource(source, 'normalizeRequestClues');
     const build = extractFunctionSource(source, 'buildTitleWithRequestClues');
+    const buildPrimary = extractFunctionSource(source, 'buildPrimaryClueSearchTitle');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(`${removeNoise}\n${compact}\n${normalize}\n${build}\nthis.normalizeRequestClues = normalizeRequestClues; this.buildTitleWithRequestClues = buildTitleWithRequestClues;`, sandbox);
+    vm.runInContext(`${removeNoise}\n${compact}\n${normalize}\n${build}\n${buildPrimary}\nthis.normalizeRequestClues = normalizeRequestClues; this.buildTitleWithRequestClues = buildTitleWithRequestClues; this.buildPrimaryClueSearchTitle = buildPrimaryClueSearchTitle;`, sandbox);
 
     assert.deepEqual(sandbox.normalizeRequestClues(['card', 'carte', 'SWSH154', 'Evolving Skies']), ['SWSH154', 'Evolving Skies']);
     const title = sandbox.buildTitleWithRequestClues('Carta Pokemon Dragonite V', ['card', 'SWSH154']);
     assert.match(title, /Dragonite V/);
     assert.match(title, /SWSH154/);
     assert.doesNotMatch(title, /\b(?:carta|card|carte|cards)\b/i);
+    assert.equal(
+        sandbox.buildPrimaryClueSearchTitle('Carta Pokémon reshiram B/N ita', ['reshiram', 'Nita'], ['reshiram']),
+        'reshiram'
+    );
 });
 
 test('CardTrader direct URL opens side panel without page scrape or API search', async () => {
