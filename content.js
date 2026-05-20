@@ -2981,6 +2981,8 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
 
 function removeMarketplaceSearchNoise(value = '') {
     return String(value || '')
+        .replace(/\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/gi, ' ')
+        .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
         .replace(/\b(?:sealed|seal(?:ed)?|salead|saled|sigillat[aoe]?|pack|booster|lot)\b/gi, ' ')
         .replace(/\s+/g, ' ')
@@ -3015,6 +3017,7 @@ function candidateNameTermsFromTitle(title = '') {
         'carte', 'carta', 'card', 'cards', 'promo', 'promos', 'rare', 'holo',
         'stamp', 'stampa', 'stamped', 'black', 'star', 'treasure', 'treasures',
         'legendary', 'ottime', 'condizioni', 'condition', 'near', 'mint',
+        'first', 'prima', 'primo', 'edition', 'edizione', 'set', 'base',
     ]);
     const words = cleaned
         .split(/\s+/)

@@ -145,3 +145,10 @@ test('13. Cardvault name table validates Pecharunt from noisy Vinted title token
 
     assert.ok(exactName, 'Pecharunt should resolve through Cardvault card names');
 });
+
+test('14. cleaned Nidoran title avoids generic Pokemon token matches', async () => {
+    const rows = await autocomplete('Nidoran', { resultLimit: 5, poolLimit: 50 });
+
+    assert.ok(rows.length > 0, 'Nidoran should return candidates');
+    assert.match(rows[0].name || '', /Nidoran/i);
+});

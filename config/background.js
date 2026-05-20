@@ -278,6 +278,8 @@ function scrapeStructuredCardFields(title = '', context = null) {
 
 function removeMarketplaceSearchNoise(value = '') {
     return String(value || '')
+        .replace(/\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/gi, ' ')
+        .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
         .replace(/\b(?:sealed|seal(?:ed)?|salead|saled|sigillat[aoe]?|pack|booster|lot)\b/gi, ' ')
         .replace(/\s+/g, ' ')
@@ -300,6 +302,7 @@ function candidateNameTermsFromTitle(title = '') {
         'carte', 'carta', 'card', 'cards', 'promo', 'promos', 'rare', 'holo',
         'stamp', 'stampa', 'stamped', 'black', 'star', 'treasure', 'treasures',
         'legendary', 'ottime', 'condizioni', 'condition', 'near', 'mint',
+        'first', 'prima', 'primo', 'edition', 'edizione', 'set', 'base',
     ]);
     const words = cleaned
         .split(/\s+/)
@@ -426,23 +429,33 @@ function normalizeCardvaultRows(payload) {
     return [];
 }
 
-function sortRowsForTitle(rows, title) {
+function sortRowsForTitle(rows, title, preferredName = '') {
     const normalizedTitle = title.toLowerCase();
+    const compactPreferredName = compactSearchValue(preferredName);
     return [...rows].sort((a, b) => {
+        const aNameMatch = compactPreferredName && compactSearchValue(a.canonical_name || a.name) === compactPreferredName ? 0 : 1;
+        const bNameMatch = compactPreferredName && compactSearchValue(b.canonical_name || b.name) === compactPreferredName ? 0 : 1;
+        if (aNameMatch !== bNameMatch) {
+            return aNameMatch - bNameMatch;
+        }
+
         const aStaffPenalty = !normalizedTitle.includes('staff') && /staff/i.test(a.card_number || '') ? 1 : 0;
         const bStaffPenalty = !normalizedTitle.includes('staff') && /staff/i.test(b.card_number || '') ? 1 : 0;
         return aStaffPenalty - bStaffPenalty;
     });
 }
 
-async function searchCardvault(title) {
+async function searchCardvault(title, preferredName = '') {
     if (!title) {
         return { rows: [], debug: { attemptedQueries: [] } };
     }
 
     const attemptedQueries = [];
+    const queries = preferredName
+        ? [preferredName, ...buildCardvaultQueries(title).filter((query) => compactSearchValue(query).includes(compactSearchValue(preferredName)))]
+        : buildCardvaultQueries(title);
 
-    for (const searchTerm of buildCardvaultQueries(title)) {
+    for (const searchTerm of [...new Set(queries.filter(Boolean))]) {
         const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
@@ -461,7 +474,7 @@ async function searchCardvault(title) {
         }
 
         const payload = await response.json();
-        const rows = sortRowsForTitle(normalizeCardvaultRows(payload), title);
+        const rows = sortRowsForTitle(normalizeCardvaultRows(payload), title, preferredName);
         attemptedQueries.push({
             query: searchTerm,
             rowCount: rows.length,
@@ -671,7 +684,7 @@ async function resolveActiveTabForSidePanel(tab) {
             }
 
             if (rows.length === 0) {
-                const searchResult = await searchCardvault(pageInfo.title);
+                const searchResult = await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
                 rows = searchResult.rows;
                 debug.attemptedQueries = searchResult.debug.attemptedQueries;
             }

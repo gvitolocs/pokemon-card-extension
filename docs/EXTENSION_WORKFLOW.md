@@ -11,7 +11,7 @@
 ## Match Resolution Flow
 
 1. The content script or side panel scrapes the marketplace title.
-2. Local cleanup removes marketplace noise such as `pokemon`, `pokémon`, `sealed`, `salead`, `pack`, `booster`, and `lot`.
+2. Local cleanup removes marketplace noise such as `pokemon`, `pokémon`, `sealed`, `salead`, `pack`, `booster`, `lot`, `first edition`, `prima edizione`, `1 edizione`, and `set base`.
 3. Candidate title terms are checked through Cardvault autocomplete.
 4. A candidate name is accepted only when Cardvault returns an exact `canonical_name` or `name` match from the backend name tables.
 5. The resolved name is sent to `/api/extension-card-search`.
