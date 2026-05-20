@@ -604,6 +604,200 @@ test('Vinted background candidates turn button green and render preview', async 
     assert.equal(appended.at(-1).previewResults[0].name_en, 'Dragonite V');
 });
 
+
+test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
+    const icon = { style: {} };
+    const button = createButtonStub();
+    button.querySelector = (selector) => selector === 'img' ? icon : null;
+    const { Processor } = loadProcessor('processors/CME.js', 'CardmarketProcessor');
+    const processor = new Processor();
+
+    processor.setPokoinButtonLabel(button, 3);
+
+    assert.equal(button.style.display, 'inline-flex');
+    assert.equal(button.style.width, 'auto');
+    assert.equal(button.style.maxWidth, 'max-content');
+    assert.equal(button.style.flex, '0 0 auto');
+    assert.equal(icon.style.width, '20px');
+    assert.equal(icon.style.height, '20px');
+});
+
+test('Cardmarket structured parser keeps card name ahead of expansion', () => {
+    const source = readRepoFile('config/background.js');
+    const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
+    const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
+    const compact = extractFunctionSource(source, 'compactSearchValue');
+    const buildQueries = extractFunctionSource(source, 'buildCardvaultQueries');
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${scrapeStructured}\n${compact}\n${buildQueries}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields; this.buildCardvaultQueries = buildCardvaultQueries;`, sandbox);
+
+    const structured = sandbox.scrapeStructuredCardFields(
+        'Camerupt (ASC 028)',
+        { expansion: 'Ascended Heroes' }
+    );
+
+    assert.equal(structured.name, 'Camerupt');
+    assert.equal(structured.searchName, 'Camerupt');
+    assert.equal(structured.collectorNumber, '028');
+    assert.equal(structured.expansion, 'Ascended Heroes');
+    assert.deepEqual([...sandbox.buildCardvaultQueries(structured.name)], ['Camerupt']);
+});
+
+test('Cardmarket background search payload uses structured card name first', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: body.search_term === 'Camerupt'
+                            ? [{ card_id: '1', name: 'Camerupt', canonical_name: 'Camerupt', search_rank: 99 }]
+                            : [],
+                    }),
+                };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: '1',
+                            name: 'Camerupt',
+                            expansionName: 'Ascended Heroes',
+                            collectorNumber: '028',
+                            score: 95,
+                        }],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 8, title: 'Camerupt (ASC 028)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Ascended-Heroes/Camerupt-ASC028' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Camerupt (ASC 028)',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Ascended-Heroes/Camerupt-ASC028',
+            },
+            { tab: { id: 8, title: 'Camerupt (ASC 028)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Ascended-Heroes/Camerupt-ASC028' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].name_en, 'Camerupt');
+    assert.equal(fetchBodies[0].body.search_term, 'Camerupt');
+    const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
+    assert.equal(extensionPayload.name, 'Camerupt');
+    assert.equal(extensionPayload.collectorNumber, '028');
+});
+
+test('Cardmarket side panel refresh clears loading after search failure', async () => {
+    const source = readRepoFile('config/background.js');
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            throw new Error('network down');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Camerupt (ASC 028)',
+                        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Ascended-Heroes/Camerupt-ASC028',
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: {
+                            rawTitle: 'Camerupt (ASC 028)',
+                            name: 'Camerupt',
+                            searchName: 'Camerupt',
+                            collectorNumber: '028',
+                            expansion: 'Ascended Heroes',
+                        },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 8,
+        title: 'Camerupt (ASC 028)',
+        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Ascended-Heroes/Camerupt-ASC028',
+    });
+
+    const finalState = storageWrites.at(-1).sidePanelState;
+    assert.equal(result.rows.length, 0);
+    assert.equal(finalState.loading, undefined);
+    assert.equal(finalState.error, 'network down');
+    assert.equal(finalState.rows.length, 0);
+});
+
 test('background clue helpers remove generic card words from request titles', () => {
     const source = readRepoFile('config/background.js');
     const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');

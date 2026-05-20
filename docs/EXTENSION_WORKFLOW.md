@@ -12,6 +12,7 @@
 8. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
 9. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
 10. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
+11. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
 
 ## Match Resolution Flow
 
@@ -29,6 +30,8 @@
 12. Variation text such as `V`, `ex`, `VMAX`, and `VSTAR` is preserved in the Cardvault search name so the side panel uses the same more-specific matching behavior as the injected button.
 13. On Vinted pages, compact clue chips are extracted from the item title and description. Useful clues include real Pokemon-name-like terms such as `Reshiram`, collector numbers, promo codes, rarity/variation words, and known expansion names; generic marketplace words like `carta`, `carte`, `card`, and `cards` are never shown as chips and never sent as search clues.
 14. Vinted clue chips that validate as Pokemon names through the existing title/name resolver are selected by default and become the primary search title. Other useful but non-name-like clues still render as chips, but start off and only affect search after the user toggles them on.
+15. Cardmarket product titles like `Camerupt (ASC 028)` are parsed as structured card data first: `Camerupt` is the card name, `028` is the collector number, and expansion/category text such as `Ascended Heroes - Singles` is only a secondary expansion clue. Name resolution and fallback autocomplete start from the structured card name instead of expansion breadcrumbs.
+16. Side-panel refreshes always write a terminal state after Cardmarket scraping or search failures. Failures clear the loading state with empty candidates and an error message instead of leaving the panel stuck on the previous loading payload.
 
 ## Candidate Display Flow
 

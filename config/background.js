@@ -261,6 +261,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
             expansion,
             rarity: '',
             variation: '',
+            searchName: removeMarketplaceSearchNoise(cardName),
         };
     }
 
@@ -384,6 +385,14 @@ function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) 
     return buildTitleWithRequestClues(title, clues);
 }
 
+function isCardmarketUrl(url = '') {
+    try {
+        return new URL(url).hostname.includes('cardmarket');
+    } catch (error) {
+        return false;
+    }
+}
+
 function compactSearchValue(value = '') {
     return removeMarketplaceSearchNoise(value)
         .toLowerCase()
@@ -399,7 +408,11 @@ function resolvedCardNameFromRow(row, term = '') {
     return row?.canonical_name || row?.name || '';
 }
 
-function candidateNameTermsFromTitle(title = '') {
+function candidateNameTermsFromTitle(title = '', structuredCard = null) {
+    if (structuredCard?.name) {
+        return [structuredCard.name];
+    }
+
     const cleaned = removeMarketplaceSearchNoise(String(title || '')
         .replace(/\s*\|\s*(?:Vinted|Cardmarket)\s*$/i, '')
         .replace(/[()"'’`.,:;!?/\\[\]{}|]+/g, ' ')
@@ -426,10 +439,10 @@ function candidateNameTermsFromTitle(title = '') {
     return [...new Set(terms)].slice(0, 18);
 }
 
-async function resolveNameFromCardvaultTitle(title = '') {
+async function resolveNameFromCardvaultTitle(title = '', structuredCard = null) {
     const attemptedTerms = [];
 
-    for (const term of candidateNameTermsFromTitle(title)) {
+    for (const term of candidateNameTermsFromTitle(title, structuredCard)) {
         const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
@@ -834,7 +847,19 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 }
 
 async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
-    const pageInfo = await getActivePageInfo(tab);
+    let pageInfo;
+    let pageInfoError = '';
+    try {
+        pageInfo = await getActivePageInfo(tab);
+    } catch (error) {
+        pageInfoError = error.message || 'Unable to read marketplace page.';
+        pageInfo = {
+            title: tab?.title || '',
+            url: tab?.url || '',
+            hostname: tab?.url ? new URL(tab.url).hostname : '',
+            structuredCard: scrapeStructuredCardFields(tab?.title || ''),
+        };
+    }
     const requestClues = normalizeRequestClues(requestContext.clues);
     const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
     if (requestClues.length > 0) {
@@ -846,7 +871,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         pageInfo.structuredCard = scrapeStructuredCardFields(pageInfo.title);
     }
     let rows = [];
-    let error = '';
+    let error = pageInfoError;
     const debug = {
         version: 2,
         tab: {
@@ -860,7 +885,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         searched: false,
         rowCount: 0,
         bestId: '',
-        error: '',
+        error,
     };
 
     if (!pageInfo.unsupported && pageInfo.title) {
@@ -878,9 +903,15 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 debug.cardtraderBlueprintId = pageInfo.cardtraderBlueprintId;
             } else {
                 try {
-                    const nameResolution = await resolveNameFromCardvaultTitle(pageInfo.title);
+                    const nameResolution = await resolveNameFromCardvaultTitle(
+                        pageInfo.title,
+                        isCardmarketUrl(pageInfo.url) ? pageInfo.structuredCard : null
+                    );
                     debug.nameResolution = nameResolution;
-                    if (nameResolution.name) {
+                    if (nameResolution.name && (
+                        !pageInfo.structuredCard?.name ||
+                        compactSearchValue(nameResolution.name) === compactSearchValue(pageInfo.structuredCard.name)
+                    )) {
                         pageInfo.structuredCard = {
                             ...(pageInfo.structuredCard || {}),
                             name: nameResolution.name,
@@ -991,8 +1022,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return [];
                 }
                 const structuredCard = scrapeStructuredCardFields(title);
-                const nameResolution = await resolveNameFromCardvaultTitle(title);
-                if (nameResolution.name) {
+                const structuredContext = isCardmarketUrl(request.url || tab?.url || '') ? structuredCard : null;
+                const nameResolution = await resolveNameFromCardvaultTitle(title, structuredContext);
+                if (nameResolution.name && (
+                    !structuredCard.name ||
+                    compactSearchValue(nameResolution.name) === compactSearchValue(structuredCard.name)
+                )) {
                     structuredCard.name = nameResolution.name;
                     if (structuredCard.variation) {
                         structuredCard.searchName = [nameResolution.name, structuredCard.variation]

@@ -339,6 +339,14 @@ function setPokoinButtonLabel(button, matchCount = null) {
         <img src="${pokoinIconUrl()}" alt="" aria-hidden="true">
         <span>Pokoin.com${suffix}</span>
     `;
+    if (window.location?.hostname?.includes('cardmarket')) {
+        applyPokoinButtonStyles(button, {
+            width: 'auto',
+            maxWidth: 'max-content',
+            flex: '0 0 auto',
+            alignSelf: 'flex-start',
+        });
+    }
 }
 
 function isHighConfidenceMatch(result = {}) {

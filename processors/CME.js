@@ -19,6 +19,7 @@ class CardmarketProcessor {
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
             <span>Pokoin.com${suffix}</span>
         `;
+        this.applyPokoinButtonStyles(button);
     }
 
     isHighConfidenceMatch(result = {}) {
@@ -68,6 +69,13 @@ class CardmarketProcessor {
             transition: 'all 0.2s ease',
             textDecoration: 'none',
             textAlign: 'center',
+            width: 'auto',
+            maxWidth: 'max-content',
+            minHeight: '0',
+            lineHeight: '1.2',
+            flex: '0 0 auto',
+            alignSelf: 'flex-start',
+            boxSizing: 'border-box',
             ...styles,
         });
 
