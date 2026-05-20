@@ -396,6 +396,57 @@ async function getActiveTab() {
     return tab || null;
 }
 
+function sameUrlWithoutHash(a = '', b = '') {
+    try {
+        const left = new URL(a);
+        const right = new URL(b);
+        left.hash = '';
+        right.hash = '';
+        return left.href === right.href;
+    } catch (error) {
+        return a === b;
+    }
+}
+
+const sidePanelRefreshTimers = new Map();
+
+async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
+    if (!tab?.id || !isSupportedMarketplaceUrl(tab.url)) {
+        return;
+    }
+
+    const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+    const currentStateUrl = sidePanelState?.pageInfo?.url || '';
+    if (currentStateUrl && sameUrlWithoutHash(currentStateUrl, tab.url) && reason !== 'activated') {
+        return;
+    }
+
+    clearTimeout(sidePanelRefreshTimers.get(tab.id));
+    sidePanelRefreshTimers.set(tab.id, setTimeout(async () => {
+        sidePanelRefreshTimers.delete(tab.id);
+        try {
+            await chrome.storage.session.set({
+                sidePanelState: {
+                    ...(sidePanelState || {}),
+                    updatedAt: Date.now(),
+                    loading: true,
+                    pageInfo: {
+                        ...(sidePanelState?.pageInfo || {}),
+                        title: tab.title || '',
+                        url: tab.url || '',
+                        hostname: tab.url ? new URL(tab.url).hostname : '',
+                    },
+                    error: '',
+                },
+            });
+            await resolveActiveTabForSidePanel(tab);
+            console.log(`✅ [Background] Side panel refreshed after ${reason}`);
+        } catch (error) {
+            console.warn(`⚠️ [Background] Side panel refresh failed after ${reason}:`, error);
+        }
+    }, 700));
+}
+
 async function resolveActiveTabForSidePanel(tab) {
     const pageInfo = await getActivePageInfo(tab);
     let rows = [];
@@ -491,8 +542,29 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch((error) => {
                 sendResponse({ success: false, error: error.message || 'Unable to refresh match.' });
             });
+    } else if (request.action === 'marketplaceNavigationChanged') {
+        const tab = sender.tab;
+        scheduleSidePanelRefresh(tab, 'content-navigation')
+            .then(() => sendResponse({ success: true }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to schedule refresh.' }));
     }
     return true; // Keep channel open for async responses
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!changeInfo.url && changeInfo.status !== 'complete') {
+        return;
+    }
+    scheduleSidePanelRefresh(tab, changeInfo.url ? 'tab-url' : 'tab-complete');
+});
+
+chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+    try {
+        const tab = await chrome.tabs.get(tabId);
+        await scheduleSidePanelRefresh(tab, 'activated');
+    } catch (error) {
+        console.warn('⚠️ [Background] Unable to refresh after tab activation:', error);
+    }
 });
 
 chrome.action.onClicked.addListener(async (tab) => {

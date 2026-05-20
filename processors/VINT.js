@@ -10,13 +10,13 @@ class VintedProcessor {
     }
 
     pokoinIconUrl() {
-        return chrome.runtime.getURL('assets/pokoin.svg');
+        return chrome.runtime.getURL('assets/pokoin-512.png');
     }
 
-    setPokoinButtonLabel(button, suffix = '') {
+    setPokoinButtonLabel(button) {
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
-            <span>Pokoin${suffix ? ` ${suffix}` : ''}</span>
+            <span>Pokoin</span>
         `;
     }
 
@@ -38,10 +38,10 @@ class VintedProcessor {
         const icon = button.querySelector('img');
         if (icon) {
             Object.assign(icon.style, {
-                width: '18px',
-                height: '18px',
-                borderRadius: '50%',
-                objectFit: 'cover',
+                width: '20px',
+                height: '20px',
+                objectFit: 'contain',
+                display: 'block',
             });
         }
     }
@@ -184,7 +184,7 @@ class VintedProcessor {
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.setAttribute('data-pokemon-linker-fallback', 'true');
-        this.setPokoinButtonLabel(button, '(Loading...)');
+        this.setPokoinButtonLabel(button);
         button.style.cssText = `
             position: fixed;
             top: 100px;
@@ -227,7 +227,7 @@ class VintedProcessor {
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.setAttribute('data-pokemon-linker-fallback', 'true');
-        this.setPokoinButtonLabel(button, '(Loading...)');
+        this.setPokoinButtonLabel(button);
         button.style.cssText = `
             margin: 16px 0;
             padding: 12px 24px;
@@ -319,7 +319,7 @@ class VintedProcessor {
             this.currentButton.innerHTML = `
                 <span class="web_ui__Button__content">
                     <span class="web_ui__Button__label">
-                        <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:18px;height:18px;border-radius:50%;object-fit:cover;margin-right:8px;vertical-align:middle;">
+                        <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:20px;height:20px;object-fit:contain;margin-right:8px;vertical-align:middle;">
                         Pokoin
                     </span>
                 </span>

@@ -458,6 +458,54 @@ function watchCardTraderNavigation() {
     window.addEventListener('popstate', () => setTimeout(checkPage, 300));
 }
 
+function notifySidePanelNavigation() {
+    chrome.runtime.sendMessage({
+        action: 'marketplaceNavigationChanged',
+        url: window.location.href,
+        title: document.title,
+    }).catch(() => {
+        // The background service worker may be asleep; tabs.onUpdated is a fallback.
+    });
+}
+
+function watchMarketplaceNavigationForSidePanel() {
+    if (window.pokoinSidePanelNavigationWatcher) {
+        return;
+    }
+
+    window.pokoinSidePanelNavigationWatcher = true;
+    let lastUrl = window.location.href;
+    let debounceId = 0;
+    const scheduleNotify = () => {
+        window.clearTimeout(debounceId);
+        debounceId = window.setTimeout(() => {
+            if (window.location.href === lastUrl) {
+                return;
+            }
+            lastUrl = window.location.href;
+            notifySidePanelNavigation();
+        }, 350);
+    };
+
+    const wrapHistoryMethod = (methodName) => {
+        const original = history[methodName];
+        history[methodName] = function patchedHistoryMethod(...args) {
+            const result = original.apply(this, args);
+            scheduleNotify();
+            return result;
+        };
+    };
+
+    wrapHistoryMethod('pushState');
+    wrapHistoryMethod('replaceState');
+    window.addEventListener('popstate', scheduleNotify);
+
+    new MutationObserver(scheduleNotify).observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+    });
+}
+
 // Create the global button only once (outside all loops)
 if (!window.globalCardTraderButton) {
     globalButton = document.createElement('button');
@@ -3827,6 +3875,8 @@ window.generateCardTraderLink = generateCardTraderLink;
 window.patchVintedProductPage = patchVintedProductPage;
 window.patchEbayProductPage = patchEbayProductPage;
 window.patchCardmarketProductPage = patchCardmarketProductPage;
+
+watchMarketplaceNavigationForSidePanel();
 
 // Singleton creation - this guarantees a single instance of extension
 pokemonCardTraderInstance = new PokemonCardTraderLinker();

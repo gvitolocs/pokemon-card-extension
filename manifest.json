@@ -77,7 +77,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "assets/pokoin.svg"
+        "assets/pokoin.svg",
+        "assets/pokoin-512.png"
       ],
       "matches": ["<all_urls>"]
     }

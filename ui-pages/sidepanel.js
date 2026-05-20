@@ -4,13 +4,6 @@ const elements = {
     cardName: document.getElementById('cardName'),
     status: document.getElementById('status'),
     refreshBtn: document.getElementById('refreshBtn'),
-    matchSummary: document.getElementById('matchSummary'),
-    listingTitle: document.getElementById('listingTitle'),
-    blueprintId: document.getElementById('blueprintId'),
-    setName: document.getElementById('setName'),
-    cardNumber: document.getElementById('cardNumber'),
-    openPokoin: document.getElementById('openPokoin'),
-    openCardTrader: document.getElementById('openCardTrader'),
     frameSection: document.getElementById('frameSection'),
     pokoinFrame: document.getElementById('pokoinFrame'),
     candidatesSection: document.getElementById('candidatesSection'),
@@ -31,12 +24,102 @@ function cardTraderUrl(blueprintId) {
     return `${CARDVAULT_API_BASE_URL}/api/cardtrader-redirect?id=${encodeURIComponent(blueprintId)}`;
 }
 
-function renderCandidate(row) {
+const expansionLogoCache = new Map();
+let expansionLogoPromise = null;
+
+function normalizeExpansionName(value = '') {
+    return String(value).trim().toLowerCase();
+}
+
+function slugifyExpansion(value = '') {
+    return String(value || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/&/g, ' and ')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 140);
+}
+
+async function loadExpansionLogos() {
+    if (expansionLogoPromise) {
+        return expansionLogoPromise;
+    }
+
+    expansionLogoPromise = fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-expansions?limit=2000`)
+        .then((response) => response.ok ? response.json() : { expansions: [] })
+        .then((payload) => {
+            for (const expansion of payload.expansions || []) {
+                const logoUrl = expansion.symbolImageUrl || '';
+                if (expansion.name && logoUrl) {
+                    expansionLogoCache.set(normalizeExpansionName(expansion.name), logoUrl);
+                }
+            }
+            return expansionLogoCache;
+        })
+        .catch(() => expansionLogoCache);
+
+    return expansionLogoPromise;
+}
+
+function expansionLogoUrl(row) {
+    const directLogo = row.expansion_symbol_url || row.expansionSymbolUrl || row.symbolImageUrl || '';
+    if (directLogo) {
+        return directLogo;
+    }
+
+    const setName = row.set_name || row.expansion_name || '';
+    const cachedLogo = expansionLogoCache.get(normalizeExpansionName(setName));
+    if (cachedLogo) {
+        return cachedLogo;
+    }
+
+    const slug = slugifyExpansion(setName);
+    return slug ? `https://cdn.pokoin.com/expansions/symbols/${slug}.png` : '';
+}
+
+function hasKnownExpansionLogo(row) {
+    const directLogo = row.expansion_symbol_url || row.expansionSymbolUrl || row.symbolImageUrl || '';
+    if (directLogo) {
+        return true;
+    }
+
+    const setName = row.set_name || row.expansion_name || '';
+    return expansionLogoCache.has(normalizeExpansionName(setName));
+}
+
+function sortCandidates(rows = []) {
+    return [...rows].sort((a, b) => {
+        const aHasLogo = hasKnownExpansionLogo(a) ? 1 : 0;
+        const bHasLogo = hasKnownExpansionLogo(b) ? 1 : 0;
+        return bHasLogo - aHasLogo;
+    });
+}
+
+function renderCandidate(row, isBest = false) {
     const link = document.createElement('a');
-    link.className = 'candidate';
+    link.className = `candidate${isBest ? ' candidate-best' : ''}`;
     link.href = cardUrl(row.card_id);
     link.target = '_blank';
     link.rel = 'noreferrer';
+
+    const logoUrl = expansionLogoUrl(row);
+    const logo = document.createElement('img');
+    logo.className = 'candidate-logo';
+    logo.alt = '';
+    logo.loading = 'lazy';
+    if (logoUrl) {
+        logo.src = logoUrl;
+        logo.addEventListener('error', () => {
+            logo.hidden = true;
+        }, { once: true });
+    } else {
+        logo.hidden = true;
+    }
+
+    const copy = document.createElement('span');
+    copy.className = 'candidate-copy';
 
     const title = document.createElement('strong');
     title.textContent = row.name || `Blueprint ${row.card_id}`;
@@ -44,7 +127,13 @@ function renderCandidate(row) {
     const meta = document.createElement('span');
     meta.textContent = [row.set_name, row.card_number].filter(Boolean).join(' · ');
 
-    link.append(title, meta);
+    copy.append(title, meta);
+
+    const action = document.createElement('span');
+    action.className = 'candidate-action';
+    action.textContent = isBest ? 'Open' : 'View';
+
+    link.append(logo, copy, action);
     return link;
 }
 
@@ -104,7 +193,6 @@ function renderState(state) {
     const best = state?.best || null;
     const blueprintId = state?.blueprintId || best?.card_id || '';
 
-    elements.matchSummary.hidden = true;
     elements.frameSection.hidden = true;
     elements.candidatesSection.hidden = true;
     elements.candidateList.replaceChildren();
@@ -138,23 +226,16 @@ function renderState(state) {
 
     const pokoinUrl = state.pokoinUrl || cardUrl(blueprintId);
     elements.cardName.textContent = best.name || `Blueprint ${blueprintId}`;
-    elements.listingTitle.textContent = pageInfo.title || 'Current marketplace listing';
-    elements.blueprintId.textContent = blueprintId;
-    elements.setName.textContent = best.set_name || '-';
-    elements.cardNumber.textContent = best.card_number || '-';
-    elements.openPokoin.href = pokoinUrl;
-    elements.openCardTrader.href = cardTraderUrl(blueprintId);
     elements.pokoinFrame.src = pokoinUrl;
 
-    elements.matchSummary.hidden = false;
     elements.frameSection.hidden = false;
     setStatus('Matched through Cardvault Oracle search.');
 
-    const candidates = (state.rows || []).slice(1, 5);
+    const candidates = sortCandidates(state.rows || []).slice(0, 5);
     if (candidates.length > 0) {
         elements.candidatesSection.hidden = false;
         candidates.forEach((row) => {
-            elements.candidateList.appendChild(renderCandidate(row));
+            elements.candidateList.appendChild(renderCandidate(row, String(row.card_id) === String(blueprintId)));
         });
     }
 }
@@ -187,3 +268,9 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 loadState().catch((error) => {
     setStatus(error.message || 'Unable to load side panel state.', true);
 });
+
+loadExpansionLogos()
+    .then(loadState)
+    .catch(() => {
+        // Candidate cards still render without set symbols.
+    });
