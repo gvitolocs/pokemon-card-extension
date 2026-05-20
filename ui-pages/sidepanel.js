@@ -52,6 +52,7 @@ function renderDebug(state) {
     const pageInfo = state?.pageInfo || {};
     const pageDebug = pageInfo.debug || {};
     const debug = state?.debug || {};
+    const structuredCard = pageInfo.structuredCard || {};
     const selectorLines = (pageDebug.selectorChecks || [])
         .map((check) => {
             const status = check.found ? 'hit' : 'miss';
@@ -65,16 +66,31 @@ function renderDebug(state) {
         `host: ${pageInfo.hostname || '-'}`,
         `title: ${pageInfo.title || '-'}`,
         `titleSource: ${pageDebug.titleSource || '-'}`,
+        `pokemonName: ${structuredCard.name || '-'}`,
+        `variation: ${structuredCard.variation || '-'}`,
+        `collectorNumber: ${structuredCard.collectorNumber || '-'}`,
+        `expansion: ${structuredCard.expansion || '-'}`,
+        `rarity: ${structuredCard.rarity || '-'}`,
         `documentTitle: ${pageDebug.documentTitle || '-'}`,
         `readyState: ${pageDebug.readyState || '-'}`,
         `extractorVersion: ${pageDebug.extractorVersion || '-'}`,
         `extractMs: ${pageDebug.elapsedMs ?? '-'}`,
         `waitAttempts: ${pageDebug.attempts ?? '-'}`,
+        `extensionEndpoint: ${debug.extensionSearch?.endpoint || '-'}`,
+        `extensionPayload: ${debug.extensionSearch?.payload ? JSON.stringify(debug.extensionSearch.payload) : '-'}`,
+        `extensionMatches: ${debug.extensionSearch?.matchCount ?? '-'}`,
+        `extensionError: ${debug.extensionSearch?.error || '-'}`,
         `apiQuery: ${debug.query || '-'}`,
         `apiSearched: ${debug.searched ? 'yes' : 'no'}`,
         `apiRows: ${debug.rowCount ?? (state?.rows || []).length}`,
         `bestId: ${debug.bestId || state?.blueprintId || '-'}`,
         `error: ${state?.error || debug.error || '-'}`,
+        '',
+        'attemptedQueries:',
+        ...((debug.attemptedQueries || []).map((attempt) =>
+            `${attempt.rowCount} row(s): ${attempt.query}`
+        )),
+        ...(debug.attemptedQueries?.length ? [] : ['-']),
         '',
         'selectors:',
         ...(selectorLines.length ? selectorLines : ['-']),

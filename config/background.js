@@ -134,10 +134,14 @@ async function extractTitleFromPage() {
         titleSource = 'document.title fallback';
     }
 
+    const finalTitle = title || document.title.replace(/\s+/g, ' ').trim();
+    const structuredCard = scrapeStructuredCardFields(finalTitle);
+
     return {
-        title: title || document.title.replace(/\s+/g, ' ').trim(),
+        title: finalTitle,
         url: window.location.href,
         hostname,
+        structuredCard,
         debug: {
             extractorVersion: 2,
             startedAt,
@@ -150,6 +154,68 @@ async function extractTitleFromPage() {
             readyState: document.readyState,
             bodyTextSample: document.body?.innerText?.replace(/\s+/g, ' ').slice(0, 300) || '',
         },
+    };
+}
+
+function scrapeStructuredCardFields(title = '') {
+    const cleanTitle = String(title || '')
+        .replace(/\s*\|\s*Vinted\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const withoutMarketplaceNoise = cleanTitle
+        .replace(/\b(Carte|Carta|Card|Pok[eé]mon|Pokemon)\b/gi, ' ')
+        .replace(/\b(Stamp|Stampa|Stamped)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const collectorNumber = (
+        cleanTitle.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0] ||
+        cleanTitle.match(/\b\d{1,3}\s*\/\s*\d{1,3}\b/)?.[0] ||
+        cleanTitle.match(/\b[A-Z]{1,5}\d{1,3}[a-z]?\b/)?.[0] ||
+        ''
+    ).replace(/\s+/g, '');
+
+    const variationMatch = cleanTitle.match(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i);
+    const variation = variationMatch
+        ? variationMatch[0].replace(/\s+/g, '').replace(/\./g, '').toLowerCase()
+        : '';
+
+    const rarityMatch = cleanTitle.match(/\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|holo|promo|rare)\b/i);
+    const rarity = rarityMatch ? rarityMatch[0].replace(/\s+/g, ' ') : '';
+
+    const expansionNoise = [
+        'Legendary Treasure',
+        'Legendary Treasures',
+        'Black Star Promos',
+        'BW Black Star Promos',
+        'Paldean Fates',
+        'Pokemon 151',
+    ];
+    const expansion = expansionNoise.find((candidate) =>
+        new RegExp(`\\b${candidate.replace(/\s+/g, '\\s+')}\\b`, 'i').test(cleanTitle)
+    ) || '';
+
+    let name = withoutMarketplaceNoise;
+    if (collectorNumber) {
+        name = name.replace(new RegExp(`\\b${collectorNumber.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'), ' ');
+    }
+    if (expansion) {
+        name = name.replace(new RegExp(`\\b${expansion.replace(/\s+/g, '\\s+')}\\b`, 'i'), ' ');
+    }
+    name = name
+        .replace(/\b(?:Legendary|Treasure|Treasures|Promo|Promos)\b/gi, ' ')
+        .replace(/\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|holo|promo|rare)\b/gi, ' ')
+        .replace(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return {
+        rawTitle: cleanTitle,
+        name,
+        collectorNumber,
+        expansion,
+        rarity,
+        variation,
     };
 }
 
@@ -175,31 +241,154 @@ async function getActivePageInfo(tab) {
     };
 }
 
+function buildCardvaultQueries(title) {
+    const cleanTitle = title.replace(/\s*\|\s*Vinted\s*$/i, '').trim();
+    const queries = [cleanTitle];
+    const promoCode = cleanTitle.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+\b/i)?.[0]?.replace(/\s+/g, '');
+
+    if (promoCode) {
+        // Promo codes are often the strongest identifier when marketplace titles
+        // include noisy set guesses such as "Legendary Treasure".
+        queries.push(promoCode);
+
+        const withoutNoise = cleanTitle
+            .replace(/\b(Carte|Pok[eé]mon|Pokemon|Stamp|Stampa|Legendary|Treasure|Treasures)\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (withoutNoise) {
+            queries.push(withoutNoise);
+        }
+    }
+
+    return [...new Set(queries.filter(Boolean))];
+}
+
+function normalizeCardvaultRows(payload) {
+    if (Array.isArray(payload)) {
+        return payload;
+    }
+
+    if (payload && typeof payload === 'object') {
+        return payload.rows || payload.results || payload.data || [];
+    }
+
+    return [];
+}
+
+function sortRowsForTitle(rows, title) {
+    const normalizedTitle = title.toLowerCase();
+    return [...rows].sort((a, b) => {
+        const aStaffPenalty = !normalizedTitle.includes('staff') && /staff/i.test(a.card_number || '') ? 1 : 0;
+        const bStaffPenalty = !normalizedTitle.includes('staff') && /staff/i.test(b.card_number || '') ? 1 : 0;
+        return aStaffPenalty - bStaffPenalty;
+    });
+}
+
 async function searchCardvault(title) {
     if (!title) {
-        return [];
+        return { rows: [], debug: { attemptedQueries: [] } };
     }
-    const searchTerm = title.replace(/\s*\|\s*Vinted\s*$/i, '').trim();
 
-    const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+    const attemptedQueries = [];
+
+    for (const searchTerm of buildCardvaultQueries(title)) {
+        const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                search_term: searchTerm,
+                result_limit: 5,
+                pool_limit: 50,
+                search_language: 'en',
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Cardvault search failed with HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const rows = sortRowsForTitle(normalizeCardvaultRows(payload), title);
+        attemptedQueries.push({
+            query: searchTerm,
+            rowCount: rows.length,
+            responseShape: Array.isArray(payload) ? 'array' : typeof payload,
+            searchContext: payload?.search_context || null,
+        });
+
+        if (rows.length > 0) {
+            return { rows, debug: { attemptedQueries } };
+        }
+    }
+
+    return { rows: [], debug: { attemptedQueries } };
+}
+
+function rowFromExtensionMatch(match) {
+    if (!match) {
+        return null;
+    }
+
+    return {
+        card_id: match.cardId,
+        name: match.name,
+        set_name: match.expansionName,
+        card_number: match.collectorNumber,
+        rarity: match.rarity,
+        card_type: match.cardType,
+        item_kind: match.itemKind,
+        product_type: match.productType,
+        trainer_name: match.trainerName,
+        image_url: match.imageUrl,
+        cdn_image_url: match.imageUrl,
+        preview_image_url: match.previewImageUrl,
+        card_palette: match.cardPalette,
+        emoji: match.emoji,
+        search_rank: match.score,
+    };
+}
+
+async function searchExtensionCard(structuredCard) {
+    if (!structuredCard?.name && !structuredCard?.collectorNumber) {
+        return { rows: [], debug: { endpoint: '/api/extension-card-search', skipped: true } };
+    }
+
+    const payload = {
+        name: structuredCard.name,
+        collectorNumber: structuredCard.collectorNumber,
+        expansion: structuredCard.expansion,
+        rarity: structuredCard.rarity,
+        variation: structuredCard.variation,
+        language: 'en',
+        limit: 3,
+    };
+
+    const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
         method: 'POST',
         headers: {
             'content-type': 'application/json',
         },
-        body: JSON.stringify({
-            search_term: searchTerm,
-            result_limit: 5,
-            pool_limit: 50,
-            search_language: 'en',
-        }),
+        body: JSON.stringify(payload),
     });
 
     if (!response.ok) {
-        throw new Error(`Cardvault search failed with HTTP ${response.status}`);
+        throw new Error(`Extension card search failed with HTTP ${response.status}`);
     }
 
-    const rows = await response.json();
-    return Array.isArray(rows) ? rows : [];
+    const data = await response.json();
+    return {
+        rows: (data.matches || []).map(rowFromExtensionMatch).filter(Boolean),
+        debug: {
+            endpoint: '/api/extension-card-search',
+            payload,
+            query: data.query || '',
+            source: data.source || '',
+            input: data.input || {},
+            matchCount: data.matches?.length || 0,
+        },
+    };
 }
 
 async function getActiveTab() {
@@ -220,6 +409,7 @@ async function resolveActiveTabForSidePanel(tab) {
         },
         query: (pageInfo.title || '').replace(/\s*\|\s*Vinted\s*$/i, '').trim(),
         apiBaseUrl: CARDVAULT_API_BASE_URL,
+        attemptedQueries: [],
         searched: false,
         rowCount: 0,
         bestId: '',
@@ -229,7 +419,22 @@ async function resolveActiveTabForSidePanel(tab) {
     if (!pageInfo.unsupported && pageInfo.title) {
         try {
             debug.searched = true;
-            rows = await searchCardvault(pageInfo.title);
+            try {
+                const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
+                rows = extensionSearchResult.rows;
+                debug.extensionSearch = extensionSearchResult.debug;
+            } catch (extensionSearchError) {
+                debug.extensionSearch = {
+                    endpoint: '/api/extension-card-search',
+                    error: extensionSearchError.message || 'Extension card search failed.',
+                };
+            }
+
+            if (rows.length === 0) {
+                const searchResult = await searchCardvault(pageInfo.title);
+                rows = searchResult.rows;
+                debug.attemptedQueries = searchResult.debug.attemptedQueries;
+            }
         } catch (searchError) {
             error = searchError.message || 'Cardvault search failed.';
             debug.error = error;
