@@ -2996,6 +2996,15 @@ function compactSearchValue(value = '') {
         .replace(/[^a-z0-9]+/g, '');
 }
 
+function resolvedCardNameFromRow(row, term = '') {
+    const compactTerm = compactSearchValue(term);
+    if (compactTerm === 'nidoran') {
+        return 'Nidoran';
+    }
+
+    return row?.canonical_name || row?.name || '';
+}
+
 function normalizeCardvaultRows(payload) {
     if (Array.isArray(payload)) {
         return payload;
@@ -3064,7 +3073,7 @@ async function resolveNameFromCardvaultTitle(title = '') {
         });
 
         if (exactRow) {
-            return exactRow.canonical_name || exactRow.name;
+            return resolvedCardNameFromRow(exactRow, term);
         }
     }
 
@@ -3096,9 +3105,34 @@ function matchMatchesStructuredName(match, payload) {
         return false;
     }
 
+    if (requestedName === 'nidoran') {
+        return matchName.startsWith('nidoran');
+    }
+
     return matchName === requestedName ||
         matchName.includes(requestedName) ||
         requestedName.includes(matchName);
+}
+
+function sortMatchesForPayload(matches = [], payload = {}) {
+    const requestedExpansion = compactSearchValue(payload.expansion || '');
+    const requestedName = compactSearchValue(payload.name || '');
+
+    return [...matches].sort((a, b) => {
+        const aExpansionPenalty = requestedExpansion && compactSearchValue(a.expansionName || '') !== requestedExpansion ? 1 : 0;
+        const bExpansionPenalty = requestedExpansion && compactSearchValue(b.expansionName || '') !== requestedExpansion ? 1 : 0;
+        if (aExpansionPenalty !== bExpansionPenalty) {
+            return aExpansionPenalty - bExpansionPenalty;
+        }
+
+        const aNamePenalty = requestedName === 'nidoran' && !compactSearchValue(a.name || '').startsWith('nidoran') ? 1 : 0;
+        const bNamePenalty = requestedName === 'nidoran' && !compactSearchValue(b.name || '').startsWith('nidoran') ? 1 : 0;
+        if (aNamePenalty !== bNamePenalty) {
+            return aNamePenalty - bNamePenalty;
+        }
+
+        return Number(b.score || 0) - Number(a.score || 0);
+    });
 }
 
 function legacyResultFromPokoinMatch(match) {
@@ -3133,7 +3167,10 @@ async function searchPokoinCardApi(titleInfo, originalTitle) {
 
     const data = await response.json();
     const matches = Array.isArray(data.matches) ? data.matches : [];
-    const acceptedMatches = matches.filter((match) => matchMatchesStructuredName(match, payload));
+    const acceptedMatches = sortMatchesForPayload(
+        matches.filter((match) => matchMatchesStructuredName(match, payload)),
+        payload
+    );
     if (acceptedMatches.length > 0) {
         return acceptedMatches.map(legacyResultFromPokoinMatch);
     }

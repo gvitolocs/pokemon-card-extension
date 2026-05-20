@@ -19,6 +19,7 @@
 7. Returned matches are accepted only if the returned card name still matches the resolved structured name.
 8. If structured search returns no accepted rows, the extension falls back to marketplace autocomplete.
 9. CardTrader card pages are supported directly: when the URL contains `/cards/:id`, that CardTrader blueprint id is used as the Pokoin card id without running search.
+10. Plain `Nidoran` is treated as a special ambiguous name: keep both male and female candidates visible, and use expansion/collector evidence to rank the best one.
 
 ## Candidate Display Flow
 

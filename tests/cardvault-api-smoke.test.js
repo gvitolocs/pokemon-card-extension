@@ -153,3 +153,11 @@ test('14. cleaned Nidoran Base Set alias avoids generic Pokemon token matches', 
     assert.match(rows[0].name || '', /Nidoran/i);
     assert.match(rows[0].set_name || '', /Base Set/i);
 });
+
+test('15. Nidoran Base Set candidates include both genders', async () => {
+    const rows = await autocomplete('Nidoran Base Set', { resultLimit: 8, poolLimit: 80 });
+    const names = rows.map((row) => row.name || '').join(' | ');
+
+    assert.match(names, /Nidoran ♀/);
+    assert.match(names, /Nidoran ♂/);
+});

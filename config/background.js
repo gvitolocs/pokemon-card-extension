@@ -309,6 +309,15 @@ function compactSearchValue(value = '') {
         .replace(/[^a-z0-9]+/g, '');
 }
 
+function resolvedCardNameFromRow(row, term = '') {
+    const compactTerm = compactSearchValue(term);
+    if (compactTerm === 'nidoran') {
+        return 'Nidoran';
+    }
+
+    return row?.canonical_name || row?.name || '';
+}
+
 function candidateNameTermsFromTitle(title = '') {
     const cleaned = removeMarketplaceSearchNoise(String(title || '')
         .replace(/\s*\|\s*(?:Vinted|Cardmarket)\s*$/i, '')
@@ -370,12 +379,12 @@ async function resolveNameFromCardvaultTitle(title = '') {
         attemptedTerms.push({
             term,
             rowCount: rows.length,
-            acceptedName: exactRow?.canonical_name || exactRow?.name || '',
+            acceptedName: exactRow ? resolvedCardNameFromRow(exactRow, term) : '',
         });
 
         if (exactRow) {
             return {
-                name: exactRow.canonical_name || exactRow.name,
+                name: resolvedCardNameFromRow(exactRow, term),
                 source: 'marketplace_card_names_for_language',
                 term,
                 attemptedTerms,
@@ -542,9 +551,34 @@ function rowMatchesStructuredName(row, structuredCard) {
         return false;
     }
 
+    if (requestedName === 'nidoran') {
+        return rowName.startsWith('nidoran');
+    }
+
     return rowName === requestedName ||
         rowName.includes(requestedName) ||
         requestedName.includes(rowName);
+}
+
+function sortRowsForStructuredCard(rows, structuredCard = {}) {
+    const requestedExpansion = compactSearchValue(structuredCard.expansion || '');
+    const requestedName = compactSearchValue(structuredCard.name || '');
+
+    return [...rows].sort((a, b) => {
+        const aExpansionPenalty = requestedExpansion && compactSearchValue(a.set_name || '') !== requestedExpansion ? 1 : 0;
+        const bExpansionPenalty = requestedExpansion && compactSearchValue(b.set_name || '') !== requestedExpansion ? 1 : 0;
+        if (aExpansionPenalty !== bExpansionPenalty) {
+            return aExpansionPenalty - bExpansionPenalty;
+        }
+
+        const aNamePenalty = requestedName === 'nidoran' && !compactSearchValue(a.name || '').startsWith('nidoran') ? 1 : 0;
+        const bNamePenalty = requestedName === 'nidoran' && !compactSearchValue(b.name || '').startsWith('nidoran') ? 1 : 0;
+        if (aNamePenalty !== bNamePenalty) {
+            return aNamePenalty - bNamePenalty;
+        }
+
+        return Number(b.search_rank || 0) - Number(a.search_rank || 0);
+    });
 }
 
 async function searchExtensionCard(structuredCard) {
@@ -581,7 +615,7 @@ async function searchExtensionCard(structuredCard) {
         .filter((row) => rowMatchesStructuredName(row, structuredCard));
 
     return {
-        rows,
+        rows: sortRowsForStructuredCard(rows, structuredCard),
         debug: {
             endpoint: '/api/extension-card-search',
             payload,
