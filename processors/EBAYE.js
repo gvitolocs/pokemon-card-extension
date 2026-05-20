@@ -9,6 +9,43 @@ class EbayProcessor {
         this.processedPages = new Set();
     }
 
+    pokoinIconUrl() {
+        return chrome.runtime.getURL('assets/pokoin.svg');
+    }
+
+    setPokoinButtonLabel(button, suffix = '') {
+        button.innerHTML = `
+            <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
+            <span>Pokoin${suffix ? ` ${suffix}` : ''}</span>
+        `;
+    }
+
+    applyPokoinButtonStyles(button, styles = {}) {
+        Object.assign(button.style, {
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            background: '#0ea5e9',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            transition: 'all 0.2s ease',
+            ...styles,
+        });
+        const icon = button.querySelector('img');
+        if (icon) {
+            Object.assign(icon.style, {
+                width: '18px',
+                height: '18px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+            });
+        }
+    }
+
     /**
      * Initialize eBay processor
      */
@@ -84,21 +121,14 @@ class EbayProcessor {
             // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
-            button.innerHTML = 'CardTrader';
+            this.setPokoinButtonLabel(button);
             button.style.cssText = `
                 margin: 16px 0;
                 padding: 8px 16px;
-                background: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 8px;
                 font-size: 16px;
-                cursor: pointer;
-                font-weight: bold;
                 min-width: 120px;
-                display: inline-block;
-                transition: all 0.2s ease;
             `;
+            this.applyPokoinButtonStyles(button, { background: '#6c757d' });
             
             // Insert button after title
             if (titleElement.parentNode) {
@@ -116,13 +146,13 @@ class EbayProcessor {
                     button.style.background = '#28a745';
                     console.log(`✅ [EBAYE] Link found, button turned green`);
                     
-                    // Open CardTrader link on click
+                    // Open Pokoin card page on click
                     const bestResult = results[0];
                     button.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const cardTraderUrl = this.generateCardTraderLink(bestResult.blueprint_id);
-                        window.open(cardTraderUrl, '_blank');
+                        const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
+                        window.open(pokoinUrl, '_blank');
                     });
                     
                     // Enhanced hover effects (green)
@@ -244,22 +274,15 @@ class EbayProcessor {
             // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
-            button.innerHTML = 'CardTrader';
+            this.setPokoinButtonLabel(button);
             button.style.cssText = `
                 margin-top: 8px;
                 margin-left: 8px;
                 padding: 8px 16px;
-                background: #6c757d;
-                color: white;
-                border: none;
-                border-radius: 8px;
                 font-size: 17px;
-                cursor: pointer;
-                font-weight: bold;
                 min-width: 100px;
-                display: inline-block;
-                transition: all 0.2s ease;
             `;
+            this.applyPokoinButtonStyles(button, { background: '#6c757d' });
             
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
@@ -274,8 +297,8 @@ class EbayProcessor {
                     button.addEventListener('click', (e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const cardTraderUrl = this.generateCardTraderLink(bestResult.blueprint_id);
-                        window.open(cardTraderUrl, '_blank');
+                        const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
+                        window.open(pokoinUrl, '_blank');
                     });
                 }
             }
@@ -303,7 +326,7 @@ class EbayProcessor {
             const element = listingElement.querySelector(selector);
             if (element && element.textContent && element.textContent.trim()) {
                 let title = element.textContent.trim();
-                title = title.replace(/\bCardTrader\b/g, '').trim();
+                title = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
                 return title;
             }
         }
@@ -360,10 +383,10 @@ class EbayProcessor {
     }
 
     /**
-     * Generate CardTrader link
+     * Generate Pokoin card link
      */
-    generateCardTraderLink(blueprintId) {
-        return `https://www.cardtrader.com/cards/${blueprintId}`;
+    generatePokoinLink(blueprintId) {
+        return `https://pokoin.com/marketplace/en/cards/${blueprintId}`;
     }
 }
 

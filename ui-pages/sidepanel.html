@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokoin Card Match</title>
+    <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+    <header class="header">
+        <div>
+            <p class="eyebrow">Pokoin match</p>
+            <h1 id="cardName">Resolving card...</h1>
+        </div>
+        <button id="refreshBtn" type="button">Refresh</button>
+    </header>
+
+    <section id="status" class="status">Reading the active marketplace page.</section>
+
+    <section id="matchSummary" class="summary" hidden>
+        <p id="listingTitle" class="listing-title"></p>
+        <dl>
+            <div>
+                <dt>Blueprint</dt>
+                <dd id="blueprintId">-</dd>
+            </div>
+            <div>
+                <dt>Set</dt>
+                <dd id="setName">-</dd>
+            </div>
+            <div>
+                <dt>Number</dt>
+                <dd id="cardNumber">-</dd>
+            </div>
+        </dl>
+        <div class="actions">
+            <a id="openPokoin" class="primary-link" href="#" target="_blank" rel="noreferrer">Open Pokoin card</a>
+            <a id="openCardTrader" class="secondary-link" href="#" target="_blank" rel="noreferrer">Open CardTrader</a>
+        </div>
+    </section>
+
+    <section id="frameSection" class="frame-section" hidden>
+        <iframe id="pokoinFrame" title="Pokoin card detail"></iframe>
+        <p class="frame-note">
+            If the card page does not render in the side panel, use the Open Pokoin card button above.
+        </p>
+    </section>
+
+    <section id="candidatesSection" class="candidates" hidden>
+        <h2>Other candidates</h2>
+        <div id="candidateList"></div>
+    </section>
+
+    <section id="debugSection" class="debug">
+        <details open>
+            <summary>Debug</summary>
+            <pre id="debugOutput">Waiting for state...</pre>
+        </details>
+    </section>
+
+    <script src="sidepanel.js"></script>
+</body>
+</html>

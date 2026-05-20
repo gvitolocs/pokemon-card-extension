@@ -45,24 +45,17 @@ class PokemonCardTraderLinker {
             this.globalButton = window.globalCardTraderButton;
         }
         
-        this.globalButton.innerHTML = 'CardTrader';
+        setPokoinButtonLabel(this.globalButton);
         this.globalButton.style.cssText = `
             margin-top: 8px;
             margin-left: 8px;
             padding: 8px 16px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 8px;
             font-size: 17px;
-            cursor: pointer;
-            font-weight: bold;
             min-width: 100px;
-            display: inline-block;
-            transition: all 0.2s ease;
         `;
+        applyPokoinButtonStyles(this.globalButton, { background: '#6c757d' });
 
-        console.log('✅ Global CardTrader button created once at startup');
+        console.log('✅ Global Pokoin button created once at startup');
     }
     
     async initializeExtension() {
@@ -124,6 +117,8 @@ class PokemonCardTraderLinker {
             
             // Initialize the site-specific processor immediately
             this.initializeProcessors();
+            patchCardTraderCardPage();
+            watchCardTraderNavigation();
             
         } catch (error) {
             console.error('❌ Error nell\'initialization:', error);
@@ -196,6 +191,9 @@ class PokemonCardTraderLinker {
                 console.log('⚠️ [CardTrader] CardmarketProcessor not available, using original logic');
                 this.patchCardmarketProductPage();
             }
+        } else if (hostname.includes('cardtrader')) {
+            patchCardTraderCardPage();
+            watchCardTraderNavigation();
         }
     }
     
@@ -242,12 +240,15 @@ class PokemonCardTraderLinker {
         
         // Start processing immediately
         this.startObserver();
+        patchCardTraderCardPage();
+        watchCardTraderNavigation();
         
         // If the DOM is still loading, restart when ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
                 console.log('⚡ [CardTrader] DOM loaded, restarting processing...');
                 this.startObserver();
+                patchCardTraderCardPage();
             });
         }
     }
@@ -372,6 +373,124 @@ if (typeof window.supabaseClient === 'undefined') {
     window.supabaseClient = null;
 }
 
+function pokoinIconUrl() {
+    return chrome.runtime.getURL('assets/pokoin.svg');
+}
+
+function setPokoinButtonLabel(button, suffix = '') {
+    button.innerHTML = `
+        <img src="${pokoinIconUrl()}" alt="" aria-hidden="true">
+        <span>Pokoin${suffix ? ` ${suffix}` : ''}</span>
+    `;
+}
+
+function applyPokoinButtonStyles(button, styles = {}) {
+    Object.assign(button.style, {
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '8px',
+        background: '#0ea5e9',
+        color: 'white',
+        border: 'none',
+        borderRadius: '8px',
+        cursor: 'pointer',
+        fontWeight: 'bold',
+        transition: 'all 0.2s ease',
+        ...styles,
+    });
+
+    const icon = button.querySelector('img');
+    if (icon) {
+        Object.assign(icon.style, {
+            width: '18px',
+            height: '18px',
+            borderRadius: '50%',
+            objectFit: 'cover',
+        });
+    }
+}
+
+function extractCardTraderBlueprintId(pathname = window.location.pathname) {
+    const match = pathname.match(/\/(?:[a-z]{2}\/)?cards\/(\d+)(?:-|\/|$)/i);
+    return match ? match[1] : '';
+}
+
+function patchCardTraderCardPage() {
+    if (!window.location.hostname.includes('cardtrader')) {
+        return;
+    }
+
+    const blueprintId = extractCardTraderBlueprintId();
+    if (!blueprintId || document.querySelector('[data-pokoin-cardtrader-button]')) {
+        return;
+    }
+
+    const titleBlock = document.querySelector('.py-3.text-center.text-sm-left');
+    const titleElement = titleBlock?.querySelector('h2');
+    if (!titleBlock || !titleElement) {
+        setTimeout(patchCardTraderCardPage, 500);
+        return;
+    }
+
+    const link = document.createElement('a');
+    link.setAttribute('data-pokoin-cardtrader-button', 'true');
+    link.href = generatePokoinLink(blueprintId);
+    link.target = '_blank';
+    link.rel = 'noreferrer';
+    setPokoinButtonLabel(link);
+    Object.assign(link.style, {
+        marginLeft: '12px',
+        padding: '7px 14px',
+        fontSize: '14px',
+        lineHeight: '1',
+        textDecoration: 'none',
+        verticalAlign: 'middle',
+    });
+    applyPokoinButtonStyles(link, {
+        background: '#0ea5e9',
+        boxShadow: '0 2px 8px rgba(14, 165, 233, 0.28)',
+    });
+
+    link.addEventListener('mouseenter', () => {
+        link.style.background = '#0284c7';
+        link.style.transform = 'translateY(-1px)';
+        link.style.boxShadow = '0 4px 12px rgba(14, 165, 233, 0.35)';
+    });
+    link.addEventListener('mouseleave', () => {
+        link.style.background = '#0ea5e9';
+        link.style.transform = 'translateY(0)';
+        link.style.boxShadow = '0 2px 8px rgba(14, 165, 233, 0.28)';
+    });
+
+    titleElement.insertAdjacentElement('afterend', link);
+    console.log(`✅ [CardTrader] Added Pokoin button for blueprint ${blueprintId}`);
+}
+
+function watchCardTraderNavigation() {
+    if (!window.location.hostname.includes('cardtrader') || window.pokoinCardTraderNavigationWatcher) {
+        return;
+    }
+
+    window.pokoinCardTraderNavigationWatcher = true;
+    let lastUrl = window.location.href;
+    const checkPage = () => {
+        if (window.location.href !== lastUrl) {
+            lastUrl = window.location.href;
+            setTimeout(patchCardTraderCardPage, 300);
+        } else {
+            patchCardTraderCardPage();
+        }
+    };
+
+    new MutationObserver(checkPage).observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+    });
+
+    window.addEventListener('popstate', () => setTimeout(checkPage, 300));
+}
+
 // Create the global button only once (outside all loops)
 if (!window.globalCardTraderButton) {
     globalButton = document.createElement('button');
@@ -379,24 +498,17 @@ if (!window.globalCardTraderButton) {
 } else {
     globalButton = window.globalCardTraderButton;
 }
-globalButton.innerHTML = 'CardTrader';
+setPokoinButtonLabel(globalButton);
 globalButton.style.cssText = `
     margin-top: 8px;
     margin-left: 8px;
     padding: 8px 16px;
-    background: #6c757d;
-    color: white;
-    border: none;
-    border-radius: 8px;
     font-size: 17px;
-    cursor: pointer;
-    font-weight: bold;
     min-width: 100px;
-    display: inline-block;
-    transition: all 0.2s ease;
 `;
+applyPokoinButtonStyles(globalButton, { background: '#6c757d' });
 
-console.log('✅ Global CardTrader button created once at startup');
+console.log('✅ Global Pokoin button created once at startup');
 
 // Initialize the extension
 async function initializeExtension() {
@@ -481,6 +593,8 @@ async function initializeExtension() {
             }
             
             initializeProcessors();
+            patchCardTraderCardPage();
+            watchCardTraderNavigation();
             
         }, 500); // 500ms delay to ensure files are loaded
         
@@ -514,6 +628,9 @@ async function initializeExtension() {
                     console.log('⚠️ [CardTrader] CardmarketProcessor not available, using original logic');
                     patchCardmarketProductPage();
                 }
+            } else if (hostname.includes('cardtrader')) {
+                patchCardTraderCardPage();
+                watchCardTraderNavigation();
             }
         }
         
@@ -541,6 +658,8 @@ async function initializeExtension() {
                     return;
                 }
                 patchCardmarketProductPage();
+            } else if (hostname.includes('cardtrader')) {
+                patchCardTraderCardPage();
             }
         }
         
@@ -566,12 +685,15 @@ function initializeUltraFast() {
     
     // Start processing immediately
     startObserver();
+    patchCardTraderCardPage();
+    watchCardTraderNavigation();
     
     // If the DOM is still loading, restart when ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             console.log('⚡ [CardTrader] DOM loaded, restarting processing...');
             startObserver();
+            patchCardTraderCardPage();
         });
     }
 }
@@ -991,28 +1113,21 @@ async function processListing(listingElement) {
         // Crea button gray (loading)
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
-        button.innerHTML = 'CardTrader';
+        setPokoinButtonLabel(button);
         button.style.cssText = `
             margin-top: 8px;
             margin-left: 8px;
             padding: 8px 16px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 8px;
             font-size: 17px;
-            cursor: pointer;
-            font-weight: bold;
             min-width: 100px;
-            display: inline-block;
-            transition: all 0.2s ease;
         `;
+        applyPokoinButtonStyles(button, { background: '#6c757d' });
         
         // Insert button
         const inseriscied = inserisciLinkContainer(listingElement, button);
         
         if (inseriscied) {
-            console.log(`✅ [CardTrader] Added CardTrader button (loading) for ${titleInfo.pokemonName}`);
+            console.log(`✅ [CardTrader] Added Pokoin button (loading) for ${titleInfo.pokemonName}`);
             
             // Search in database
             console.log(`🔍 [CardTrader] Starting search for: "${title}"`);
@@ -1043,8 +1158,8 @@ async function processListing(listingElement) {
                 button.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
-                    window.open(cardTraderUrl, '_blank');
+                    const pokoinUrl = generatePokoinLink(bestResult.blueprint_id);
+                    window.open(pokoinUrl, '_blank');
                 });
                 
                 // Hover effects (green)
@@ -1066,7 +1181,7 @@ async function processListing(listingElement) {
                 // Controlla Supabase
                 if (typeof window.supabaseClient === 'undefined' || !window.supabaseClient) {
                     console.log('⚠️ [CardTrader] Supabase not available, button stays gray');
-                    button.innerHTML = 'CardTrader (DB offline)';
+                    setPokoinButtonLabel(button, '(DB offline)');
                 }
                 
                 // Effetti hover (gray)
@@ -1119,7 +1234,7 @@ function extractTitleFromListing(listingElement) {
             if (element && element.textContent && element.textContent.trim()) {
                 let title = element.textContent.trim();
                 // Rimuovi eventuali pulsanti CardTrader dal title
-                title = title.replace(/\bCardTrader\b/g, '').trim();
+                title = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
                 return title;
             }
         }
@@ -1128,7 +1243,7 @@ function extractTitleFromListing(listingElement) {
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
             // Rimuovi eventuali pulsanti CardTrader dal title
-            title = title.replace(/\bCardTrader\b/g, '').trim();
+            title = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
             return title;
         }
         
@@ -1147,7 +1262,7 @@ function extractTitleFromListing(listingElement) {
             if (element && element.textContent && element.textContent.trim()) {
                 let title = element.textContent.trim();
                 // Rimuovi eventuali pulsanti CardTrader dal title
-                title = title.replace(/\bCardTrader\b/g, '').trim();
+                title = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
                 return title;
             }
         }
@@ -1156,7 +1271,7 @@ function extractTitleFromListing(listingElement) {
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
             // Rimuovi eventuali pulsanti CardTrader dal title
-            title = title.replace(/\bCardTrader\b/g, '').trim();
+            title = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
             return title;
         }
     } else if (hostname.includes('cardmarket')) {
@@ -1183,7 +1298,7 @@ function extractTitleFromListing(listingElement) {
                     console.log(`🔍 [CardTrader] Cardmarket title normale - Title estratto: "${title}"`);
                 }
                 // Rimuovi eventuali pulsanti CardTrader dal title
-                title = title.replace(/\bCardTrader\b/g, '').trim();
+                title = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
                 console.log(`🔍 [CardTrader] Cardmarket title finale: "${title}"`);
                 return title;
             }
@@ -1192,7 +1307,7 @@ function extractTitleFromListing(listingElement) {
         // Fallback: usa il testo of elemento stesso
         if (listingElement.textContent && listingElement.textContent.trim()) {
             let title = listingElement.textContent.trim();
-            title = title.replace(/\bCardTrader\b/g, '').trim();
+            title = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
             console.log(`🔍 [CardTrader] Cardmarket fallback - Title: "${title}"`);
             return title;
         }
@@ -1506,21 +1621,14 @@ function patchEbayProductPage() {
         // Create gray loading button immediately
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
-        button.innerHTML = 'CardTrader';
+        setPokoinButtonLabel(button);
         button.style.cssText = `
             margin: 16px 0;
             padding: 8px 16px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 8px;
             font-size: 16px;
-            cursor: pointer;
-            font-weight: bold;
             min-width: 120px;
-            display: inline-block;
-            transition: all 0.2s ease;
         `;
+        applyPokoinButtonStyles(button, { background: '#6c757d' });
         
         // Insert the button after the title
         if (titleElement.parentNode) {
@@ -1546,8 +1654,8 @@ function patchEbayProductPage() {
                 button.addEventListener('click', (e) => {
                     e.preventDefault();
                     e.stopPropagation();
-                    const cardTraderUrl = generateCardTraderLink(bestResult.blueprint_id);
-                    window.open(cardTraderUrl, '_blank');
+                    const pokoinUrl = generatePokoinLink(bestResult.blueprint_id);
+                    window.open(pokoinUrl, '_blank');
                 });
                 
                 // Enhanced hover effects (green)
@@ -1866,7 +1974,7 @@ function patchCardmarketProductPage() {
 // Extract info from title
 function extractTitleInfo(title) {
     // Clean title from "CardTrader" and other extension elements
-    let cleanTitle = title.replace(/\bCardTrader\b/g, '').trim();
+    let cleanTitle = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
     cleanTitle = cleanTitle.replace(/\bDB offline\b/g, '').trim();
     cleanTitle = cleanTitle.replace(/\bCaricamento\.\.\.\b/g, '').trim();
     
@@ -3676,11 +3784,18 @@ function generateCacheKey(title) {
     return title.toLowerCase().trim().replace(/\s+/g, ' ');
 }
 
-// Function for generare link CardTrader
-function generateCardTraderLink(blueprintId) {
+// Function for generare link Pokoin
+function generatePokoinLink(blueprintId) {
     // Caso special for search Cardmarket
     if (blueprintId === 'cardmarket_search') {
-        return null; // Not generare link CardTrader for ricerche Cardmarket
+        return null; // Not generare link Pokoin for ricerche Cardmarket
+    }
+    return `https://pokoin.com/marketplace/en/cards/${blueprintId}`;
+}
+
+function generateCardTraderLink(blueprintId) {
+    if (blueprintId === 'cardmarket_search') {
+        return null;
     }
     return `https://cardtrader.com/cards/${blueprintId}`;
 }

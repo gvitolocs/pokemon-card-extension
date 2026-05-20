@@ -82,6 +82,13 @@ Testing helpers:
 
 - `tests/test-extension.html`
 - `tests/generate-icons.html`
+- `tests/cardvault-api-smoke.test.js`
+
+Run the Cardvault API smoke suite with:
+
+```bash
+node --test tests/cardvault-api-smoke.test.js
+```
 
 ## Documentation
 

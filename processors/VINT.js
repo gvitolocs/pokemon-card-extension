@@ -9,6 +9,43 @@ class VintedProcessor {
         this.processedPages = new Set();
     }
 
+    pokoinIconUrl() {
+        return chrome.runtime.getURL('assets/pokoin.svg');
+    }
+
+    setPokoinButtonLabel(button, suffix = '') {
+        button.innerHTML = `
+            <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
+            <span>Pokoin${suffix ? ` ${suffix}` : ''}</span>
+        `;
+    }
+
+    applyPokoinButtonStyles(button, styles = {}) {
+        Object.assign(button.style, {
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            background: '#0ea5e9',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            cursor: 'pointer',
+            fontWeight: 'bold',
+            transition: 'all 0.2s ease',
+            ...styles,
+        });
+        const icon = button.querySelector('img');
+        if (icon) {
+            Object.assign(icon.style, {
+                width: '18px',
+                height: '18px',
+                borderRadius: '50%',
+                objectFit: 'cover',
+            });
+        }
+    }
+
     /**
      * Initialize Vinted processor
      */
@@ -147,26 +184,19 @@ class VintedProcessor {
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.setAttribute('data-pokemon-linker-fallback', 'true');
-        button.innerHTML = 'CardTrader (Loading...)';
+        this.setPokoinButtonLabel(button, '(Loading...)');
         button.style.cssText = `
             position: fixed;
             top: 100px;
             right: 20px;
             z-index: 9999;
             padding: 12px 24px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 8px;
             font-size: 16px;
-            cursor: pointer;
-            font-weight: bold;
             min-width: 120px;
-            display: inline-block;
-            transition: all 0.2s ease;
             font-family: Arial, sans-serif;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         `;
+        this.applyPokoinButtonStyles(button, { background: '#6c757d' });
         
         // Hover effects (gray)
         button.addEventListener('mouseenter', () => {
@@ -197,22 +227,15 @@ class VintedProcessor {
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.setAttribute('data-pokemon-linker-fallback', 'true');
-        button.innerHTML = 'CardTrader (Loading...)';
+        this.setPokoinButtonLabel(button, '(Loading...)');
         button.style.cssText = `
             margin: 16px 0;
             padding: 12px 24px;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 8px;
             font-size: 16px;
-            cursor: pointer;
-            font-weight: bold;
             min-width: 120px;
-            display: inline-block;
-            transition: all 0.2s ease;
             font-family: Arial, sans-serif;
         `;
+        this.applyPokoinButtonStyles(button, { background: '#6c757d' });
         
         // Hover effects (gray)
         button.addEventListener('mouseenter', () => {
@@ -295,15 +318,19 @@ class VintedProcessor {
             // If this is a link element (replacement case), update content
             this.currentButton.innerHTML = `
                 <span class="web_ui__Button__content">
-                    <span class="web_ui__Button__label">CardTrader</span>
+                    <span class="web_ui__Button__label">
+                        <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:18px;height:18px;border-radius:50%;object-fit:cover;margin-right:8px;vertical-align:middle;">
+                        Pokoin
+                    </span>
                 </span>
             `;
             this.currentButton.style.background = '#28a745';
             this.currentButton.style.color = 'white';
         } else {
             // If this is a normal button
-            this.currentButton.innerHTML = 'CardTrader';
+            this.setPokoinButtonLabel(this.currentButton);
             this.currentButton.style.background = '#28a745';
+            this.applyPokoinButtonStyles(this.currentButton, { background: '#28a745' });
         }
         
         this.currentButton.removeAttribute('data-pokemon-linker-fallback');
@@ -317,8 +344,8 @@ class VintedProcessor {
         this.currentButton.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const cardTraderUrl = this.generateCardTraderLink(bestResult.blueprint_id);
-            window.open(cardTraderUrl, '_blank');
+            const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
+            window.open(pokoinUrl, '_blank');
         });
         
         // Hover effects (green)
@@ -338,39 +365,32 @@ class VintedProcessor {
     }
 
     /**
-     * Create CardTrader button for product page (legacy method)
+     * Create Pokoin button for product page (legacy method)
      */
     createProductButton(titleElement, results) {
         console.log(`🔍 [VINT] Starting button creation with ${results.length} results`);
         console.log(`🔍 [VINT] First result:`, results[0]);
         
-        // Create single CardTrader button
+        // Create single Pokoin button
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
-        button.innerHTML = 'CardTrader';
+        this.setPokoinButtonLabel(button);
         button.style.cssText = `
             margin: 16px 0;
             padding: 12px 24px;
-            background: #28a745;
-            color: white;
-            border: none;
-            border-radius: 8px;
             font-size: 16px;
-            cursor: pointer;
-            font-weight: bold;
             min-width: 120px;
-            display: inline-block;
-            transition: all 0.2s ease;
             font-family: Arial, sans-serif;
         `;
+        this.applyPokoinButtonStyles(button, { background: '#28a745' });
         
         // Add click handler with top-ranked result
         const bestResult = results[0];
         button.addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            const cardTraderUrl = this.generateCardTraderLink(bestResult.blueprint_id);
-            window.open(cardTraderUrl, '_blank');
+            const pokoinUrl = this.generatePokoinLink(bestResult.blueprint_id);
+            window.open(pokoinUrl, '_blank');
         });
         
         // Hover effects
@@ -392,10 +412,10 @@ class VintedProcessor {
         
         if (titleElement.parentNode) {
             titleElement.parentNode.insertBefore(button, titleElement.nextSibling);
-            console.log(`✅ [VINT] Added CardTrader button on product page for: ${bestResult.name_en || bestResult.pokemon_name}`);
+            console.log(`✅ [VINT] Added Pokoin button on product page for: ${bestResult.name_en || bestResult.pokemon_name}`);
             console.log(`✅ [VINT] Button inserted successfully in DOM`);
         } else {
-            console.log('⚠️ [VINT] Unable to insert CardTrader button: parentNode not found');
+            console.log('⚠️ [VINT] Unable to insert Pokoin button: parentNode not found');
         }
     }
 
@@ -437,10 +457,10 @@ class VintedProcessor {
     }
 
     /**
-     * Generate CardTrader link
+     * Generate Pokoin card link
      */
-    generateCardTraderLink(blueprintId) {
-        return `https://www.cardtrader.com/cards/${blueprintId}`;
+    generatePokoinLink(blueprintId) {
+        return `https://pokoin.com/marketplace/en/cards/${blueprintId}`;
     }
 }
 
