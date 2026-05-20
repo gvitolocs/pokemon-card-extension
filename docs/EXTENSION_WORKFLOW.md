@@ -42,7 +42,8 @@
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
 7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
-8. Vinted renders the Pokoin button and clue chips inside one compact fixed panel with spacing between the button and chips, avoiding the old independent `top: 154px; right: 20px` chip overlay that could cover the Vinted product details column. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
+8. Vinted renders the Pokoin button and clue chips inside one compact panel inserted into the item details/title column, before the listing action area when Vinted exposes one. The chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
+9. Vinted uses a fixed fallback panel only when no safe item title/details anchor exists. That fallback sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
 
 ## CardTrader Direct Path
 

@@ -12,6 +12,7 @@ class VintedProcessor {
         this.currentKeywords = [];
         this.selectedKeywordValues = new Set();
         this.latestSearchToken = 0;
+        this.currentPanel = null;
     }
 
     pokoinIconUrl() {
@@ -262,15 +263,11 @@ class VintedProcessor {
             return;
         }
 
-        const buttonRect = this.currentButton.getBoundingClientRect();
+        const panel = this.currentButton.closest?.('[data-pokoin-vinted-panel]');
         const preview = document.createElement('div');
         preview.setAttribute('data-pokoin-candidate-preview', 'true');
         preview.style.cssText = `
-            position: fixed;
-            top: ${Math.round(buttonRect.bottom + 8)}px;
-            right: ${Math.max(12, Math.round(window.innerWidth - buttonRect.right))}px;
-            z-index: 9998;
-            width: min(320px, calc(100vw - 24px));
+            width: 100%;
             padding: 12px;
             border: 1px solid rgba(56, 189, 248, 0.35);
             border-radius: 16px;
@@ -307,7 +304,11 @@ class VintedProcessor {
             preview.appendChild(row);
         });
 
-        document.body.appendChild(preview);
+        if (panel) {
+            panel.appendChild(preview);
+        } else {
+            document.body.appendChild(preview);
+        }
     }
 
     openPokoinSidePanel() {
@@ -338,14 +339,12 @@ class VintedProcessor {
         return response?.success && Array.isArray(response.results) ? response.results : [];
     }
 
-    vintedFloatingPanelStyles() {
+    vintedInsertedPanelStyles() {
         return {
-            position: 'fixed',
-            top: '12px',
-            right: '12px',
-            zIndex: '9999',
-            width: 'min(260px, calc(100vw - 24px))',
-            maxWidth: '260px',
+            position: 'static',
+            width: '100%',
+            maxWidth: '420px',
+            margin: '12px 0',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'stretch',
@@ -355,15 +354,144 @@ class VintedProcessor {
         };
     }
 
-    ensureVintedFloatingPanel() {
-        let panel = document.querySelector?.('[data-pokoin-vinted-panel]');
+    vintedFallbackPanelStyles() {
+        return {
+            position: 'fixed',
+            left: '16px',
+            bottom: '16px',
+            right: 'auto',
+            top: 'auto',
+            zIndex: '9999',
+            width: 'min(280px, calc(100vw - 32px))',
+            maxWidth: '280px',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '8px',
+            pointerEvents: 'auto',
+            fontFamily: 'Arial, sans-serif',
+        };
+    }
+
+    vintedFloatingPanelStyles() {
+        return this.vintedFallbackPanelStyles();
+    }
+
+    nearestElement(node) {
+        let current = node;
+        while (current && current.nodeType && current.nodeType !== Node.ELEMENT_NODE) {
+            current = current.parentElement || current.parentNode;
+        }
+        return current || null;
+    }
+
+    findVintedDetailsContainer(titleElement) {
+        if (!titleElement) {
+            return null;
+        }
+
+        const detailSelectors = [
+            '[data-testid="item-details"]',
+            '[data-testid="item-page-details"]',
+            '[data-testid="item-details-container"]',
+            '[data-testid="item-info"]',
+            '[data-testid="item-summary"]',
+            '[class*="item-details"]',
+            '[class*="ItemDetails"]',
+        ];
+
+        for (const selector of detailSelectors) {
+            const closest = titleElement.closest?.(selector);
+            if (closest) {
+                return closest;
+            }
+        }
+
+        const titleParent = this.nearestElement(titleElement.parentElement || titleElement.parentNode);
+        if (titleParent) {
+            return titleParent;
+        }
+
+        for (const selector of detailSelectors) {
+            const candidate = document.querySelector?.(selector);
+            if (candidate?.querySelector?.('h1, [data-testid="item-title"]')) {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    findVintedActionArea(container) {
+        if (!container?.querySelector) {
+            return null;
+        }
+
+        const actionSelectors = [
+            '[data-testid="item-actions"]',
+            '[data-testid="item-action-bar"]',
+            '[data-testid="item-buy-button"]',
+            '[data-testid="item-message-button"]',
+            '[class*="item-actions"]',
+            '[class*="ItemActions"]',
+        ];
+
+        for (const selector of actionSelectors) {
+            const actionArea = container.querySelector(selector);
+            if (actionArea) {
+                return actionArea;
+            }
+        }
+
+        return null;
+    }
+
+    insertVintedPanelNearDetails(panel, titleElement) {
+        const detailsContainer = this.findVintedDetailsContainer(titleElement);
+        if (!detailsContainer) {
+            return false;
+        }
+
+        Object.assign(panel.style, this.vintedInsertedPanelStyles());
+        panel.setAttribute('data-pokoin-vinted-placement', 'anchored');
+
+        const actionArea = this.findVintedActionArea(detailsContainer);
+        if (actionArea?.parentNode === detailsContainer) {
+            detailsContainer.insertBefore(panel, actionArea);
+            return true;
+        }
+
+        if (titleElement?.parentNode === detailsContainer && titleElement.nextSibling) {
+            detailsContainer.insertBefore(panel, titleElement.nextSibling);
+            return true;
+        }
+
+        if (titleElement?.parentNode === detailsContainer) {
+            detailsContainer.appendChild(panel);
+            return true;
+        }
+
+        detailsContainer.appendChild(panel);
+        return true;
+    }
+
+    ensureVintedPanel(titleElement = this.currentTitleElement) {
+        let panel = this.currentPanel || document.querySelector?.('[data-pokoin-vinted-panel]');
         if (!panel) {
             panel = document.createElement('div');
             panel.setAttribute('data-pokoin-vinted-panel', 'true');
-            Object.assign(panel.style, this.vintedFloatingPanelStyles());
-            document.body.appendChild(panel);
+            if (!this.insertVintedPanelNearDetails(panel, titleElement)) {
+                Object.assign(panel.style, this.vintedFallbackPanelStyles());
+                panel.setAttribute('data-pokoin-vinted-placement', 'fallback-fixed');
+                document.body.appendChild(panel);
+            }
         }
+        this.currentPanel = panel;
         return panel;
+    }
+
+    ensureVintedFloatingPanel() {
+        return this.ensureVintedPanel();
     }
 
     applyPokoinButtonStyles(button, styles = {}) {
@@ -542,7 +670,7 @@ class VintedProcessor {
             container.appendChild(chip);
         });
 
-        this.ensureVintedFloatingPanel().appendChild(container);
+        this.ensureVintedPanel(this.currentTitleElement).appendChild(container);
     }
 
     applyKeywordChipStyle(chip, selected) {
@@ -605,10 +733,8 @@ class VintedProcessor {
      * Create gray fallback button
      */
     createFallbackButton(titleElement) {
-        console.log(`🔍 [VINT] Creating fixed gray button at top-right`);
-        
-        // Always use fixed-position top-right method
-        this.createFixedPositionButton();
+        console.log(`🔍 [VINT] Creating Pokoin action panel near Vinted item details`);
+        this.createVintedPanelButton(titleElement);
     }
 
 
@@ -616,7 +742,7 @@ class VintedProcessor {
     /**
      * Create fixed top-right button
      */
-    createFixedPositionButton() {
+    createVintedPanelButton(titleElement = this.currentTitleElement) {
         console.log('🔄 [VINT] Creating compact Vinted action panel...');
         
         // Create gray fixed-position button
@@ -647,7 +773,7 @@ class VintedProcessor {
             button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
         });
         
-        const panel = this.ensureVintedFloatingPanel();
+        const panel = this.ensureVintedPanel(titleElement);
         if (typeof panel.prepend === 'function') {
             panel.prepend(button);
         } else {
@@ -660,6 +786,10 @@ class VintedProcessor {
             e.stopPropagation();
             this.openPokoinSidePanel();
         });
+    }
+
+    createFixedPositionButton() {
+        this.createVintedPanelButton(this.currentTitleElement);
     }
 
     /**

@@ -93,6 +93,99 @@ function createButtonStub() {
     };
 }
 
+function createDomElement(tagName = 'div', attributes = {}) {
+    const element = {
+        tagName: tagName.toUpperCase(),
+        nodeType: 1,
+        style: {},
+        attributes: { ...attributes },
+        children: [],
+        textContent: '',
+        parentNode: null,
+        parentElement: null,
+        nextSibling: null,
+        type: '',
+        setAttribute(name, value) {
+            this.attributes[name] = value;
+        },
+        getAttribute(name) {
+            return this.attributes[name];
+        },
+        appendChild(child) {
+            child.parentNode = this;
+            child.parentElement = this;
+            this.children.push(child);
+            this.updateSiblings();
+            return child;
+        },
+        prepend(child) {
+            child.parentNode = this;
+            child.parentElement = this;
+            this.children.unshift(child);
+            this.updateSiblings();
+            return child;
+        },
+        insertBefore(child, before) {
+            child.parentNode = this;
+            child.parentElement = this;
+            const index = this.children.indexOf(before);
+            if (index === -1) {
+                this.children.push(child);
+            } else {
+                this.children.splice(index, 0, child);
+            }
+            this.updateSiblings();
+            return child;
+        },
+        updateSiblings() {
+            this.children.forEach((child, index, children) => {
+                child.nextSibling = children[index + 1] || null;
+            });
+        },
+        addEventListener() {},
+        querySelector(selector) {
+            return this.children.find((child) => child.matches?.(selector) || child.querySelector?.(selector)) || null;
+        },
+        querySelectorAll(selector) {
+            return this.children.flatMap((child) => {
+                const matches = child.matches?.(selector) ? [child] : [];
+                return [...matches, ...(child.querySelectorAll?.(selector) || [])];
+            });
+        },
+        matches(selector) {
+            if (selector.includes(',')) {
+                return selector.split(',').some((part) => this.matches(part.trim()));
+            }
+            const testId = selector.match(/\[data-testid="([^"]+)"\]/)?.[1];
+            if (testId) {
+                return this.attributes['data-testid'] === testId;
+            }
+            if (selector === tagName || selector.toUpperCase() === this.tagName) {
+                return true;
+            }
+            if (selector.startsWith('[class*="')) {
+                const classFragment = selector.match(/\[class\*="([^"]+)"\]/)?.[1] || '';
+                return String(this.attributes.class || '').includes(classFragment);
+            }
+            if (selector.startsWith('[data-pokoin-vinted-panel]')) {
+                return this.attributes['data-pokoin-vinted-panel'] !== undefined;
+            }
+            return false;
+        },
+        closest(selector) {
+            let current = this;
+            while (current) {
+                if (current.matches?.(selector)) {
+                    return current;
+                }
+                current = current.parentElement || current.parentNode;
+            }
+            return null;
+        },
+    };
+    return element;
+}
+
 test('content search fetch failures warn and return empty results', async () => {
     const source = readRepoFile('content.js');
     const globalSearchStart = source.indexOf('// Search cards in database');
@@ -372,8 +465,75 @@ test('Vinted selected keyword toggles shape background and side-panel messages',
     assert.deepEqual([...messages[1].primaryClues], []);
 });
 
-test('Vinted keyword panel is compact and anchored to button container', () => {
-    const appended = [];
+test('Vinted placement prefers the product details/title container', () => {
+    const bodyAppends = [];
+    const details = createDomElement('section', { 'data-testid': 'item-details' });
+    const titleWrapper = createDomElement('div');
+    const title = createDomElement('h1', { 'data-testid': 'item-title' });
+    const actionArea = createDomElement('div', { 'data-testid': 'item-actions' });
+    titleWrapper.appendChild(title);
+    details.appendChild(titleWrapper);
+    details.appendChild(actionArea);
+
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: (selector) => selector === '[data-pokoin-vinted-panel]' ? null : null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: {
+                appendChild(element) {
+                    bodyAppends.push(element);
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+
+    const panel = processor.ensureVintedPanel(title);
+
+    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'anchored');
+    assert.equal(panel.parentNode, details);
+    assert.equal(details.children.indexOf(panel), details.children.indexOf(actionArea) - 1);
+    assert.equal(bodyAppends.length, 0, 'anchored panel should not be fixed on body');
+    assert.equal(panel.style.position, 'static');
+});
+
+test('Vinted fallback fixed panel is only used without a safe anchor', () => {
+    const bodyAppends = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: {
+                appendChild(element) {
+                    bodyAppends.push(element);
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+
+    const panel = processor.ensureVintedPanel(null);
+
+    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'fallback-fixed');
+    assert.equal(panel.style.position, 'fixed');
+    assert.equal(panel.style.left, '16px');
+    assert.equal(panel.style.bottom, '16px');
+    assert.equal(panel.style.right, 'auto');
+    assert.equal(panel.style.top, 'auto');
+    assert.equal(bodyAppends[0], panel);
+});
+
+test('Vinted chip and button share normal inserted details container', () => {
+    const details = createDomElement('section', { 'data-testid': 'item-details' });
+    const title = createDomElement('h1', { 'data-testid': 'item-title' });
+    const actionArea = createDomElement('div', { 'data-testid': 'item-actions' });
+    details.appendChild(title);
+    details.appendChild(actionArea);
+
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
             extractTitleInfo: () => ({ pokemonName: null }),
@@ -382,48 +542,28 @@ test('Vinted keyword panel is compact and anchored to button container', () => {
             querySelector: () => null,
             querySelectorAll: () => [],
             contains: () => true,
-            createElement: (tagName) => ({
-                tagName: tagName.toUpperCase(),
-                style: {},
-                attributes: {},
-                children: [],
-                textContent: '',
-                type: '',
-                setAttribute(name, value) {
-                    this.attributes[name] = value;
-                },
-                appendChild(child) {
-                    this.children.push(child);
-                },
-                prepend(child) {
-                    this.children.unshift(child);
-                },
-                addEventListener() {},
-                querySelector() {
-                    return { style: {} };
-                },
-            }),
+            createElement: (tagName) => createDomElement(tagName),
             body: {
-                appendChild(element) {
-                    appended.push(element);
-                },
+                appendChild() {},
             },
         },
     });
     const processor = new Processor();
-    processor.currentButton = createButtonStub();
+    processor.currentTitleElement = title;
 
-    const panelStyles = processor.vintedFloatingPanelStyles();
+    processor.createVintedPanelButton(title);
     processor.renderKeywordToggles('Carta Pokemon Dragonite', 'SWSH154 Evolving Skies');
 
-    assert.equal(panelStyles.top, '12px');
-    assert.equal(panelStyles.right, '12px');
-    assert.equal(panelStyles.width, 'min(260px, calc(100vw - 24px))');
-    assert.notEqual(panelStyles.top, '154px');
-    assert.notEqual(panelStyles.right, '20px');
-    assert.equal(appended.length, 1, 'one shared panel should be appended');
-    assert.equal(appended[0].attributes['data-pokoin-vinted-panel'], 'true');
-    assert.ok(appended[0].children.some((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true'));
+    const panel = details.children.find((child) => child.attributes['data-pokoin-vinted-panel'] === 'true');
+    assert.ok(panel, 'panel should be inserted into item details');
+    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'anchored');
+    assert.equal(panel.style.position, 'static');
+    assert.ok(panel.children.some((child) => child.attributes['data-pokemon-linker-button'] === 'true'));
+    assert.ok(panel.children.some((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true'));
+    assert.match(
+        panel.children.find((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true').style.cssText,
+        /flex-wrap:\s*wrap/
+    );
 });
 
 test('Vinted background candidates turn button green and render preview', async () => {
