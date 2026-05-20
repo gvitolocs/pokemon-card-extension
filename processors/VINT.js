@@ -403,6 +403,17 @@ class VintedProcessor {
             console.log('⚠️ [VINT] Button is no longer in DOM');
             return;
         }
+
+        const applyResolvedButtonState = (button) => {
+            button.removeAttribute('data-pokemon-linker-fallback');
+            this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
+            this.applyPokoinButtonStyles(button, {
+                background: '#28a745',
+                color: '#ffffff',
+                border: '2px solid #16a34a',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.35)',
+            });
+        };
         
         // Update button
         if (this.currentButton.tagName === 'A') {
@@ -415,21 +426,21 @@ class VintedProcessor {
                     </span>
                 </span>
             `;
-            this.currentButton.style.background = '#28a745';
-            this.currentButton.style.color = 'white';
+            this.applyPokoinButtonStyles(this.currentButton, {
+                background: '#28a745',
+                color: '#ffffff',
+                border: '2px solid #16a34a',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.35)',
+            });
         } else {
-            // If this is a normal button
-            this.setPokoinButtonLabel(this.currentButton, this.countHighConfidenceMatches(results));
-            this.currentButton.style.background = '#28a745';
-            this.applyPokoinButtonStyles(this.currentButton, { background: '#28a745' });
+            applyResolvedButtonState(this.currentButton);
         }
-        
-        this.currentButton.removeAttribute('data-pokemon-linker-fallback');
         
         // Remove previous listeners by cloning the button
         const newButton = this.currentButton.cloneNode(true);
         this.currentButton.parentNode.replaceChild(newButton, this.currentButton);
         this.currentButton = newButton;
+        applyResolvedButtonState(this.currentButton);
         
         // Add click handler
         this.currentButton.addEventListener('click', (e) => {

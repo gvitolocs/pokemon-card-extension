@@ -169,3 +169,16 @@ test('16. first-edition Italian clue maps Gastly toward Base Set', async () => {
     assert.match(rows[0].name || '', /^Gastly$/i);
     assert.match(rows[0].set_name || '', /^Base Set$/i);
 });
+
+test('17. Gastly Base Set family has three vintage candidates before Expedition', async () => {
+    const rows = await autocomplete('Gastly Base Set', { resultLimit: 8, poolLimit: 80 });
+    const baseFamily = rows.filter((row) =>
+        /^Base Set(?: 2| Shadowless)?$/i.test(row.set_name || '')
+    );
+
+    assert.ok(baseFamily.length >= 3, 'Gastly should include Base Set, Base Set 2, and Shadowless candidates');
+    assert.deepEqual(
+        baseFamily.slice(0, 3).map((row) => row.set_name),
+        ['Base Set', 'Base Set 2', 'Base Set Shadowless']
+    );
+});

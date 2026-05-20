@@ -561,6 +561,13 @@ function rowMatchesStructuredName(row, structuredCard) {
         requestedName.includes(rowName);
 }
 
+function isAllowedBaseSetFamily(row) {
+    const setName = compactSearchValue(row?.set_name || '');
+    return setName === 'baseset' ||
+        setName === 'baseset2' ||
+        setName === 'basesetshadowless';
+}
+
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const requestedExpansion = compactSearchValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
@@ -613,7 +620,8 @@ async function searchExtensionCard(structuredCard) {
     const rows = (data.matches || [])
         .map(rowFromExtensionMatch)
         .filter(Boolean)
-        .filter((row) => rowMatchesStructuredName(row, structuredCard));
+        .filter((row) => rowMatchesStructuredName(row, structuredCard))
+        .filter((row) => compactSearchValue(structuredCard.expansion || '') !== 'baseset' || isAllowedBaseSetFamily(row));
 
     return {
         rows: sortRowsForStructuredCard(rows, structuredCard),

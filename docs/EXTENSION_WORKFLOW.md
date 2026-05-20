@@ -20,6 +20,7 @@
 8. If structured search returns no accepted rows, the extension falls back to marketplace autocomplete.
 9. CardTrader card pages are supported directly: when the URL contains `/cards/:id`, that CardTrader blueprint id is used as the Pokoin card id without running search.
 10. Plain `Nidoran` is treated as a special ambiguous name: keep both male and female candidates visible, and use expansion/collector evidence to rank the best one.
+11. First-edition titles mapped to `Base Set` are constrained to the Base Set family (`Base Set`, `Base Set 2`, `Base Set Shadowless`) so modern or unrelated expansion matches do not appear.
 
 ## Candidate Display Flow
 

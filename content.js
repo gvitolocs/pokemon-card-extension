@@ -3116,6 +3116,13 @@ function matchMatchesStructuredName(match, payload) {
         requestedName.includes(matchName);
 }
 
+function isAllowedBaseSetFamilyMatch(match) {
+    const expansionName = compactSearchValue(match?.expansionName || '');
+    return expansionName === 'baseset' ||
+        expansionName === 'baseset2' ||
+        expansionName === 'basesetshadowless';
+}
+
 function sortMatchesForPayload(matches = [], payload = {}) {
     const requestedExpansion = compactSearchValue(payload.expansion || '');
     const requestedName = compactSearchValue(payload.name || '');
@@ -3170,7 +3177,9 @@ async function searchPokoinCardApi(titleInfo, originalTitle) {
     const data = await response.json();
     const matches = Array.isArray(data.matches) ? data.matches : [];
     const acceptedMatches = sortMatchesForPayload(
-        matches.filter((match) => matchMatchesStructuredName(match, payload)),
+        matches
+            .filter((match) => matchMatchesStructuredName(match, payload))
+            .filter((match) => compactSearchValue(payload.expansion || '') !== 'baseset' || isAllowedBaseSetFamilyMatch(match)),
         payload
     );
     if (acceptedMatches.length > 0) {
