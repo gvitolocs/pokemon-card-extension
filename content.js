@@ -2961,6 +2961,7 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
     const title = originalTitle || titleInfo.originalTitle || '';
     const promoNumber = title.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0]?.replace(/\s+/g, '');
     const collectorNumber = promoNumber || titleInfo.collectorNumber || titleInfo.cardNumber || '';
+    const expansionAlias = /\b(?:set\s+base|base\s+set)\b/i.test(title) ? 'Base Set' : '';
     const variation = titleInfo.cardType ||
         (titleInfo.isEXCard ? 'ex' : '') ||
         (titleInfo.isGXCard ? 'gx' : '') ||
@@ -2971,7 +2972,7 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
     return {
         name: titleInfo.pokemonName || titleInfo.name || '',
         collectorNumber,
-        expansion: titleInfo.expansion || titleInfo.expansionName || '',
+        expansion: titleInfo.expansion || titleInfo.expansionName || expansionAlias,
         rarity: titleInfo.rarity || '',
         variation: String(variation || '').replace(/\s+/g, '').replace(/\./g, '').toLowerCase(),
         language: 'en',

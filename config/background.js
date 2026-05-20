@@ -240,6 +240,10 @@ function scrapeStructuredCardFields(title = '', context = null) {
     const rarityMatch = cleanTitle.match(/\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|holo|promo|rare)\b/i);
     const rarity = rarityMatch ? rarityMatch[0].replace(/\s+/g, ' ') : '';
 
+    const expansionAliases = [
+        { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
+    ];
+    const aliasedExpansion = expansionAliases.find(({ pattern }) => pattern.test(cleanTitle))?.name || '';
     const expansionNoise = [
         'Legendary Treasure',
         'Legendary Treasures',
@@ -248,7 +252,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         'Paldean Fates',
         'Pokemon 151',
     ];
-    const expansion = expansionNoise.find((candidate) =>
+    const expansion = aliasedExpansion || expansionNoise.find((candidate) =>
         new RegExp(`\\b${candidate.replace(/\s+/g, '\\s+')}\\b`, 'i').test(cleanTitle)
     ) || '';
 
@@ -260,6 +264,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         name = name.replace(new RegExp(`\\b${expansion.replace(/\s+/g, '\\s+')}\\b`, 'i'), ' ');
     }
     name = name
+        .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:Legendary|Treasure|Treasures|Promo|Promos)\b/gi, ' ')
         .replace(/\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|holo|promo|rare)\b/gi, ' ')
         .replace(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
