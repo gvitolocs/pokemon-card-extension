@@ -902,14 +902,41 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then((results) => sendResponse({ success: true, results }))
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
     } else if (request.action === 'openSidePanelForCurrentTab') {
-        const tab = sender.tab;
-        if (!tab?.id) {
+        const senderTab = sender.tab;
+        if (!senderTab?.id) {
             sendResponse({ success: false, error: 'No sender tab found.' });
             return false;
         }
 
-        chrome.sidePanel?.open({ tabId: tab.id })
-            .then(() => resolveActiveTabForSidePanel(tab))
+        Promise.resolve()
+            .then(async () => {
+                const tab = await chrome.tabs.get(senderTab.id);
+                const currentUrl = request.url || tab.url || senderTab.url || '';
+                const currentTitle = request.title || tab.title || senderTab.title || '';
+                clearTimeout(sidePanelRefreshTimers.get(tab.id));
+                await chrome.sidePanel?.open({ tabId: tab.id });
+                await chrome.storage.session.set({
+                    sidePanelState: {
+                        updatedAt: Date.now(),
+                        loading: true,
+                        pageInfo: {
+                            title: currentTitle,
+                            url: currentUrl,
+                            hostname: currentUrl ? new URL(currentUrl).hostname : '',
+                        },
+                        rows: [],
+                        best: null,
+                        blueprintId: '',
+                        pokoinUrl: '',
+                        error: '',
+                    },
+                });
+                return resolveActiveTabForSidePanel({
+                    ...tab,
+                    url: currentUrl || tab.url,
+                    title: currentTitle || tab.title,
+                });
+            })
             .then((result) => sendResponse({ success: true, result }))
             .catch((error) => {
                 sendResponse({ success: false, error: error.message || 'Unable to open side panel.' });

@@ -8,6 +8,7 @@
 4. The background service worker refreshes the side panel state for the sender tab.
 5. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.
 6. If a marketplace content script cannot fetch Cardvault results directly, it asks the background service worker to run the same resolver so the button can still update.
+7. Button clicks always force a fresh side-panel loading state and resolve the clicked tab URL/title, avoiding stale candidates from previous pages.
 
 ## Match Resolution Flow
 
