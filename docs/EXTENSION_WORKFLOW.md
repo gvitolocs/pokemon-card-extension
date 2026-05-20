@@ -12,7 +12,7 @@
 
 1. The content script or side panel scrapes the marketplace title.
 2. Local cleanup removes marketplace noise such as `pokemon`, `pokémon`, `sealed`, `salead`, `pack`, `booster`, `lot`, `first edition`, `prima edizione`, and `1 edizione`.
-3. Expansion aliases are preserved as structured expansion fields before name cleanup; for example Italian `set base`, `1 edizione`, and `prima edizione` map to `Base Set`.
+3. Expansion aliases are preserved as structured expansion fields before name cleanup; for example Italian `set base` maps to `Base Set`.
 4. Candidate title terms are checked through Cardvault autocomplete.
 5. A candidate name is accepted only when Cardvault returns an exact `canonical_name` or `name` match from the backend name tables.
 6. The resolved name is sent to `/api/extension-card-search`.
@@ -20,7 +20,7 @@
 8. If structured search returns no accepted rows, the extension falls back to marketplace autocomplete.
 9. CardTrader card pages are supported directly: when the URL contains `/cards/:id`, that CardTrader blueprint id is used as the Pokoin card id without running search.
 10. Plain `Nidoran` is treated as a special ambiguous name: keep both male and female candidates visible, and use expansion/collector evidence to rank the best one.
-11. First-edition titles mapped to `Base Set` are constrained to the Base Set family (`Base Set`, `Base Set 2`, `Base Set Shadowless`) so modern or unrelated expansion matches do not appear.
+11. First-edition wording is a local ordering hint, not a hard expansion filter: boost the Base Set family (`Base Set`, `Base Set 2`, `Base Set Shadowless`) first, but keep newer Japanese/modern edition candidates available afterward.
 
 ## Candidate Display Flow
 

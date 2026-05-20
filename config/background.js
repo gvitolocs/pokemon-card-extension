@@ -252,9 +252,9 @@ function scrapeStructuredCardFields(title = '', context = null) {
     const rarityMatch = cleanTitle.match(/\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|holo|promo|rare)\b/i);
     const rarity = rarityMatch ? rarityMatch[0].replace(/\s+/g, ' ') : '';
 
+    const hasEditionHint = /\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/i.test(cleanTitle);
     const expansionAliases = [
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
-        { pattern: /\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/i, name: 'Base Set' },
     ];
     const aliasedExpansion = expansionAliases.find(({ pattern }) => pattern.test(cleanTitle))?.name || '';
     const expansionNoise = [
@@ -289,6 +289,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         name: removeMarketplaceSearchNoise(name),
         collectorNumber,
         expansion,
+        editionHint: hasEditionHint,
         rarity,
         variation,
     };
@@ -571,12 +572,19 @@ function isAllowedBaseSetFamily(row) {
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const requestedExpansion = compactSearchValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
+    const hasEditionHint = Boolean(structuredCard.editionHint);
 
     return [...rows].sort((a, b) => {
         const aExpansionPenalty = requestedExpansion && compactSearchValue(a.set_name || '') !== requestedExpansion ? 1 : 0;
         const bExpansionPenalty = requestedExpansion && compactSearchValue(b.set_name || '') !== requestedExpansion ? 1 : 0;
         if (aExpansionPenalty !== bExpansionPenalty) {
             return aExpansionPenalty - bExpansionPenalty;
+        }
+
+        const aEditionBoost = hasEditionHint && isAllowedBaseSetFamily(a) ? 0 : 1;
+        const bEditionBoost = hasEditionHint && isAllowedBaseSetFamily(b) ? 0 : 1;
+        if (aEditionBoost !== bEditionBoost) {
+            return aEditionBoost - bEditionBoost;
         }
 
         const aNamePenalty = requestedName === 'nidoran' && !compactSearchValue(a.name || '').startsWith('nidoran') ? 1 : 0;
@@ -586,6 +594,18 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
         }
 
         return Number(b.search_rank || 0) - Number(a.search_rank || 0);
+    });
+}
+
+function uniqueRowsById(rows = []) {
+    const seen = new Set();
+    return rows.filter((row) => {
+        const id = String(row.card_id || '');
+        if (!id || seen.has(id)) {
+            return false;
+        }
+        seen.add(id);
+        return true;
     });
 }
 
@@ -600,6 +620,7 @@ async function searchExtensionCard(structuredCard) {
         expansion: structuredCard.expansion,
         rarity: structuredCard.rarity,
         variation: structuredCard.variation,
+        editionHint: structuredCard.editionHint,
         language: 'en',
         limit: 3,
     };
@@ -617,11 +638,31 @@ async function searchExtensionCard(structuredCard) {
     }
 
     const data = await response.json();
-    const rows = (data.matches || [])
+    let matches = data.matches || [];
+    if (structuredCard.editionHint && !structuredCard.expansion && structuredCard.name) {
+        const editionResponse = await fetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...payload,
+                expansion: 'Base Set',
+                editionHint: false,
+                limit: 5,
+            }),
+        });
+        if (editionResponse.ok) {
+            const editionData = await editionResponse.json();
+            matches = [...(editionData.matches || []), ...matches];
+        }
+    }
+
+    const rows = uniqueRowsById(matches
         .map(rowFromExtensionMatch)
         .filter(Boolean)
         .filter((row) => rowMatchesStructuredName(row, structuredCard))
-        .filter((row) => compactSearchValue(structuredCard.expansion || '') !== 'baseset' || isAllowedBaseSetFamily(row));
+        .filter((row) => compactSearchValue(structuredCard.expansion || '') !== 'baseset' || isAllowedBaseSetFamily(row)));
 
     return {
         rows: sortRowsForStructuredCard(rows, structuredCard),

@@ -2961,9 +2961,10 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
     const title = originalTitle || titleInfo.originalTitle || '';
     const promoNumber = title.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0]?.replace(/\s+/g, '');
     const collectorNumber = promoNumber || titleInfo.collectorNumber || titleInfo.cardNumber || '';
-    const expansionAlias = /\b(?:set\s+base|base\s+set|(?:1st|first|prima|primo|1)\s+(?:edition|edizione))\b/i.test(title)
+    const expansionAlias = /\b(?:set\s+base|base\s+set)\b/i.test(title)
         ? 'Base Set'
         : '';
+    const editionHint = /\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/i.test(title);
     const variation = titleInfo.cardType ||
         (titleInfo.isEXCard ? 'ex' : '') ||
         (titleInfo.isGXCard ? 'gx' : '') ||
@@ -2977,6 +2978,7 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
         expansion: titleInfo.expansion || titleInfo.expansionName || expansionAlias,
         rarity: titleInfo.rarity || '',
         variation: String(variation || '').replace(/\s+/g, '').replace(/\./g, '').toLowerCase(),
+        editionHint,
         language: 'en',
         limit: 5,
     };
@@ -3126,12 +3128,19 @@ function isAllowedBaseSetFamilyMatch(match) {
 function sortMatchesForPayload(matches = [], payload = {}) {
     const requestedExpansion = compactSearchValue(payload.expansion || '');
     const requestedName = compactSearchValue(payload.name || '');
+    const hasEditionHint = Boolean(payload.editionHint);
 
     return [...matches].sort((a, b) => {
         const aExpansionPenalty = requestedExpansion && compactSearchValue(a.expansionName || '') !== requestedExpansion ? 1 : 0;
         const bExpansionPenalty = requestedExpansion && compactSearchValue(b.expansionName || '') !== requestedExpansion ? 1 : 0;
         if (aExpansionPenalty !== bExpansionPenalty) {
             return aExpansionPenalty - bExpansionPenalty;
+        }
+
+        const aEditionBoost = hasEditionHint && isAllowedBaseSetFamilyMatch(a) ? 0 : 1;
+        const bEditionBoost = hasEditionHint && isAllowedBaseSetFamilyMatch(b) ? 0 : 1;
+        if (aEditionBoost !== bEditionBoost) {
+            return aEditionBoost - bEditionBoost;
         }
 
         const aNamePenalty = requestedName === 'nidoran' && !compactSearchValue(a.name || '').startsWith('nidoran') ? 1 : 0;
@@ -3141,6 +3150,18 @@ function sortMatchesForPayload(matches = [], payload = {}) {
         }
 
         return Number(b.score || 0) - Number(a.score || 0);
+    });
+}
+
+function uniqueMatchesById(matches = []) {
+    const seen = new Set();
+    return matches.filter((match) => {
+        const id = String(match.cardId || match.card_id || '');
+        if (!id || seen.has(id)) {
+            return false;
+        }
+        seen.add(id);
+        return true;
     });
 }
 
@@ -3175,7 +3196,25 @@ async function searchPokoinCardApi(titleInfo, originalTitle) {
     }
 
     const data = await response.json();
-    const matches = Array.isArray(data.matches) ? data.matches : [];
+    let matches = Array.isArray(data.matches) ? data.matches : [];
+    if (payload.editionHint && !payload.expansion && payload.name) {
+        const editionResponse = await fetch('https://pokoin.com/api/extension-card-search', {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                ...payload,
+                expansion: 'Base Set',
+                editionHint: false,
+                limit: 5,
+            }),
+        });
+        if (editionResponse.ok) {
+            const editionData = await editionResponse.json();
+            matches = uniqueMatchesById([...(editionData.matches || []), ...matches]);
+        }
+    }
     const acceptedMatches = sortMatchesForPayload(
         matches
             .filter((match) => matchMatchesStructuredName(match, payload))
