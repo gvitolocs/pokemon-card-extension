@@ -241,7 +241,7 @@ function renderState(state) {
     }
 
     const rows = state.rows?.length ? state.rows : [best];
-    const candidates = sortCandidates(rows).slice(0, 5);
+    const candidates = sortCandidates(rows).slice(0, 8);
     if (candidates.length > 0) {
         elements.candidatesSection.hidden = false;
         candidates.forEach((row) => {

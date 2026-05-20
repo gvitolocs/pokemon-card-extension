@@ -22,6 +22,7 @@
 9. CardTrader card pages are supported directly: when the URL contains `/cards/:id`, that CardTrader blueprint id is used as the Pokoin card id without running search.
 10. Plain `Nidoran` is treated as a special ambiguous name: keep both male and female candidates visible, and use expansion/collector evidence to rank the best one.
 11. First-edition wording is a local ordering hint, not a hard expansion filter: boost the Base Set family (`Base Set`, `Base Set 2`, `Base Set Shadowless`) first, but keep newer Japanese/modern edition candidates available afterward.
+12. Variation text such as `V`, `ex`, `VMAX`, and `VSTAR` is preserved in the Cardvault search name so the side panel uses the same more-specific matching behavior as the injected button.
 
 ## Candidate Display Flow
 
@@ -34,4 +35,4 @@
 4. If no explicit expansion code exists, use the collector prefix such as `SVP` or `XY`.
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
-7. Vinted's in-page preview can show up to eight candidates under the `Pokoin.com` button.
+7. Vinted's in-page preview and the side panel can show up to eight candidates under the `Pokoin.com` button / Best candidates section.

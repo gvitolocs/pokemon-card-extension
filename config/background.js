@@ -292,6 +292,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         editionHint: hasEditionHint,
         rarity,
         variation,
+        searchName: removeMarketplaceSearchNoise([name, variation].filter(Boolean).join(' ')),
     };
 }
 
@@ -615,7 +616,7 @@ async function searchExtensionCard(structuredCard) {
     }
 
     const payload = {
-        name: structuredCard.name,
+        name: structuredCard.searchName || structuredCard.name,
         collectorNumber: structuredCard.collectorNumber,
         expansion: structuredCard.expansion,
         rarity: structuredCard.rarity,
@@ -791,6 +792,11 @@ async function resolveActiveTabForSidePanel(tab) {
                             ...(pageInfo.structuredCard || {}),
                             name: nameResolution.name,
                         };
+                        if (pageInfo.structuredCard.variation) {
+                            pageInfo.structuredCard.searchName = [nameResolution.name, pageInfo.structuredCard.variation]
+                                .filter(Boolean)
+                                .join(' ');
+                        }
                     }
                 } catch (nameResolutionError) {
                     debug.nameResolution = {
@@ -884,6 +890,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const nameResolution = await resolveNameFromCardvaultTitle(title);
                 if (nameResolution.name) {
                     structuredCard.name = nameResolution.name;
+                    if (structuredCard.variation) {
+                        structuredCard.searchName = [nameResolution.name, structuredCard.variation]
+                            .filter(Boolean)
+                            .join(' ');
+                    }
                 }
                 const searchResult = await searchExtensionCard(structuredCard);
                 return searchResult.rows.map(legacyResultFromRow);
