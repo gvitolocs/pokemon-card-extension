@@ -483,10 +483,15 @@ function notifySidePanelNavigation() {
 }
 
 function openPokoinSidePanel() {
+    const cardtraderBlueprintId = extractCardTraderBlueprintId();
+    const directTitle = cardtraderBlueprintId
+        ? (document.querySelector('.py-3.text-center.text-sm-left h2, h1, h2')?.textContent || document.title).replace(/\s+/g, ' ').trim()
+        : document.title;
     return chrome.runtime.sendMessage({
         action: 'openSidePanelForCurrentTab',
         url: window.location.href,
-        title: document.title,
+        title: directTitle,
+        cardtraderBlueprintId,
     }).catch((error) => {
         console.warn('⚠️ [Pokoin] Unable to open side panel:', error);
         return { success: false, error: error.message };
@@ -2989,6 +2994,7 @@ function removeMarketplaceSearchNoise(value = '') {
         .replace(/\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/gi, ' ')
         .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
+        .replace(/\b(?:carta|carte|card|cards)\b/gi, ' ')
         .replace(/\b(?:sealed|seal(?:ed)?|salead|saled|sigillat[aoe]?|pack|booster|lot)\b/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();

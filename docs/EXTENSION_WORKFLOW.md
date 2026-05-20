@@ -10,11 +10,13 @@
 6. If a marketplace content script cannot fetch Cardvault results directly, it asks the background service worker to run the same resolver so the button can still update without logging expected page-context fetch failures as extension errors.
 7. Button clicks always force a fresh side-panel loading state and resolve the clicked tab URL/title, avoiding stale candidates from previous pages.
 8. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
+9. Vinted can pass selected item-description clues with the button click; the background service worker merges those clues into the side-panel search context before resolving candidates.
+10. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
 
 ## Match Resolution Flow
 
 1. The content script or side panel scrapes the marketplace title.
-2. Local cleanup removes marketplace noise such as `pokemon`, `pokémon`, `sealed`, `salead`, `pack`, `booster`, `lot`, `first edition`, `prima edizione`, and `1 edizione`.
+2. Local cleanup removes marketplace noise such as `pokemon`, `pokémon`, `carta`, `carte`, `card`, `cards`, `sealed`, `salead`, `pack`, `booster`, `lot`, `first edition`, `prima edizione`, and `1 edizione`.
 3. Expansion aliases are preserved as structured expansion fields before name cleanup; for example Italian `set base` maps to `Base Set`.
 4. Candidate title terms are checked through Cardvault autocomplete.
 5. A candidate name is accepted only when Cardvault returns an exact `canonical_name` or `name` match from the backend name tables.
@@ -25,6 +27,7 @@
 10. Plain `Nidoran` is treated as a special ambiguous name: keep both male and female candidates visible, and use expansion/collector evidence to rank the best one.
 11. First-edition wording is a local ordering hint, not a hard expansion filter: boost the Base Set family (`Base Set`, `Base Set 2`, `Base Set Shadowless`) first, but keep newer Japanese/modern edition candidates available afterward.
 12. Variation text such as `V`, `ex`, `VMAX`, and `VSTAR` is preserved in the Cardvault search name so the side panel uses the same more-specific matching behavior as the injected button.
+13. On Vinted pages, compact clue chips are extracted from the item title and description. Useful clues include collector numbers, promo codes, rarity/variation words, and known expansion names; generic marketplace words like `carta`, `carte`, `card`, and `cards` are never shown as chips and never sent as search clues.
 
 ## Candidate Display Flow
 
@@ -38,3 +41,8 @@
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
 7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
+8. Vinted clue chips render near the injected Pokoin button as compact user-selectable toggles. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
+
+## CardTrader Direct Path
+
+CardTrader was slower when the side panel opened because the background service worker still executed the generic page-title scraping path before it noticed the URL contained a blueprint id. The direct path now checks CardTrader URLs before injecting any page script or calling Cardvault APIs, writes the side-panel state with `source: cardtrader_url`, and opens the common side panel immediately.

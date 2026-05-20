@@ -7,6 +7,11 @@ class VintedProcessor {
     constructor() {
         this.isEnabled = true;
         this.processedPages = new Set();
+        this.currentTitle = '';
+        this.currentTitleElement = null;
+        this.currentKeywords = [];
+        this.selectedKeywordValues = new Set();
+        this.latestSearchToken = 0;
     }
 
     pokoinIconUrl() {
@@ -32,6 +37,147 @@ class VintedProcessor {
 
     countHighConfidenceMatches(results = []) {
         return results.filter((result) => this.isHighConfidenceMatch(result)).length;
+    }
+
+    normalizeClueValue(value = '') {
+        return String(value || '')
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[’`]/g, "'")
+            .replace(/[^a-z0-9/'\s-]+/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    compactClueValue(value = '') {
+        return this.normalizeClueValue(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    removeVintedMarketplaceNoise(value = '') {
+        return this.normalizeClueValue(value)
+            .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
+            .replace(/\b(?:carta|carte|card|cards)\b/gi, ' ')
+            .replace(/\b(?:sealed|seal(?:ed)?|salead|saled|sigillat[aoe]?|pack|booster|lot)\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    vintedKeywordStopWords() {
+        return new Set([
+            'a', 'an', 'and', 'con', 'da', 'de', 'del', 'della', 'di', 'e', 'for', 'in', 'il', 'la', 'le',
+            'of', 'per', 'the', 'un', 'una', 'with',
+            'pokemon', 'pokémon', 'pokemom', 'pkkmn', 'pkn', 'pokn',
+            'carta', 'carte', 'card', 'cards',
+            'tcg', 'gioco', 'trading', 'collezione', 'collezionabile',
+            'condizione', 'condizioni', 'condition', 'conditions', 'ottime', 'perfette', 'buone', 'nuova', 'nuovo',
+            'near', 'mint', 'excellent', 'good', 'played', 'used', 'usata', 'usato',
+            'vendo', 'vendita', 'spedizione', 'scambio', 'lotto', 'lot', 'bundle',
+            'originale', 'original', 'italiano', 'italiana', 'inglese', 'english', 'japanese', 'giapponese',
+        ]);
+    }
+
+    addKeywordCandidate(candidates, value, source = 'description') {
+        const label = this.normalizeClueValue(value);
+        const compact = this.compactClueValue(label);
+        const stopWords = this.vintedKeywordStopWords();
+        if (!label || compact.length < 2 || stopWords.has(label.toLowerCase()) || stopWords.has(compact)) {
+            return;
+        }
+        if (!candidates.some((candidate) => candidate.compact === compact)) {
+            candidates.push({ label, value: label, compact, source });
+        }
+    }
+
+    extractVintedDescription() {
+        const selectors = [
+            '[data-testid="item-description"]',
+            '[data-testid="item-description"] p',
+            '[data-testid="item-page-description"]',
+            '[data-testid="item-details-description"]',
+            '[data-testid="item-details"] [class*="description"]',
+            '[class*="item-description"]',
+            '[class*="description"]',
+            'meta[property="og:description"]',
+            'meta[name="description"]',
+        ];
+
+        for (const selector of selectors) {
+            const element = document.querySelector(selector);
+            const text = element?.getAttribute?.('content') || element?.textContent || '';
+            const cleaned = text.replace(/\s+/g, ' ').trim();
+            if (cleaned && cleaned.length >= 8 && !/^vinted\b/i.test(cleaned)) {
+                return cleaned;
+            }
+        }
+
+        return '';
+    }
+
+    extractVintedKeywords(title = '', description = '') {
+        const sourceText = `${title} ${description}`.replace(/\s+/g, ' ').trim();
+        if (!sourceText) {
+            return [];
+        }
+
+        const candidates = [];
+        const expansionHints = [
+            'Base Set', 'Base Set 2', 'Base Set Shadowless', 'Jungle', 'Fossil', 'Team Rocket',
+            'Legendary Treasures', 'Black Star Promos', 'Evolving Skies', 'Fusion Strike',
+            'Paldean Fates', 'Pokemon 151', 'Scarlet Violet', 'Obsidian Flames', 'Crown Zenith',
+            'Chilling Reign', 'Silver Tempest', 'Brilliant Stars', 'Astral Radiance',
+        ];
+        expansionHints.forEach((hint) => {
+            if (new RegExp(`\\b${hint.replace(/\s+/g, '\\s+')}\\b`, 'i').test(sourceText)) {
+                this.addKeywordCandidate(candidates, hint, 'expansion');
+            }
+        });
+
+        const cluePatterns = [
+            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
+            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
+            /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
+            /\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|holo|promo|rare)\b/gi,
+            /\b(?:vmax|vstar|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
+        ];
+        cluePatterns.forEach((pattern) => {
+            for (const match of sourceText.matchAll(pattern)) {
+                this.addKeywordCandidate(candidates, match[0].replace(/\s+/g, ' '), 'pattern');
+            }
+        });
+
+        const normalized = sourceText
+            .replace(/[()"'’`.,:;!?\\[\]{}|]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const words = normalized
+            .split(/\s+/)
+            .map((word) => this.normalizeClueValue(word))
+            .filter((word) => word && !this.vintedKeywordStopWords().has(word.toLowerCase()));
+
+        for (let size = Math.min(2, words.length); size >= 1; size -= 1) {
+            for (let index = 0; index <= words.length - size; index += 1) {
+                const phrase = words.slice(index, index + size).join(' ');
+                if (phrase.length >= 3 && !/^\d+$/.test(phrase)) {
+                    this.addKeywordCandidate(candidates, phrase, 'text');
+                }
+            }
+        }
+
+        return candidates.slice(0, 10);
+    }
+
+    selectedKeywordLabels() {
+        return this.currentKeywords
+            .filter((keyword) => this.selectedKeywordValues.has(keyword.compact))
+            .map((keyword) => keyword.value);
+    }
+
+    buildVintedSearchTitle(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
+        return [this.removeVintedMarketplaceNoise(title), ...clues]
+            .map((part) => this.removeVintedMarketplaceNoise(part))
+            .filter(Boolean)
+            .filter((part, index, all) => all.findIndex((candidate) => this.compactClueValue(candidate) === this.compactClueValue(part)) === index)
+            .join(' ');
     }
 
     compactCandidateMeta(result = {}) {
@@ -102,19 +248,24 @@ class VintedProcessor {
     }
 
     openPokoinSidePanel() {
+        const clues = this.selectedKeywordLabels();
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
             url: window.location.href,
-            title: document.title,
+            title: this.buildVintedSearchTitle(this.currentTitle || document.title, clues),
+            originalTitle: this.currentTitle || document.title,
+            clues,
         }).catch((error) => {
             console.warn('⚠️ [VINT] Unable to open side panel:', error);
         });
     }
 
-    async searchCardWithBackground(title) {
+    async searchCardWithBackground(title, clues = this.selectedKeywordLabels()) {
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
-            title,
+            title: this.buildVintedSearchTitle(title, clues),
+            originalTitle: title,
+            clues,
             url: window.location.href,
         });
         return response?.success && Array.isArray(response.results) ? response.results : [];
@@ -228,6 +379,8 @@ class VintedProcessor {
             }
             
             console.log(`🔍 [VINT] Product title: "${title}"`);
+            this.currentTitle = title;
+            this.currentTitleElement = titleElement;
             
             // Extract title information
             const titleInfo = this.extractTitleInfo(title);
@@ -235,33 +388,9 @@ class VintedProcessor {
             // Always create a gray fallback button (even for non-Pokemon titles)
             console.log('🔍 [VINT] Creating gray fallback button...');
             this.createFallbackButton(titleElement);
+            this.renderKeywordToggles(title, this.extractVintedDescription());
             
-            // Search in the database
-            this.searchCardInDatabase(titleInfo, title).then(results => {
-                console.log(`🔍 [VINT] Results received from database:`, results);
-                if (results && results.length > 0) {
-                    console.log(`✅ [VINT] Updating button with ${results.length} results`);
-                    this.updateButtonWithResults(results);
-                } else {
-                    console.log('⚠️ [VINT] No content-script result found, trying background search');
-                    this.searchCardWithBackground(title).then((backgroundResults) => {
-                        if (backgroundResults.length > 0) {
-                            console.log(`✅ [VINT] Background search returned ${backgroundResults.length} results`);
-                            this.updateButtonWithResults(backgroundResults);
-                        } else {
-                            console.log('⚠️ [VINT] No database result found, button stays gray');
-                        }
-                    });
-                }
-            }).catch(error => {
-                console.warn('⚠️ [VINT] Content search unavailable, trying background search:', error);
-                this.searchCardWithBackground(title).then((backgroundResults) => {
-                    if (backgroundResults.length > 0) {
-                        console.log(`✅ [VINT] Background fallback returned ${backgroundResults.length} results`);
-                        this.updateButtonWithResults(backgroundResults);
-                    }
-                });
-            });
+            this.runVintedSearch(titleInfo, title);
             
             // Mark page as processed
             this.processedPages.add(window.location.href);
@@ -269,6 +398,112 @@ class VintedProcessor {
         } catch (error) {
             console.error('❌ [VINT] Error while processing product page:', error);
         }
+    }
+
+    renderKeywordToggles(title, description) {
+        document.querySelectorAll('[data-pokoin-vinted-keywords]').forEach((element) => element.remove());
+        this.currentKeywords = this.extractVintedKeywords(title, description);
+        this.selectedKeywordValues = new Set(this.currentKeywords.map((keyword) => keyword.compact));
+        if (!this.currentButton || this.currentKeywords.length === 0) {
+            return;
+        }
+
+        const container = document.createElement('div');
+        container.setAttribute('data-pokoin-vinted-keywords', 'true');
+        container.style.cssText = `
+            position: fixed;
+            top: 154px;
+            right: 20px;
+            z-index: 9999;
+            width: min(320px, calc(100vw - 40px));
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            padding: 8px;
+            border-radius: 12px;
+            background: rgba(15, 23, 42, 0.86);
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+            font-family: Arial, sans-serif;
+        `;
+
+        this.currentKeywords.forEach((keyword) => {
+            const chip = document.createElement('button');
+            chip.type = 'button';
+            chip.textContent = keyword.label;
+            chip.setAttribute('data-pokoin-vinted-keyword', keyword.compact);
+            this.applyKeywordChipStyle(chip, true);
+            chip.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const isSelected = this.selectedKeywordValues.has(keyword.compact);
+                if (isSelected) {
+                    this.selectedKeywordValues.delete(keyword.compact);
+                } else {
+                    this.selectedKeywordValues.add(keyword.compact);
+                }
+                this.applyKeywordChipStyle(chip, !isSelected);
+                this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle);
+            });
+            container.appendChild(chip);
+        });
+
+        document.body.appendChild(container);
+    }
+
+    applyKeywordChipStyle(chip, selected) {
+        Object.assign(chip.style, {
+            border: selected ? '1px solid #38bdf8' : '1px solid rgba(148, 163, 184, 0.45)',
+            borderRadius: '999px',
+            padding: '5px 9px',
+            background: selected ? 'rgba(14, 165, 233, 0.92)' : 'rgba(15, 23, 42, 0.68)',
+            color: '#ffffff',
+            fontSize: '12px',
+            lineHeight: '1',
+            cursor: 'pointer',
+            fontWeight: selected ? '700' : '500',
+        });
+        chip.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    }
+
+    async runVintedSearch(titleInfo, title) {
+        const searchToken = ++this.latestSearchToken;
+        const searchTitle = this.buildVintedSearchTitle(title);
+        let results = [];
+
+        try {
+            results = await this.searchCardInDatabase(titleInfo, searchTitle);
+        } catch (error) {
+            console.warn('⚠️ [VINT] Content search unavailable, trying background search:', error);
+        }
+
+        if (searchToken !== this.latestSearchToken) {
+            return;
+        }
+
+        if (results && results.length > 0) {
+            this.updateButtonWithResults(results);
+        }
+
+        const backgroundResults = await this.searchCardWithBackground(title);
+        if (searchToken !== this.latestSearchToken) {
+            return;
+        }
+
+        if (backgroundResults.length > 0) {
+            this.updateButtonWithResults(backgroundResults);
+        } else if (!results || results.length === 0) {
+            this.updateButtonWithoutResults();
+        }
+    }
+
+    updateButtonWithoutResults() {
+        if (!this.currentButton || !document.contains(this.currentButton)) {
+            return;
+        }
+        this.setPokoinButtonLabel(this.currentButton);
+        this.currentButton.setAttribute('data-pokemon-linker-fallback', 'true');
+        this.applyPokoinButtonStyles(this.currentButton, { background: '#6c757d' });
+        this.renderCandidatePreview([]);
     }
 
     /**
@@ -324,6 +559,11 @@ class VintedProcessor {
         document.body.appendChild(button);
         console.log(`✅ [VINT] Added fixed top-right button`);
         this.currentButton = button;
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.openPokoinSidePanel();
+        });
     }
 
     /**

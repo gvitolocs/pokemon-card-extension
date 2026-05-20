@@ -60,6 +60,39 @@ function isSupportedMarketplaceUrl(url = '') {
     }
 }
 
+function cardtraderBlueprintIdFromUrl(url = '') {
+    try {
+        const { hostname, pathname } = new URL(url);
+        if (!hostname.includes('cardtrader')) {
+            return '';
+        }
+        return pathname.match(/\/(?:[a-z]{2}\/)?cards\/(\d+)(?:-|\/|$)/i)?.[1] || '';
+    } catch (error) {
+        return '';
+    }
+}
+
+function buildCardTraderDirectPageInfo(tab = {}) {
+    const blueprintId = cardtraderBlueprintIdFromUrl(tab.url || '');
+    if (!blueprintId) {
+        return null;
+    }
+
+    const title = String(tab.title || '').replace(/\s+/g, ' ').trim() || `CardTrader card ${blueprintId}`;
+    return {
+        title,
+        url: tab.url || '',
+        hostname: tab.url ? new URL(tab.url).hostname : '',
+        structuredCard: scrapeStructuredCardFields(title),
+        cardtraderBlueprintId: blueprintId,
+        debug: {
+            extractorVersion: 2,
+            titleSource: 'cardtrader URL blueprint id',
+            directCardTrader: true,
+        },
+    };
+}
+
 async function extractTitleFromPage() {
     const hostname = window.location.hostname;
     const startedAt = Date.now();
@@ -301,9 +334,46 @@ function removeMarketplaceSearchNoise(value = '') {
         .replace(/\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/gi, ' ')
         .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
+        .replace(/\b(?:carta|carte|card|cards)\b/gi, ' ')
         .replace(/\b(?:sealed|seal(?:ed)?|salead|saled|sigillat[aoe]?|pack|booster|lot)\b/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function normalizeRequestClues(clues = []) {
+    const stopWords = new Set(['carta', 'carte', 'card', 'cards', 'pokemon', 'pokémon']);
+    const seen = new Set();
+    return (Array.isArray(clues) ? clues : [])
+        .map((clue) => removeMarketplaceSearchNoise(clue)
+            .replace(/[^a-z0-9/'\s-]+/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim())
+        .filter((clue) => {
+            const compact = compactSearchValue(clue);
+            if (!clue || compact.length < 2 || stopWords.has(clue.toLowerCase()) || stopWords.has(compact) || seen.has(compact)) {
+                return false;
+            }
+            seen.add(compact);
+            return true;
+        })
+        .slice(0, 10);
+}
+
+function buildTitleWithRequestClues(title = '', clues = []) {
+    const normalizedClues = normalizeRequestClues(clues);
+    const seen = new Set();
+    return [removeMarketplaceSearchNoise(title), ...normalizedClues]
+        .map((part) => removeMarketplaceSearchNoise(part).replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .filter((part) => {
+            const compact = compactSearchValue(part);
+            if (seen.has(compact)) {
+                return false;
+            }
+            seen.add(compact);
+            return true;
+        })
+        .join(' ');
 }
 
 function compactSearchValue(value = '') {
@@ -412,6 +482,11 @@ async function getActivePageInfo(tab) {
         };
     }
 
+    const cardTraderDirectPageInfo = buildCardTraderDirectPageInfo(tab);
+    if (cardTraderDirectPageInfo) {
+        return cardTraderDirectPageInfo;
+    }
+
     const [result] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: extractTitleFromPage,
@@ -435,7 +510,7 @@ function buildCardvaultQueries(title) {
         queries.push(promoCode);
 
         const withoutNoise = cleanTitle
-            .replace(/\b(Carte|Stamp|Stampa|Legendary|Treasure|Treasures)\b/gi, ' ')
+            .replace(/\b(Carta|Carte|Card|Cards|Stamp|Stampa|Legendary|Treasure|Treasures)\b/gi, ' ')
             .replace(/\s+/g, ' ')
             .trim();
         if (withoutNoise) {
@@ -750,8 +825,16 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
     }, 700));
 }
 
-async function resolveActiveTabForSidePanel(tab) {
+async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     const pageInfo = await getActivePageInfo(tab);
+    const requestClues = normalizeRequestClues(requestContext.clues);
+    if (requestClues.length > 0) {
+        const originalTitle = requestContext.originalTitle || pageInfo.title || tab?.title || '';
+        pageInfo.originalTitle = originalTitle;
+        pageInfo.clues = requestClues;
+        pageInfo.title = buildTitleWithRequestClues(originalTitle, requestClues);
+        pageInfo.structuredCard = scrapeStructuredCardFields(pageInfo.title);
+    }
     let rows = [];
     let error = '';
     const debug = {
@@ -880,9 +963,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
     } else if (request.action === 'searchCardForTitle') {
         const tab = sender.tab;
-        const title = request.title || tab?.title || '';
+        const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
+        const clues = normalizeRequestClues(request.clues);
+        const title = buildTitleWithRequestClues(request.originalTitle || request.title || tab?.title || '', clues);
         Promise.resolve()
             .then(async () => {
+                if (directCardTraderBlueprintId) {
+                    return [legacyResultFromRow({
+                        card_id: directCardTraderBlueprintId,
+                        name: title || tab?.title || `CardTrader card ${directCardTraderBlueprintId}`,
+                        source: 'cardtrader_url',
+                        search_rank: 999999,
+                    })];
+                }
                 if (!title) {
                     return [];
                 }
@@ -897,7 +990,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
                 }
                 const searchResult = await searchExtensionCard(structuredCard);
-                return searchResult.rows.map(legacyResultFromRow);
+                if (searchResult.rows.length > 0) {
+                    return searchResult.rows.map(legacyResultFromRow);
+                }
+                const fallbackSearch = await searchCardvault(title, structuredCard?.name || '');
+                return fallbackSearch.rows.map(legacyResultFromRow);
             })
             .then((results) => sendResponse({ success: true, results }))
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
@@ -913,16 +1010,73 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const tab = await chrome.tabs.get(senderTab.id);
                 const currentUrl = request.url || tab.url || senderTab.url || '';
                 const currentTitle = request.title || tab.title || senderTab.title || '';
+                const directCardTraderBlueprintId = request.cardtraderBlueprintId || cardtraderBlueprintIdFromUrl(currentUrl);
                 clearTimeout(sidePanelRefreshTimers.get(tab.id));
                 await chrome.sidePanel?.open({ tabId: tab.id });
+                const requestClues = normalizeRequestClues(request.clues);
+                const requestTitle = buildTitleWithRequestClues(request.originalTitle || currentTitle, requestClues);
+                if (directCardTraderBlueprintId) {
+                    const directName = currentTitle || `CardTrader card ${directCardTraderBlueprintId}`;
+                    const directRow = {
+                        card_id: directCardTraderBlueprintId,
+                        name: directName,
+                        source: 'cardtrader_url',
+                        search_rank: 999999,
+                    };
+                    const directResult = {
+                        pageInfo: {
+                            title: directName,
+                            url: currentUrl,
+                            hostname: currentUrl ? new URL(currentUrl).hostname : '',
+                            structuredCard: scrapeStructuredCardFields(directName),
+                            cardtraderBlueprintId: String(directCardTraderBlueprintId),
+                            debug: {
+                                extractorVersion: 2,
+                                titleSource: 'cardtrader button URL blueprint id',
+                                directCardTrader: true,
+                            },
+                        },
+                        rows: [directRow],
+                        best: directRow,
+                        blueprintId: String(directCardTraderBlueprintId),
+                        pokoinUrl: `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${directCardTraderBlueprintId}`,
+                        error: '',
+                        debug: {
+                            version: 2,
+                            tab: {
+                                id: tab?.id || null,
+                                title: tab?.title || '',
+                                url: tab?.url || '',
+                            },
+                            query: directName,
+                            apiBaseUrl: CARDVAULT_API_BASE_URL,
+                            attemptedQueries: [],
+                            searched: false,
+                            rowCount: 1,
+                            bestId: String(directCardTraderBlueprintId),
+                            cardtraderBlueprintId: String(directCardTraderBlueprintId),
+                            directCardTrader: true,
+                            error: '',
+                        },
+                    };
+                    await chrome.storage.session.set({
+                        sidePanelState: {
+                            updatedAt: Date.now(),
+                            ...directResult,
+                        },
+                    });
+                    return directResult;
+                }
                 await chrome.storage.session.set({
                     sidePanelState: {
                         updatedAt: Date.now(),
                         loading: true,
                         pageInfo: {
-                            title: currentTitle,
+                            title: requestTitle || currentTitle,
                             url: currentUrl,
                             hostname: currentUrl ? new URL(currentUrl).hostname : '',
+                            originalTitle: request.originalTitle || currentTitle,
+                            clues: requestClues,
                         },
                         rows: [],
                         best: null,
@@ -934,7 +1088,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 return resolveActiveTabForSidePanel({
                     ...tab,
                     url: currentUrl || tab.url,
-                    title: currentTitle || tab.title,
+                    title: requestTitle || currentTitle || tab.title,
+                }, {
+                    originalTitle: request.originalTitle || currentTitle,
+                    clues: requestClues,
                 });
             })
             .then((result) => sendResponse({ success: true, result }))
