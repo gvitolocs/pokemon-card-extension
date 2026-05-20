@@ -8,8 +8,6 @@ const elements = {
     pokoinFrame: document.getElementById('pokoinFrame'),
     candidatesSection: document.getElementById('candidatesSection'),
     candidateList: document.getElementById('candidateList'),
-    debugSection: document.getElementById('debugSection'),
-    debugOutput: document.getElementById('debugOutput'),
 };
 
 function setStatus(message, isError = false) {
@@ -195,57 +193,6 @@ function renderCandidate(row, isBest = false) {
     return link;
 }
 
-function renderDebug(state) {
-    const pageInfo = state?.pageInfo || {};
-    const pageDebug = pageInfo.debug || {};
-    const debug = state?.debug || {};
-    const structuredCard = pageInfo.structuredCard || {};
-    const selectorLines = (pageDebug.selectorChecks || [])
-        .map((check) => {
-            const status = check.found ? 'hit' : 'miss';
-            const text = check.text ? ` -> "${check.text}"` : '';
-            return `${status}: ${check.selector}${text}`;
-        });
-
-    const lines = [
-        `updated: ${state?.updatedAt ? new Date(state.updatedAt).toLocaleTimeString() : '-'}`,
-        `url: ${pageInfo.url || '-'}`,
-        `host: ${pageInfo.hostname || '-'}`,
-        `title: ${pageInfo.title || '-'}`,
-        `titleSource: ${pageDebug.titleSource || '-'}`,
-        `pokemonName: ${structuredCard.name || '-'}`,
-        `variation: ${structuredCard.variation || '-'}`,
-        `collectorNumber: ${structuredCard.collectorNumber || '-'}`,
-        `expansion: ${structuredCard.expansion || '-'}`,
-        `rarity: ${structuredCard.rarity || '-'}`,
-        `documentTitle: ${pageDebug.documentTitle || '-'}`,
-        `readyState: ${pageDebug.readyState || '-'}`,
-        `extractorVersion: ${pageDebug.extractorVersion || '-'}`,
-        `extractMs: ${pageDebug.elapsedMs ?? '-'}`,
-        `waitAttempts: ${pageDebug.attempts ?? '-'}`,
-        `extensionEndpoint: ${debug.extensionSearch?.endpoint || '-'}`,
-        `extensionPayload: ${debug.extensionSearch?.payload ? JSON.stringify(debug.extensionSearch.payload) : '-'}`,
-        `extensionMatches: ${debug.extensionSearch?.matchCount ?? '-'}`,
-        `extensionError: ${debug.extensionSearch?.error || '-'}`,
-        `apiQuery: ${debug.query || '-'}`,
-        `apiSearched: ${debug.searched ? 'yes' : 'no'}`,
-        `apiRows: ${debug.rowCount ?? (state?.rows || []).length}`,
-        `bestId: ${debug.bestId || state?.blueprintId || '-'}`,
-        `error: ${state?.error || debug.error || '-'}`,
-        '',
-        'attemptedQueries:',
-        ...((debug.attemptedQueries || []).map((attempt) =>
-            `${attempt.rowCount} row(s): ${attempt.query}`
-        )),
-        ...(debug.attemptedQueries?.length ? [] : ['-']),
-        '',
-        'selectors:',
-        ...(selectorLines.length ? selectorLines : ['-']),
-    ];
-
-    elements.debugOutput.textContent = lines.join('\n');
-}
-
 function renderState(state) {
     const pageInfo = state?.pageInfo || {};
     const best = state?.best || null;
@@ -254,9 +201,7 @@ function renderState(state) {
 
     elements.frameSection.hidden = true;
     elements.candidatesSection.hidden = true;
-    elements.debugSection.hidden = false;
     elements.candidateList.replaceChildren();
-    renderDebug(state);
 
     if (state?.error) {
         elements.cardName.textContent = 'No card loaded';
@@ -292,7 +237,6 @@ function renderState(state) {
     setStatus('');
 
     if (isCardTraderDirect) {
-        elements.debugSection.hidden = true;
         return;
     }
 
