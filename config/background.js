@@ -254,6 +254,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
 
     const expansionAliases = [
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
+        { pattern: /\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/i, name: 'Base Set' },
     ];
     const aliasedExpansion = expansionAliases.find(({ pattern }) => pattern.test(cleanTitle))?.name || '';
     const expansionNoise = [

@@ -2961,7 +2961,9 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
     const title = originalTitle || titleInfo.originalTitle || '';
     const promoNumber = title.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0]?.replace(/\s+/g, '');
     const collectorNumber = promoNumber || titleInfo.collectorNumber || titleInfo.cardNumber || '';
-    const expansionAlias = /\b(?:set\s+base|base\s+set)\b/i.test(title) ? 'Base Set' : '';
+    const expansionAlias = /\b(?:set\s+base|base\s+set|(?:1st|first|prima|primo|1)\s+(?:edition|edizione))\b/i.test(title)
+        ? 'Base Set'
+        : '';
     const variation = titleInfo.cardType ||
         (titleInfo.isEXCard ? 'ex' : '') ||
         (titleInfo.isGXCard ? 'gx' : '') ||

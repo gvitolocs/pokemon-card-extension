@@ -161,3 +161,11 @@ test('15. Nidoran Base Set candidates include both genders', async () => {
     assert.match(names, /Nidoran ♀/);
     assert.match(names, /Nidoran ♂/);
 });
+
+test('16. first-edition Italian clue maps Gastly toward Base Set', async () => {
+    const rows = await autocomplete('Gastly Base Set', { resultLimit: 5, poolLimit: 50 });
+
+    assert.ok(rows.length > 0, 'Gastly Base Set should return candidates');
+    assert.match(rows[0].name || '', /^Gastly$/i);
+    assert.match(rows[0].set_name || '', /^Base Set$/i);
+});

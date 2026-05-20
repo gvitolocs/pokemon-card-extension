@@ -12,7 +12,7 @@
 
 1. The content script or side panel scrapes the marketplace title.
 2. Local cleanup removes marketplace noise such as `pokemon`, `pokémon`, `sealed`, `salead`, `pack`, `booster`, `lot`, `first edition`, `prima edizione`, and `1 edizione`.
-3. Expansion aliases are preserved as structured expansion fields before name cleanup; for example Italian `set base` maps to `Base Set`.
+3. Expansion aliases are preserved as structured expansion fields before name cleanup; for example Italian `set base`, `1 edizione`, and `prima edizione` map to `Base Set`.
 4. Candidate title terms are checked through Cardvault autocomplete.
 5. A candidate name is accepted only when Cardvault returns an exact `canonical_name` or `name` match from the backend name tables.
 6. The resolved name is sent to `/api/extension-card-search`.
