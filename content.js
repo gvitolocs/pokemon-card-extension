@@ -506,6 +506,14 @@ function openPokoinSidePanel() {
     });
 }
 
+function attachPokoinSidePanelClick(button) {
+    button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openPokoinSidePanel();
+    });
+}
+
 function watchMarketplaceNavigationForSidePanel() {
     if (window.pokoinSidePanelNavigationWatcher) {
         return;
@@ -1135,6 +1143,7 @@ async function processListing(listingElement) {
             min-width: 100px;
         `;
         applyPokoinButtonStyles(button, { background: '#6c757d' });
+        attachPokoinSidePanelClick(button);
         
         // Insert button
         const inseriscied = inserisciLinkContainer(listingElement, button);
@@ -1166,13 +1175,6 @@ async function processListing(listingElement) {
                 button.style.background = '#28a745';
                 setPokoinButtonLabel(button, countHighConfidenceMatches(results));
                 console.log(`✅ [CardTrader] Link found, button turned green for: ${titleInfo.pokemonName || title}`);
-                
-                // Add click handler
-                button.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openPokoinSidePanel();
-                });
                 
                 // Hover effects (green)
                 button.addEventListener('mouseenter', () => {
@@ -1598,6 +1600,7 @@ function patchEbayProductPage() {
             min-width: 120px;
         `;
         applyPokoinButtonStyles(button, { background: '#6c757d' });
+        attachPokoinSidePanelClick(button);
         
         // Insert the button after the title
         if (titleElement.parentNode) {
@@ -1618,13 +1621,6 @@ function patchEbayProductPage() {
                 button.style.background = '#28a745';
                 setPokoinButtonLabel(button, countHighConfidenceMatches(results));
                 console.log(`✅ [CardTrader] Link found, button turned green su eBay`);
-                
-                // Open the CardTrader link directly when clicked
-                button.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openPokoinSidePanel();
-                });
                 
                 // Enhanced hover effects (green)
                 button.addEventListener('mouseenter', () => {
@@ -1837,6 +1833,7 @@ function patchCardmarketProductPage() {
             min-width: 100px;
         `;
         applyPokoinButtonStyles(button, { background: '#6c757d' });
+        attachPokoinSidePanelClick(button);
         
         // Search il link "Contact Support" e sostituiscilo with il button Pokoin
         const supportLink = document.querySelector('a[href*="support/tickets/new"]');
@@ -1874,13 +1871,6 @@ function patchCardmarketProductPage() {
                 targetButton.style.background = '#28a745';
                 setPokoinButtonLabel(targetButton, countHighConfidenceMatches(results));
                 console.log(`✅ [CardTrader] Link found, button turned green`);
-                
-                // Open the Pokoin link directly when clicked
-                targetButton.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    openPokoinSidePanel();
-                });
                 
                 // Enhanced hover effects (green)
                 targetButton.addEventListener('mouseenter', () => {

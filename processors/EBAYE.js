@@ -53,6 +53,14 @@ class EbayProcessor {
         });
     }
 
+    attachSidePanelClick(button) {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.openPokoinSidePanel();
+        });
+    }
+
     applyPokoinButtonStyles(button, styles = {}) {
         Object.assign(button.style, {
             display: 'inline-flex',
@@ -159,6 +167,7 @@ class EbayProcessor {
                 min-width: 120px;
             `;
             this.applyPokoinButtonStyles(button, { background: '#6c757d' });
+            this.attachSidePanelClick(button);
             
             // Insert button after title
             if (titleElement.parentNode) {
@@ -176,13 +185,6 @@ class EbayProcessor {
                     button.style.background = '#28a745';
                     this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
                     console.log(`✅ [EBAYE] Link found, button turned green`);
-                    
-                    // Open Pokoin card page on click
-                    button.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        this.openPokoinSidePanel();
-                    });
                     
                     // Enhanced hover effects (green)
                     button.addEventListener('mouseenter', () => {
@@ -311,6 +313,7 @@ class EbayProcessor {
                 min-width: 100px;
             `;
             this.applyPokoinButtonStyles(button, { background: '#6c757d' });
+            this.attachSidePanelClick(button);
             
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
@@ -322,12 +325,6 @@ class EbayProcessor {
                 if (results && results.length > 0) {
                     button.style.background = '#28a745';
                     this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
-                    const bestResult = results[0];
-                    button.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        this.openPokoinSidePanel();
-                    });
                 }
             }
             

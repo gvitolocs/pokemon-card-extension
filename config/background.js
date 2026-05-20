@@ -1053,9 +1053,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         Promise.resolve()
             .then(async () => {
                 if (directCardTraderBlueprintId) {
+                    const directName = cleanCardTraderDirectName(title || tab?.title || '', request.url || tab?.url || '', directCardTraderBlueprintId);
                     return [legacyResultFromRow({
                         card_id: directCardTraderBlueprintId,
-                        name: title || tab?.title || `CardTrader card ${directCardTraderBlueprintId}`,
+                        name: directName,
                         source: 'cardtrader_url',
                         search_rank: 999999,
                     })];

@@ -54,6 +54,14 @@ class CardmarketProcessor {
         });
     }
 
+    attachSidePanelClick(button) {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.openPokoinSidePanel();
+        });
+    }
+
     applyPokoinButtonStyles(button, styles = {}) {
         Object.assign(button.style, {
             display: 'inline-flex',
@@ -168,6 +176,7 @@ class CardmarketProcessor {
                 min-width: 100px;
             `;
             this.applyPokoinButtonStyles(button, { background: '#6c757d' });
+            this.attachSidePanelClick(button);
             
             // Look for "Contact Support" link and replace with Pokoin button
             const supportLink = document.querySelector('a[href*="support/tickets/new"]');
@@ -205,13 +214,6 @@ class CardmarketProcessor {
                     targetButton.style.background = '#28a745';
                     this.setPokoinButtonLabel(targetButton, this.countHighConfidenceMatches(results));
                     console.log(`✅ [CME] Link found, button turned green`);
-                    
-                    // Open Pokoin link on click
-                    targetButton.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        this.openPokoinSidePanel();
-                    });
                     
                     // Enhanced hover effects (green)
                     targetButton.addEventListener('mouseenter', () => {
@@ -340,6 +342,7 @@ class CardmarketProcessor {
                 min-width: 100px;
             `;
             this.applyPokoinButtonStyles(button, { background: '#6c757d' });
+            this.attachSidePanelClick(button);
             
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
@@ -351,12 +354,6 @@ class CardmarketProcessor {
                 if (results && results.length > 0) {
                     button.style.background = '#28a745';
                     this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
-                    const bestResult = results[0];
-                    button.addEventListener('click', (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        this.openPokoinSidePanel();
-                    });
                 }
             }
             

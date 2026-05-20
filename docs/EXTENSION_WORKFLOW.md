@@ -3,17 +3,18 @@
 ## Button Click Flow
 
 1. Marketplace content scripts add a Pokoin button to supported listing pages.
-2. The button shows `Pokoin.com (N)`, where `N` is the count of matches above the high-confidence threshold.
-3. Clicking the button opens the Chrome side panel for the current tab instead of opening a new browser tab.
-4. The background service worker refreshes the side panel state for the sender tab.
-5. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.
-6. If a marketplace content script cannot fetch Cardvault results directly, it asks the background service worker to run the same resolver so the button can still update without logging expected page-context fetch failures as extension errors.
-7. Button clicks always force a fresh side-panel loading state and resolve the clicked tab URL/title, avoiding stale candidates from previous pages.
-8. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
-9. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
-10. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
-11. Direct CardTrader state stores a human card name for the side-panel header. If CardTrader only provides a URL-like title, the extension derives the name from the card URL slug instead of showing the long `cardtrader.com/...` path.
-12. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
+2. Buttons are created immediately in a gray/loading state and still open the Chrome side panel. A resolved match is not required before the user can click.
+3. When matches arrive, the button shows `Pokoin.com (N)`, where `N` is the count of matches above the high-confidence threshold, and turns green.
+4. Clicking any marketplace button opens the Chrome side panel for the current tab instead of opening a new browser tab.
+5. The background service worker refreshes the side panel state for the sender tab.
+6. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.
+7. If a marketplace content script cannot fetch Cardvault results directly, it asks the background service worker to run the same resolver so the button can still update without logging expected page-context fetch failures as extension errors.
+8. Button clicks always force a fresh side-panel loading state and resolve the clicked tab URL/title, avoiding stale candidates from previous pages.
+9. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
+10. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
+11. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
+12. Direct CardTrader state stores a human card name for the side-panel header. If CardTrader only provides a URL-like title, the extension derives the name from the card URL slug instead of showing the long `cardtrader.com/...` path.
+13. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
 
 ## Match Resolution Flow
 
@@ -49,8 +50,14 @@
 8. Vinted renders the Pokoin button and clue chips inside one compact panel inserted into the item details/title column, before the listing action area when Vinted exposes one. The chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
 9. Vinted uses a fixed fallback panel only when no safe item title/details anchor exists. That fallback sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
 
+## Processor Boundaries
+
+Marketplace processors are responsible for page detection, button placement, lightweight preview UI, and sending `searchCardForTitle` / `openSidePanelForCurrentTab` messages. The background service worker owns the canonical side-panel payload: `pageInfo`, `rows`, `best`, `blueprintId`, `pokoinUrl`, `error`, and debug metadata. Processors should not open Pokoin cards directly or depend on having a resolved candidate before wiring the side-panel click handler.
+
+eBay and Cardmarket processors attach the side-panel click handler as soon as the gray button is created, then only update visual state after matches arrive. Vinted additionally sends selected clue chips and primary Pokemon-name-like clues. CardTrader sends the blueprint id directly and lets the background service worker write a complete direct-card side-panel state.
+
 ## CardTrader Direct Path
 
 CardTrader was slower when the side panel opened because the background service worker still executed the generic page-title scraping path before it noticed the URL contained a blueprint id. The direct path now checks CardTrader URLs before injecting any page script or calling Cardvault APIs, writes the side-panel state with `source: cardtrader_url`, and opens the common side panel immediately.
 
-When direct CardTrader state is rendered, the side panel treats it as a full card page view: candidates remain hidden, the embedded Pokoin card page fills the remaining panel space, and the header uses a clean card name from the page title, structured card data, or URL slug fallback.
+When direct CardTrader state is rendered, the side panel treats it as a full card page view: candidates remain hidden, the embedded Pokoin card page fills the remaining panel space, and the header uses a clean card name from the page title, structured card data, or URL slug fallback. The same cleanup is used for direct CardTrader preview/search responses, so URL-like titles never leak into the side-panel header or candidate payload.

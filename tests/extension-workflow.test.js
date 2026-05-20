@@ -935,6 +935,69 @@ test('CardTrader direct URL opens side panel without page scrape or API search',
     assert.equal(finalState.debug.directCardTrader, true);
 });
 
+test('CardTrader direct background search returns clean URL slug name', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new Error('CardTrader direct search should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct search should not scrape');
+                },
+            },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+                title: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+            },
+            { tab: { id: 7, title: '', url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, '12345');
+    assert.equal(response.results[0].name_en, 'Charizard EX');
+    assert.equal(response.results[0].source, 'cardtrader_url');
+    assert.equal(fetchCalls, 0);
+});
+
 test('CardTrader direct side panel state uses clean card name from URL slug', async () => {
     const source = readRepoFile('config/background.js');
     const storageWrites = [];
@@ -1170,6 +1233,59 @@ test('CardTrader injected button intercepts click and opens side panel workflow'
     assert.equal(messages[0].title, 'Charizard ex');
 });
 
+test('content legacy gray buttons attach side-panel click before search results', async () => {
+    const source = readRepoFile('content.js');
+    const contentStart = source.indexOf('function pokoinIconUrl');
+    const functions = [
+        extractFunctionSource(source, 'extractCardTraderBlueprintId', contentStart),
+        extractFunctionSource(source, 'openPokoinSidePanel', contentStart),
+        extractFunctionSource(source, 'attachPokoinSidePanelClick', contentStart),
+    ].join('\n');
+    const messages = [];
+    const listeners = {};
+    const sandbox = {
+        window: {
+            location: {
+                hostname: 'www.ebay.com',
+                pathname: '/itm/123',
+                href: 'https://www.ebay.com/itm/123',
+            },
+        },
+        document: {
+            title: 'Dragonite V Pokemon card',
+            querySelector: () => null,
+        },
+        chrome: {
+            runtime: {
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        console: { warn() {} },
+    };
+    sandbox.window.window = sandbox.window;
+    vm.createContext(sandbox);
+    vm.runInContext(`${functions}\nthis.attachPokoinSidePanelClick = attachPokoinSidePanelClick;`, sandbox, { filename: 'content.js' });
+
+    const button = {
+        addEventListener(type, listener) {
+            listeners[type] = listener;
+        },
+    };
+    sandbox.attachPokoinSidePanelClick(button);
+    await listeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+    });
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
+    assert.equal(messages[0].url, 'https://www.ebay.com/itm/123');
+    assert.equal(messages[0].title, 'Dragonite V Pokemon card');
+});
+
 test('site processors use background fallback and side-panel opening', async () => {
     for (const [relativePath, className] of [
         ['processors/EBAYE.js', 'EbayProcessor'],
@@ -1202,6 +1318,44 @@ test('site processors use background fallback and side-panel opening', async () 
         assert.equal(results.length, 1, `${className} should use background search fallback`);
         assert.equal(messages[0].action, 'searchCardForTitle');
         assert.equal(messages.at(-1).action, 'openSidePanelForCurrentTab');
+    }
+});
+
+test('eBay and Cardmarket gray buttons open the side panel before matches resolve', () => {
+    for (const [relativePath, className] of [
+        ['processors/EBAYE.js', 'EbayProcessor'],
+        ['processors/CME.js', 'CardmarketProcessor'],
+    ]) {
+        const messages = [];
+        const listeners = {};
+        const { Processor } = loadProcessor(relativePath, className, {
+            window: {
+                location: { href: 'https://example.test/item', hostname: 'example.test' },
+            },
+            chrome: {
+                runtime: {
+                    getURL: (asset) => `chrome-extension://test/${asset}`,
+                    sendMessage: async (message) => {
+                        messages.push(message);
+                        return { success: true };
+                    },
+                },
+            },
+        });
+        const processor = new Processor();
+        const button = createButtonStub();
+        button.addEventListener = (type, listener) => {
+            listeners[type] = listener;
+        };
+
+        processor.attachSidePanelClick(button);
+        listeners.click({
+            preventDefault() {},
+            stopPropagation() {},
+        });
+
+        assert.equal(messages.length, 1, `${className} gray button should open side panel`);
+        assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
     }
 });
 
