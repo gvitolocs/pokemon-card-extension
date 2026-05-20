@@ -17,7 +17,7 @@ class CardmarketProcessor {
         const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
-            <span>Pokoin${suffix}</span>
+            <span>Pokoin.com${suffix}</span>
         `;
     }
 

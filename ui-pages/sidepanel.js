@@ -288,7 +288,8 @@ function renderState(state) {
     elements.frameSection.hidden = false;
     setStatus('');
 
-    const candidates = sortCandidates(state.rows || []).slice(0, 5);
+    const rows = state.rows?.length ? state.rows : [best];
+    const candidates = sortCandidates(rows).slice(0, 5);
     if (candidates.length > 0) {
         elements.candidatesSection.hidden = false;
         candidates.forEach((row) => {

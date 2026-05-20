@@ -337,7 +337,7 @@ function setPokoinButtonLabel(button, matchCount = null) {
     const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
     button.innerHTML = `
         <img src="${pokoinIconUrl()}" alt="" aria-hidden="true">
-        <span>Pokoin${suffix}</span>
+        <span>Pokoin.com${suffix}</span>
     `;
 }
 

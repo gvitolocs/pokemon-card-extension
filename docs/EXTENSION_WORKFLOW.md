@@ -3,7 +3,7 @@
 ## Button Click Flow
 
 1. Marketplace content scripts add a Pokoin button to supported listing pages.
-2. The button shows `Pokoin (N)`, where `N` is the count of matches above the high-confidence threshold.
+2. The button shows `Pokoin.com (N)`, where `N` is the count of matches above the high-confidence threshold.
 3. Clicking the button opens the Chrome side panel for the current tab instead of opening a new browser tab.
 4. The background service worker refreshes the side panel state for the sender tab.
 5. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.

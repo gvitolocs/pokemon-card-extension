@@ -17,7 +17,7 @@ class VintedProcessor {
         const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
-            <span>Pokoin${suffix}</span>
+            <span>Pokoin.com${suffix}</span>
         `;
     }
 
@@ -339,7 +339,7 @@ class VintedProcessor {
                 <span class="web_ui__Button__content">
                     <span class="web_ui__Button__label">
                         <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:22px;height:22px;border-radius:50%;object-fit:cover;margin-right:8px;vertical-align:middle;">
-                        Pokoin (${this.countHighConfidenceMatches(results)})
+                        Pokoin.com (${this.countHighConfidenceMatches(results)})
                     </span>
                 </span>
             `;
