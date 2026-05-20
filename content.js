@@ -2949,13 +2949,34 @@ function extractTitleInfo(title) {
     };
 }
 
+let contentSearchFallbackNoticeShown = false;
+
+function isExpectedContentSearchUnavailable(error) {
+    const name = String(error?.name || '');
+    const message = String(error?.message || error || '');
+    return /typeerror/i.test(name) &&
+        /(?:failed to fetch|load failed|networkerror|network request failed)/i.test(message);
+}
+
+function noteContentSearchFallback(error) {
+    if (isExpectedContentSearchUnavailable(error)) {
+        if (!contentSearchFallbackNoticeShown) {
+            contentSearchFallbackNoticeShown = true;
+            console.info('ℹ️ [Pokoin] Content search unavailable; marketplace processors will use background search.');
+        }
+        return;
+    }
+
+    console.warn('⚠️ [Pokoin] Content search failed unexpectedly; processor/background fallback can continue:', error);
+}
+
 // Search cards in database
 async function searchCardInDatabase(titleInfo, originalTitle = '') {
     try {
         const enrichedTitleInfo = await enrichTitleInfoWithCardvaultName(titleInfo, originalTitle);
         return await searchPokoinCardApi(enrichedTitleInfo, originalTitle);
     } catch (error) {
-        console.warn('⚠️ [Pokoin] Content search unavailable; processor/background fallback can continue:', error);
+        noteContentSearchFallback(error);
         return [];
     }
 }

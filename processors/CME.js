@@ -430,22 +430,10 @@ class CardmarketProcessor {
     }
 
     /**
-     * Search database (delegates to `content.js`)
+     * Search database through the background service worker.
      */
     async searchCardInDatabase(titleInfo, title) {
-        let results = [];
-        if (typeof window.searchCardInDatabase === 'function') {
-            try {
-                results = await window.searchCardInDatabase(titleInfo, title);
-            } catch (error) {
-                console.warn('⚠️ [CME] Content search unavailable, using background search:', error);
-            }
-        }
-
-        if (Array.isArray(results) && results.length > 0) {
-            return results;
-        }
-
+        void titleInfo;
         return this.searchCardWithBackground(title);
     }
 

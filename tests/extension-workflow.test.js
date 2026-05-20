@@ -54,6 +54,8 @@ function loadProcessor(relativePath, className, overrides = {}) {
             observe() {}
         },
         Node: { ELEMENT_NODE: 1 },
+        setTimeout: overrides.setTimeout || setTimeout,
+        clearTimeout: overrides.clearTimeout || clearTimeout,
     };
     sandbox.window.window = sandbox.window;
     vm.createContext(sandbox);
@@ -144,13 +146,25 @@ function createDomElement(tagName = 'div', attributes = {}) {
         },
         addEventListener() {},
         querySelector(selector) {
-            return this.children.find((child) => child.matches?.(selector) || child.querySelector?.(selector)) || null;
+            for (const child of this.children) {
+                if (child.matches?.(selector)) {
+                    return child;
+                }
+                const descendant = child.querySelector?.(selector);
+                if (descendant) {
+                    return descendant;
+                }
+            }
+            return null;
         },
         querySelectorAll(selector) {
             return this.children.flatMap((child) => {
                 const matches = child.matches?.(selector) ? [child] : [];
                 return [...matches, ...(child.querySelectorAll?.(selector) || [])];
             });
+        },
+        contains(target) {
+            return target === this || this.children.some((child) => child.contains?.(target));
         },
         matches(selector) {
             if (selector.includes(',')) {
@@ -160,12 +174,26 @@ function createDomElement(tagName = 'div', attributes = {}) {
             if (testId) {
                 return this.attributes['data-testid'] === testId;
             }
+            const partialTestId = selector.match(/\[data-testid\*="([^"]+)"\]/)?.[1];
+            if (partialTestId) {
+                return String(this.attributes['data-testid'] || '').includes(partialTestId);
+            }
             if (selector === tagName || selector.toUpperCase() === this.tagName) {
                 return true;
             }
             if (selector.startsWith('[class*="')) {
                 const classFragment = selector.match(/\[class\*="([^"]+)"\]/)?.[1] || '';
                 return String(this.attributes.class || '').includes(classFragment);
+            }
+            if (/^[a-z]+\[data-testid="[^"]+"\]$/i.test(selector)) {
+                const [tagSelector] = selector.split('[');
+                const expectedTestId = selector.match(/\[data-testid="([^"]+)"\]/)?.[1];
+                return this.tagName === tagSelector.toUpperCase() && this.attributes['data-testid'] === expectedTestId;
+            }
+            if (/^[a-z]+\.[\w-]+(?:__[\w-]+)*/i.test(selector)) {
+                const [tagSelector, ...classParts] = selector.split('.');
+                const expectedClass = classParts.join('.');
+                return this.tagName === tagSelector.toUpperCase() && String(this.attributes.class || '').split(/\s+/).includes(expectedClass);
             }
             if (selector.startsWith('[data-pokoin-vinted-panel]')) {
                 return this.attributes['data-pokoin-vinted-panel'] !== undefined;
@@ -211,16 +239,20 @@ function createClassListStub() {
     };
 }
 
-test('content search fetch failures warn and return empty results', async () => {
+test('content search fetch failures are quiet and return empty results', async () => {
     const source = readRepoFile('content.js');
     const globalSearchStart = source.indexOf('// Search cards in database');
+    const helperStart = source.indexOf('let contentSearchFallbackNoticeShown');
+    const helperSource = source.slice(helperStart, globalSearchStart);
     const extracted = extractFunctionSource(source, 'searchCardInDatabase', globalSearchStart);
     const errors = [];
     const warnings = [];
+    const infos = [];
     const sandbox = {
         console: {
             error: (...args) => errors.push(args),
             warn: (...args) => warnings.push(args),
+            info: (...args) => infos.push(args),
             log() {},
         },
         enrichTitleInfoWithCardvaultName: async (titleInfo) => titleInfo,
@@ -229,27 +261,33 @@ test('content search fetch failures warn and return empty results', async () => 
         },
     };
     vm.createContext(sandbox);
-    vm.runInContext(`${extracted}\nthis.searchCardInDatabase = searchCardInDatabase;`, sandbox);
+    vm.runInContext(`${helperSource}\n${extracted}\nthis.searchCardInDatabase = searchCardInDatabase;`, sandbox);
 
     const results = await sandbox.searchCardInDatabase({ pokemonName: 'Dragonite', isVCard: true }, 'Dragonite V Fullart Pokemon');
+    const repeatedResults = await sandbox.searchCardInDatabase({ pokemonName: 'Dragonite', isVCard: true }, 'Dragonite V Fullart Pokemon');
 
     assert.ok(Array.isArray(results));
     assert.equal(results.length, 0);
+    assert.ok(Array.isArray(repeatedResults));
+    assert.equal(repeatedResults.length, 0);
     assert.equal(errors.length, 0, 'expected fetch failures should not use console.error');
-    assert.equal(warnings.length, 1, 'expected fetch failure should be visible as one warning');
-    assert.match(String(warnings[0][0]), /Content search unavailable/);
+    assert.equal(warnings.length, 0, 'expected fetch failure should not spam warnings');
+    assert.equal(infos.length, 1, 'expected fetch failure should emit one quiet diagnostic');
+    assert.match(String(infos[0][0]), /Content search unavailable/);
 });
 
 test('Vinted falls back to background without error spam', async () => {
     const errors = [];
     const warnings = [];
     const chromeMessages = [];
+    let contentSearchCalls = 0;
     const { Processor, sandbox } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         error: (...args) => errors.push(args),
         warn: (...args) => warnings.push(args),
         window: {
             location: { href: 'https://www.vinted.it/items/1-dragonite-v', hostname: 'www.vinted.it' },
             searchCardInDatabase: async () => {
+                contentSearchCalls += 1;
                 throw new TypeError('Failed to fetch');
             },
         },
@@ -268,13 +306,15 @@ test('Vinted falls back to background without error spam', async () => {
     });
 
     const processor = new Processor();
-    const results = await processor.searchCardInDatabase({ pokemonName: 'Dragonite' }, 'Dragonite V Fullart Pokemon');
-    const fallbackResults = results.length ? results : await processor.searchCardWithBackground('Dragonite V Fullart Pokemon');
+    processor.currentTitle = 'Dragonite V Fullart Pokemon';
+    processor.currentButton = createButtonStub();
+    processor.renderCandidatePreview = () => {};
+    await processor.runVintedSearch({ pokemonName: 'Dragonite' }, 'Dragonite V Fullart Pokemon');
 
-    assert.equal(results.length, 0, 'content failure returns empty results');
-    assert.equal(fallbackResults[0].name_en, 'Dragonite V');
+    assert.equal(contentSearchCalls, 0, 'Vinted should not call noisy content fetch path for preview search');
+    assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], undefined);
     assert.equal(errors.length, 0, 'expected content fetch failures should not be logged as errors');
-    assert.equal(warnings.length, 1);
+    assert.equal(warnings.length, 0, 'background-first Vinted search should not warn on content fetch');
     assert.equal(chromeMessages.at(-1).action, 'searchCardForTitle');
     assert.equal(sandbox.window.VintedProcessor, Processor);
 });
@@ -589,6 +629,89 @@ test('Vinted chip and button share normal inserted details container', () => {
         panel.children.find((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true').style.cssText,
         /flex-wrap:\s*wrap/
     );
+});
+
+test('Vinted safe anchor selection ignores ad, header, and category placeholders', () => {
+    const adPlaceholder = createDomElement('div', { 'data-testid': 'ad-placeholder' });
+    const fakeAdTitle = createDomElement('h1');
+    fakeAdTitle.textContent = 'Advertisement';
+    adPlaceholder.appendChild(fakeAdTitle);
+
+    const header = createDomElement('header');
+    const fakeHeaderTitle = createDomElement('h1');
+    fakeHeaderTitle.textContent = 'Pokemon cards category';
+    header.appendChild(fakeHeaderTitle);
+
+    const details = createDomElement('section', { 'data-testid': 'item-page-summary-plugin' });
+    const productTitle = createDomElement('h1', { 'data-testid': 'item-title' });
+    productTitle.textContent = 'Dragonite V Pokemon card';
+    const actionArea = createDomElement('div', { 'data-testid': 'item-actions' });
+    details.appendChild(productTitle);
+    details.appendChild(actionArea);
+
+    const allTitles = [fakeAdTitle, fakeHeaderTitle, productTitle];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: () => null,
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return allTitles.filter((element) => element.matches?.(selector) || selector === 'h1');
+                }
+                return [];
+            },
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+    });
+    const processor = new Processor();
+
+    const anchor = processor.resolveVintedProductAnchor();
+    const panel = processor.ensureVintedPanel(anchor.titleElement);
+
+    assert.equal(anchor.titleElement, productTitle);
+    assert.equal(anchor.detailsContainer, details);
+    assert.equal(panel.parentNode, details);
+    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'anchored');
+});
+
+test('Vinted processing waits when only top skeleton title exists', () => {
+    const skeleton = createDomElement('div', { 'data-testid': 'item-skeleton' });
+    const fakeTitle = createDomElement('h1');
+    fakeTitle.textContent = 'Loading';
+    skeleton.appendChild(fakeTitle);
+    let scheduledDelay = null;
+    let scheduledCallback = null;
+
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/9-loading',
+                hostname: 'www.vinted.it',
+                pathname: '/items/9-loading',
+            },
+        },
+        document: {
+            querySelector: () => null,
+            querySelectorAll: (selector) => selector.includes('h1') ? [fakeTitle] : [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+        setTimeout: (callback, delay) => {
+            scheduledCallback = callback;
+            scheduledDelay = delay;
+            return 1;
+        },
+    });
+    const processor = new Processor();
+
+    const scheduled = processor.scheduleVintedProductRetry('safe item title not found');
+
+    assert.equal(scheduled, true);
+    assert.equal(scheduledDelay, processor.vintedProcessRetryDelayMs);
+    assert.equal(typeof scheduledCallback, 'function');
+    assert.equal(processor.processedPages.has('https://www.vinted.it/items/9-loading'), false);
 });
 
 test('Vinted background candidates turn button green and render preview', async () => {

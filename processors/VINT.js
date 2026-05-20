@@ -13,6 +13,9 @@ class VintedProcessor {
         this.selectedKeywordValues = new Set();
         this.latestSearchToken = 0;
         this.currentPanel = null;
+        this.vintedProcessAttempts = new Map();
+        this.vintedProcessRetryDelayMs = 500;
+        this.vintedProcessMaxRetries = 10;
     }
 
     pokoinIconUrl() {
@@ -385,41 +388,158 @@ class VintedProcessor {
         return current || null;
     }
 
-    findVintedDetailsContainer(titleElement) {
-        if (!titleElement) {
-            return null;
-        }
-
-        const detailSelectors = [
+    vintedDetailsSelectors() {
+        return [
+            '[data-testid="item-page-summary-plugin"]',
             '[data-testid="item-details"]',
             '[data-testid="item-page-details"]',
             '[data-testid="item-details-container"]',
             '[data-testid="item-info"]',
             '[data-testid="item-summary"]',
+            '[data-testid="item-overview"]',
             '[class*="item-details"]',
             '[class*="ItemDetails"]',
+            '[class*="item-page-summary"]',
         ];
+    }
+
+    isVintedUnsafeAnchorElement(element) {
+        if (!element?.closest) {
+            return true;
+        }
+
+        const unsafeSelectors = [
+            'header',
+            'nav',
+            'footer',
+            'aside',
+            '[role="banner"]',
+            '[role="navigation"]',
+            '[data-testid*="ad"]',
+            '[data-testid*="banner"]',
+            '[data-testid*="catalog"]',
+            '[data-testid*="category"]',
+            '[data-testid*="feed"]',
+            '[data-testid*="header"]',
+            '[data-testid*="navigation"]',
+            '[data-testid*="placeholder"]',
+            '[data-testid*="search"]',
+            '[data-testid*="skeleton"]',
+            '[class*="ad-"]',
+            '[class*="banner"]',
+            '[class*="catalog"]',
+            '[class*="category"]',
+            '[class*="feed"]',
+            '[class*="header"]',
+            '[class*="navigation"]',
+            '[class*="placeholder"]',
+            '[class*="skeleton"]',
+        ];
+
+        return unsafeSelectors.some((selector) => element.closest(selector));
+    }
+
+    isVintedTitleText(text = '') {
+        const cleaned = String(text || '').replace(/\s+/g, ' ').trim();
+        if (cleaned.length < 3) {
+            return false;
+        }
+
+        return !/^(?:vinted|loading|caricamento|advertisement|sponsored|promoted|pubblicit[aà])\b/i.test(cleaned);
+    }
+
+    isSafeVintedDetailsContainer(container) {
+        return Boolean(container?.querySelector && !this.isVintedUnsafeAnchorElement(container));
+    }
+
+    isSafeVintedTitleElement(element) {
+        if (!element || !this.isVintedTitleText(element.textContent) || this.isVintedUnsafeAnchorElement(element)) {
+            return false;
+        }
+
+        return Boolean(this.findVintedDetailsContainer(element));
+    }
+
+    findVintedTitleElement() {
+        const titleSelectors = [
+            '[data-testid="item-title"]',
+            'h1[data-testid="item-title"]',
+            '[data-testid="item-page-summary-plugin"] h1',
+            '[data-testid="item-page-summary-plugin"] .web_ui__Text__title',
+            '[data-testid="item-details"] h1',
+            '[data-testid="item-page-details"] h1',
+            '[data-testid="item-details-container"] h1',
+            '[class*="item-details"] h1',
+            '[class*="ItemDetails"] h1',
+            'h1.web_ui__Text__title',
+            'h1',
+        ];
+
+        for (const selector of titleSelectors) {
+            const candidates = Array.from(document.querySelectorAll?.(selector) || []);
+            const titleElement = candidates.find((candidate) => this.isSafeVintedTitleElement(candidate));
+            console.log(`🔍 [VINT] Trying selector "${selector}":`, titleElement ? 'FOUND' : 'NOT FOUND');
+            if (titleElement) {
+                return titleElement;
+            }
+        }
+
+        return null;
+    }
+
+    findVintedDetailsContainer(titleElement) {
+        if (!titleElement) {
+            return null;
+        }
+
+        const detailSelectors = this.vintedDetailsSelectors();
 
         for (const selector of detailSelectors) {
             const closest = titleElement.closest?.(selector);
-            if (closest) {
+            if (this.isSafeVintedDetailsContainer(closest)) {
                 return closest;
             }
         }
 
-        const titleParent = this.nearestElement(titleElement.parentElement || titleElement.parentNode);
-        if (titleParent) {
-            return titleParent;
-        }
-
         for (const selector of detailSelectors) {
             const candidate = document.querySelector?.(selector);
-            if (candidate?.querySelector?.('h1, [data-testid="item-title"]')) {
+            if (
+                this.isSafeVintedDetailsContainer(candidate) &&
+                (candidate.contains?.(titleElement) || candidate.querySelector?.('h1, [data-testid="item-title"]') === titleElement)
+            ) {
                 return candidate;
             }
         }
 
         return null;
+    }
+
+    resolveVintedProductAnchor() {
+        const titleElement = this.findVintedTitleElement();
+        const title = titleElement?.textContent?.replace(/\s+/g, ' ').trim() || '';
+        return {
+            titleElement,
+            title,
+            detailsContainer: this.findVintedDetailsContainer(titleElement),
+        };
+    }
+
+    scheduleVintedProductRetry(reason) {
+        const pageKey = window.location.href;
+        const attempts = this.vintedProcessAttempts.get(pageKey) || 0;
+        if (attempts >= this.vintedProcessMaxRetries || typeof setTimeout !== 'function') {
+            console.log(`⚠️ [VINT] Product details unavailable after retries: ${reason}`);
+            return false;
+        }
+
+        this.vintedProcessAttempts.set(pageKey, attempts + 1);
+        console.log(`⏳ [VINT] Waiting for product details (${attempts + 1}/${this.vintedProcessMaxRetries}): ${reason}`);
+        setTimeout(() => this.processProductPage(), this.vintedProcessRetryDelayMs);
+        return true;
+    }
+
+    hasVintedRetryBudget() {
+        return (this.vintedProcessAttempts.get(window.location.href) || 0) < this.vintedProcessMaxRetries;
     }
 
     findVintedActionArea(container) {
@@ -567,37 +687,19 @@ class VintedProcessor {
         try {
             console.log('🔍 [VINT] Processing Vinted product page...');
             
-            // Find product title
-            const titleSelectors = [
-                'h1.web_ui__Text__title',
-                '[data-testid="item-title"]',
-                'h1[data-testid="item-title"]',
-                'h1',
-                '.web_ui__Text__title',
-                '.web_ui__Text__subtitle'
-            ];
-            
-            console.log(`🔍 [VINT] Looking for title with selectors:`, titleSelectors);
-            
-            let titleElement = null;
-            for (const selector of titleSelectors) {
-                titleElement = document.querySelector(selector);
-                console.log(`🔍 [VINT] Trying selector "${selector}":`, titleElement ? 'FOUND' : 'NOT FOUND');
-                if (titleElement) {
-                    console.log(`✅ [VINT] Title found with selector: ${selector}`);
-                    console.log(`🔍 [VINT] Title content: "${titleElement.textContent.trim()}"`);
-                    break;
-                }
-            }
-            
+            const { titleElement, title, detailsContainer } = this.resolveVintedProductAnchor();
             if (!titleElement) {
-                console.log('⚠️ [VINT] Product title not found');
+                this.scheduleVintedProductRetry('safe item title not found');
                 return;
             }
             
-            const title = titleElement.textContent.trim();
             if (!title) {
-                console.log('⚠️ [VINT] Product title is empty');
+                this.scheduleVintedProductRetry('item title is empty');
+                return;
+            }
+
+            if (!detailsContainer && this.hasVintedRetryBudget()) {
+                this.scheduleVintedProductRetry('item details block not ready');
                 return;
             }
             
@@ -690,31 +792,16 @@ class VintedProcessor {
 
     async runVintedSearch(titleInfo, title) {
         const searchToken = ++this.latestSearchToken;
-        const searchTitle = this.buildVintedSearchTitle(title);
-        let results = [];
-
-        try {
-            results = await this.searchCardInDatabase(titleInfo, searchTitle);
-        } catch (error) {
-            console.warn('⚠️ [VINT] Content search unavailable, trying background search:', error);
-        }
-
-        if (searchToken !== this.latestSearchToken) {
-            return;
-        }
-
-        if (results && results.length > 0) {
-            this.updateButtonWithResults(results);
-        }
-
+        void titleInfo;
         const backgroundResults = await this.searchCardWithBackground(title);
+
         if (searchToken !== this.latestSearchToken) {
             return;
         }
 
         if (backgroundResults.length > 0) {
             this.updateButtonWithResults(backgroundResults);
-        } else if (!results || results.length === 0) {
+        } else {
             this.updateButtonWithoutResults();
         }
     }

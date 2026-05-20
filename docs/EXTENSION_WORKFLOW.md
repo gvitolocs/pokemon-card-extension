@@ -8,7 +8,7 @@
 4. Clicking any marketplace button opens the Chrome side panel for the current tab instead of opening a new browser tab.
 5. The background service worker refreshes the side panel state for the sender tab.
 6. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.
-7. If a marketplace content script cannot fetch Cardvault results directly, it asks the background service worker to run the same resolver so the button can still update without logging expected page-context fetch failures as extension errors.
+7. Marketplace processors use the background service worker as the reliable Cardvault search path. Direct content-script fetches are legacy/fallback only; expected page-context network failures are quiet and must not spam Chrome extension warnings on repeated processor attempts.
 8. Button clicks always force a fresh side-panel loading state and resolve the clicked tab URL/title, avoiding stale candidates from previous pages.
 9. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
 10. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
@@ -47,12 +47,13 @@
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
 7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
-8. Vinted renders the Pokoin button and clue chips inside one compact panel inserted into the item details/title column, before the listing action area when Vinted exposes one. The chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
-9. Vinted uses a fixed fallback panel only when no safe item title/details anchor exists. That fallback sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
+8. Vinted renders the Pokoin button and clue chips inside one compact panel inserted into the product details/title block, before the listing action area when Vinted exposes one. Anchor selection is Vinted-specific: it prefers `item-title` inside `item-page-summary-plugin`, `item-details`, or related item detail containers, ignores ad placeholders, skeletons, global headers, nav, category rows, and feed/catalog containers, and waits briefly for the real details block when Vinted initially renders only the top ad/skeleton area.
+9. The Vinted chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
+10. Vinted uses a fixed fallback panel only after no safe item title/details anchor exists. That fallback sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
 
 ## Processor Boundaries
 
-Marketplace processors are responsible for page detection, button placement, lightweight preview UI, and sending `searchCardForTitle` / `openSidePanelForCurrentTab` messages. The background service worker owns the canonical side-panel payload: `pageInfo`, `rows`, `best`, `blueprintId`, `pokoinUrl`, `error`, and debug metadata. Processors should not open Pokoin cards directly or depend on having a resolved candidate before wiring the side-panel click handler.
+Marketplace processors are responsible for page detection, button placement, lightweight preview UI, and sending `searchCardForTitle` / `openSidePanelForCurrentTab` messages. The background service worker owns Cardvault search, fallback autocomplete, and the canonical side-panel payload: `pageInfo`, `rows`, `best`, `blueprintId`, `pokoinUrl`, `error`, and debug metadata. Processors should not open Pokoin cards directly, should not depend on having a resolved candidate before wiring the side-panel click handler, and should avoid repeated direct content-script API fetches that produce noisy page-context failures.
 
 eBay and Cardmarket processors attach the side-panel click handler as soon as the gray button is created, then only update visual state after matches arrive. Vinted additionally sends selected clue chips and primary Pokemon-name-like clues. CardTrader sends the blueprint id directly and lets the background service worker write a complete direct-card side-panel state.
 
