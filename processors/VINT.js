@@ -34,6 +34,78 @@ class VintedProcessor {
         return results.filter((result) => this.isHighConfidenceMatch(result)).length;
     }
 
+    compactCandidateMeta(result = {}) {
+        const number = String(result.collector_number || result.card_number || '')
+            .match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)(?:\s*\/\s*\d{1,4}[a-z]?)?\b/i)?.[1] || '';
+        const setName = result.expansion_name_en || result.set_name || '';
+        const setShort = String(setName)
+            .replace(/\b(?:and|of|the|a|an)\b/gi, ' ')
+            .split(/\s+/)
+            .map((part) => part[0])
+            .join('')
+            .toUpperCase();
+        return [number, setShort || setName].filter(Boolean).join(' · ');
+    }
+
+    renderCandidatePreview(results = []) {
+        document.querySelectorAll('[data-pokoin-candidate-preview]').forEach((element) => element.remove());
+        if (!this.currentButton || !document.contains(this.currentButton) || results.length === 0) {
+            return;
+        }
+
+        const buttonRect = this.currentButton.getBoundingClientRect();
+        const preview = document.createElement('div');
+        preview.setAttribute('data-pokoin-candidate-preview', 'true');
+        preview.style.cssText = `
+            position: fixed;
+            top: ${Math.round(buttonRect.bottom + 8)}px;
+            right: ${Math.max(12, Math.round(window.innerWidth - buttonRect.right))}px;
+            z-index: 9998;
+            width: min(320px, calc(100vw - 24px));
+            padding: 12px;
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            border-radius: 16px;
+            background: rgba(7, 17, 31, 0.94);
+            color: #f8fafc;
+            box-shadow: 0 18px 42px rgba(2, 6, 23, 0.35);
+            font-family: Arial, sans-serif;
+        `;
+
+        const title = document.createElement('div');
+        title.textContent = 'Best candidates';
+        title.style.cssText = 'font-size:13px;font-weight:800;margin-bottom:8px;';
+        preview.appendChild(title);
+
+        results.slice(0, 4).forEach((result) => {
+            const row = document.createElement('button');
+            row.type = 'button';
+            row.style.cssText = `
+                display: grid;
+                grid-template-columns: 1fr;
+                width: 100%;
+                padding: 8px 0;
+                border: 0;
+                border-top: 1px solid rgba(148, 163, 184, 0.18);
+                background: transparent;
+                color: inherit;
+                text-align: left;
+                cursor: pointer;
+            `;
+            row.innerHTML = `
+                <strong style="display:block;font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${result.name_en || result.pokemon_name || 'Candidate'}</strong>
+                <span style="display:block;margin-top:3px;color:#94a3b8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result)}</span>
+            `;
+            row.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                this.openPokoinSidePanel();
+            });
+            preview.appendChild(row);
+        });
+
+        document.body.appendChild(preview);
+    }
+
     openPokoinSidePanel() {
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
@@ -378,6 +450,8 @@ class VintedProcessor {
             this.currentButton.style.transform = 'scale(1)';
             this.currentButton.style.boxShadow = 'none';
         });
+
+        this.renderCandidatePreview(results);
         
         console.log(`✅ [VINT] Button updated successfully for: ${bestResult.name_en || bestResult.pokemon_name}`);
     }
