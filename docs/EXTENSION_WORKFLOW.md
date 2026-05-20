@@ -18,6 +18,7 @@
 6. The resolved name is sent to `/api/extension-card-search`.
 7. Returned matches are accepted only if the returned card name still matches the resolved structured name.
 8. If structured search returns no accepted rows, the extension falls back to marketplace autocomplete.
+9. CardTrader card pages are supported directly: when the URL contains `/cards/:id`, that CardTrader blueprint id is used as the Pokoin card id without running search.
 
 ## Candidate Display Flow
 

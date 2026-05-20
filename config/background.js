@@ -53,7 +53,8 @@ function isSupportedMarketplaceUrl(url = '') {
         const { hostname } = new URL(url);
         return hostname.includes('ebay') ||
             hostname.includes('vinted') ||
-            hostname.includes('cardmarket');
+            hostname.includes('cardmarket') ||
+            hostname.includes('cardtrader');
     } catch (error) {
         return false;
     }
@@ -83,6 +84,11 @@ async function extractTitleFromPage() {
             '.product-title',
             '.card-title',
         ],
+        cardtrader: [
+            '.py-3.text-center.text-sm-left h2',
+            'h1',
+            'h2',
+        ],
     };
 
     const selectors = hostname.includes('vinted')
@@ -91,7 +97,9 @@ async function extractTitleFromPage() {
             ? selectorMap.ebay
             : hostname.includes('cardmarket')
                 ? selectorMap.cardmarket
-                : ['h1', 'title'];
+                : hostname.includes('cardtrader')
+                    ? selectorMap.cardtrader
+                    : ['h1', 'title'];
 
     const selectorChecks = [];
     let titleSource = '';
@@ -139,12 +147,16 @@ async function extractTitleFromPage() {
         ? scrapeCardmarketContext(finalTitle)
         : null;
     const structuredCard = scrapeStructuredCardFields(finalTitle, cardmarketContext);
+    const cardtraderBlueprintId = hostname.includes('cardtrader')
+        ? window.location.pathname.match(/\/(?:[a-z]{2}\/)?cards\/(\d+)(?:-|\/|$)/i)?.[1] || ''
+        : '';
 
     return {
         title: finalTitle,
         url: window.location.href,
         hostname,
         structuredCard,
+        cardtraderBlueprintId,
         debug: {
             extractorVersion: 2,
             startedAt,
@@ -661,37 +673,49 @@ async function resolveActiveTabForSidePanel(tab) {
     if (!pageInfo.unsupported && pageInfo.title) {
         try {
             debug.searched = true;
-            try {
-                const nameResolution = await resolveNameFromCardvaultTitle(pageInfo.title);
-                debug.nameResolution = nameResolution;
-                if (nameResolution.name) {
-                    pageInfo.structuredCard = {
-                        ...(pageInfo.structuredCard || {}),
-                        name: nameResolution.name,
+            if (pageInfo.cardtraderBlueprintId) {
+                rows = [{
+                    card_id: pageInfo.cardtraderBlueprintId,
+                    name: pageInfo.structuredCard?.name || pageInfo.title,
+                    set_name: pageInfo.structuredCard?.expansion || '',
+                    card_number: pageInfo.structuredCard?.collectorNumber || '',
+                    source: 'cardtrader_url',
+                    search_rank: 999999,
+                }];
+                debug.cardtraderBlueprintId = pageInfo.cardtraderBlueprintId;
+            } else {
+                try {
+                    const nameResolution = await resolveNameFromCardvaultTitle(pageInfo.title);
+                    debug.nameResolution = nameResolution;
+                    if (nameResolution.name) {
+                        pageInfo.structuredCard = {
+                            ...(pageInfo.structuredCard || {}),
+                            name: nameResolution.name,
+                        };
+                    }
+                } catch (nameResolutionError) {
+                    debug.nameResolution = {
+                        source: 'marketplace_card_names_for_language',
+                        error: nameResolutionError.message || 'Card name resolution failed.',
                     };
                 }
-            } catch (nameResolutionError) {
-                debug.nameResolution = {
-                    source: 'marketplace_card_names_for_language',
-                    error: nameResolutionError.message || 'Card name resolution failed.',
-                };
-            }
 
-            try {
-                const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
-                rows = extensionSearchResult.rows;
-                debug.extensionSearch = extensionSearchResult.debug;
-            } catch (extensionSearchError) {
-                debug.extensionSearch = {
-                    endpoint: '/api/extension-card-search',
-                    error: extensionSearchError.message || 'Extension card search failed.',
-                };
-            }
+                try {
+                    const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
+                    rows = extensionSearchResult.rows;
+                    debug.extensionSearch = extensionSearchResult.debug;
+                } catch (extensionSearchError) {
+                    debug.extensionSearch = {
+                        endpoint: '/api/extension-card-search',
+                        error: extensionSearchError.message || 'Extension card search failed.',
+                    };
+                }
 
-            if (rows.length === 0) {
-                const searchResult = await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
-                rows = searchResult.rows;
-                debug.attemptedQueries = searchResult.debug.attemptedQueries;
+                if (rows.length === 0) {
+                    const searchResult = await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
+                    rows = searchResult.rows;
+                    debug.attemptedQueries = searchResult.debug.attemptedQueries;
+                }
             }
         } catch (searchError) {
             error = searchError.message || 'Cardvault search failed.';
