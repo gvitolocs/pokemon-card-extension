@@ -14,6 +14,7 @@ const elements = {
 function setStatus(message, isError = false) {
     elements.status.textContent = message;
     elements.status.classList.toggle('error', isError);
+    elements.status.hidden = !message;
 }
 
 function cardUrl(blueprintId) {
@@ -285,7 +286,7 @@ function renderState(state) {
     elements.pokoinFrame.src = pokoinUrl;
 
     elements.frameSection.hidden = false;
-    setStatus('Matched through Cardvault Oracle search.');
+    setStatus('');
 
     const candidates = sortCandidates(state.rows || []).slice(0, 5);
     if (candidates.length > 0) {
