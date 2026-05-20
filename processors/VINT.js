@@ -13,6 +13,9 @@ class VintedProcessor {
         this.selectedKeywordValues = new Set();
         this.latestSearchToken = 0;
         this.currentPanel = null;
+        this.currentPanelHost = null;
+        this.vintedPanelObserver = null;
+        this.vintedReinsertTimer = null;
         this.vintedProcessAttempts = new Map();
         this.vintedProcessRetryDelayMs = 500;
         this.vintedProcessMaxRetries = 10;
@@ -260,13 +263,65 @@ class VintedProcessor {
         return [number, setShort || setName].filter(Boolean).join(' · ');
     }
 
+    vintedPanelRoot(panel = this.currentPanel) {
+        return panel?.shadowRoot || panel;
+    }
+
+    createVintedOwnedPanelHost() {
+        const host = document.createElement('div');
+        host.setAttribute('data-pokoin-extension-panel', 'vinted');
+        host.setAttribute('data-pokoin-vinted-panel-host', 'true');
+        Object.assign(host.style, this.vintedPanelBaseStyles());
+
+        let root = host;
+        if (typeof host.attachShadow === 'function') {
+            root = host.attachShadow({ mode: 'open' });
+            const style = document.createElement('style');
+            style.textContent = this.vintedPanelResetStyles();
+            root.appendChild(style);
+        }
+
+        const panel = document.createElement('div');
+        panel.setAttribute('data-pokoin-vinted-panel', 'true');
+        panel.setAttribute('data-pokoin-extension-panel', 'vinted-content');
+        Object.assign(panel.style, this.vintedInsertedPanelStyles());
+        root.appendChild(panel);
+
+        return { host, panel };
+    }
+
+    findExistingVintedPanelHost() {
+        return document.querySelector?.('[data-pokoin-vinted-panel-host]');
+    }
+
+    findExistingVintedPanel(host = this.currentPanelHost) {
+        if (!host) {
+            return null;
+        }
+        return host.shadowRoot?.querySelector?.('[data-pokoin-vinted-panel]') || host.querySelector?.('[data-pokoin-vinted-panel]');
+    }
+
+    removeOwnedPanelChildren(selector) {
+        const root = this.vintedPanelRoot();
+        root?.querySelectorAll?.(selector).forEach((element) => element.remove());
+    }
+
+    isVintedOwnedNodeConnected(node) {
+        if (!node) {
+            return false;
+        }
+        return document.contains(node)
+            || Boolean(this.currentPanelHost && document.contains(this.currentPanelHost) && this.currentPanelHost.contains?.(node))
+            || Boolean(this.currentPanelHost && document.contains(this.currentPanelHost) && this.currentPanel?.contains?.(node));
+    }
+
     renderCandidatePreview(results = []) {
-        document.querySelectorAll('[data-pokoin-candidate-preview]').forEach((element) => element.remove());
-        if (!this.currentButton || !document.contains(this.currentButton) || results.length === 0) {
+        this.removeOwnedPanelChildren('[data-pokoin-candidate-preview]');
+        if (!this.isVintedOwnedNodeConnected(this.currentButton) || results.length === 0) {
             return;
         }
 
-        const panel = this.currentButton.closest?.('[data-pokoin-vinted-panel]');
+        const panel = this.currentPanel || this.currentButton.closest?.('[data-pokoin-vinted-panel]');
         const preview = document.createElement('div');
         preview.setAttribute('data-pokoin-candidate-preview', 'true');
         preview.style.cssText = `
@@ -310,7 +365,7 @@ class VintedProcessor {
         if (panel) {
             panel.appendChild(preview);
         } else {
-            document.body.appendChild(preview);
+            this.ensureVintedPanel(this.currentTitleElement).appendChild(preview);
         }
     }
 
@@ -355,6 +410,42 @@ class VintedProcessor {
             pointerEvents: 'auto',
             fontFamily: 'Arial, sans-serif',
         };
+    }
+
+    vintedPanelBaseStyles() {
+        return {
+            all: 'initial',
+            boxSizing: 'border-box',
+            contain: 'layout style',
+            colorScheme: 'light',
+            pointerEvents: 'auto',
+            fontFamily: 'Arial, sans-serif',
+        };
+    }
+
+    vintedPanelResetStyles() {
+        return `
+            :host {
+                all: initial;
+                box-sizing: border-box;
+                contain: layout style;
+                color-scheme: light;
+                pointer-events: auto;
+                font-family: Arial, sans-serif;
+            }
+            *, *::before, *::after {
+                box-sizing: border-box;
+                font-family: Arial, sans-serif;
+            }
+            button {
+                appearance: none;
+                -webkit-appearance: none;
+                font: inherit;
+            }
+            img {
+                max-width: none;
+            }
+        `;
     }
 
     vintedFallbackPanelStyles() {
@@ -566,46 +657,100 @@ class VintedProcessor {
         return null;
     }
 
-    insertVintedPanelNearDetails(panel, titleElement) {
+    insertVintedPanelNearDetails(host, titleElement) {
         const detailsContainer = this.findVintedDetailsContainer(titleElement);
         if (!detailsContainer) {
             return false;
         }
 
-        Object.assign(panel.style, this.vintedInsertedPanelStyles());
-        panel.setAttribute('data-pokoin-vinted-placement', 'anchored');
+        Object.assign(host.style, this.vintedPanelBaseStyles(), this.vintedInsertedPanelStyles());
+        host.setAttribute('data-pokoin-vinted-placement', 'anchored');
 
         const actionArea = this.findVintedActionArea(detailsContainer);
         if (actionArea?.parentNode === detailsContainer) {
-            detailsContainer.insertBefore(panel, actionArea);
+            detailsContainer.insertBefore(host, actionArea);
             return true;
         }
 
         if (titleElement?.parentNode === detailsContainer && titleElement.nextSibling) {
-            detailsContainer.insertBefore(panel, titleElement.nextSibling);
+            detailsContainer.insertBefore(host, titleElement.nextSibling);
             return true;
         }
 
         if (titleElement?.parentNode === detailsContainer) {
-            detailsContainer.appendChild(panel);
+            detailsContainer.appendChild(host);
             return true;
         }
 
-        detailsContainer.appendChild(panel);
+        detailsContainer.appendChild(host);
         return true;
     }
 
-    ensureVintedPanel(titleElement = this.currentTitleElement) {
-        let panel = this.currentPanel || document.querySelector?.('[data-pokoin-vinted-panel]');
-        if (!panel) {
-            panel = document.createElement('div');
-            panel.setAttribute('data-pokoin-vinted-panel', 'true');
-            if (!this.insertVintedPanelNearDetails(panel, titleElement)) {
-                Object.assign(panel.style, this.vintedFallbackPanelStyles());
-                panel.setAttribute('data-pokoin-vinted-placement', 'fallback-fixed');
-                document.body.appendChild(panel);
-            }
+    placeVintedPanelHost(host, titleElement = this.currentTitleElement) {
+        if (this.insertVintedPanelNearDetails(host, titleElement)) {
+            return true;
         }
+
+        Object.assign(host.style, this.vintedPanelBaseStyles(), this.vintedFallbackPanelStyles());
+        host.setAttribute('data-pokoin-vinted-placement', 'fallback-fixed');
+        document.body.appendChild(host);
+        return false;
+    }
+
+    removeDuplicateVintedPanelHosts(ownedHost) {
+        document.querySelectorAll?.('[data-pokoin-vinted-panel-host]').forEach((host) => {
+            if (host !== ownedHost) {
+                host.remove();
+            }
+        });
+    }
+
+    scheduleVintedPanelReinsert() {
+        if (this.vintedReinsertTimer || typeof setTimeout !== 'function') {
+            return;
+        }
+
+        this.vintedReinsertTimer = setTimeout(() => {
+            this.vintedReinsertTimer = null;
+            this.ensureVintedPanel(this.currentTitleElement);
+        }, 100);
+    }
+
+    startVintedPanelObserver() {
+        if (this.vintedPanelObserver || typeof MutationObserver !== 'function' || !document.body) {
+            return;
+        }
+
+        this.vintedPanelObserver = new MutationObserver(() => {
+            if (this.currentPanelHost && !document.contains(this.currentPanelHost)) {
+                this.scheduleVintedPanelReinsert();
+            }
+        });
+        this.vintedPanelObserver.observe(document.body, { childList: true, subtree: true });
+    }
+
+    ensureVintedPanel(titleElement = this.currentTitleElement) {
+        let host = this.currentPanelHost;
+        let panel = this.findExistingVintedPanel(host);
+
+        if (!host || !panel) {
+            host = this.findExistingVintedPanelHost();
+            panel = this.findExistingVintedPanel(host);
+        }
+
+        if (!host || !panel) {
+            ({ host, panel } = this.createVintedOwnedPanelHost());
+        }
+
+        this.currentPanelHost = host;
+        this.currentPanel = panel;
+        this.removeDuplicateVintedPanelHosts(host);
+
+        if (!host.parentNode || !document.contains(host)) {
+            this.placeVintedPanelHost(host, titleElement);
+        }
+
+        this.startVintedPanelObserver();
         this.currentPanel = panel;
         return panel;
     }
@@ -726,7 +871,7 @@ class VintedProcessor {
     }
 
     renderKeywordToggles(title, description) {
-        document.querySelectorAll('[data-pokoin-vinted-keywords]').forEach((element) => element.remove());
+        this.removeOwnedPanelChildren('[data-pokoin-vinted-keywords]');
         this.currentKeywords = this.extractVintedKeywords(title, description);
         this.selectedKeywordValues = new Set(
             this.currentKeywords
@@ -807,7 +952,7 @@ class VintedProcessor {
     }
 
     updateButtonWithoutResults() {
-        if (!this.currentButton || !document.contains(this.currentButton)) {
+        if (!this.isVintedOwnedNodeConnected(this.currentButton)) {
             return;
         }
         this.setPokoinButtonLabel(this.currentButton);
@@ -970,7 +1115,7 @@ class VintedProcessor {
         const bestResult = results[0];
         
         // Ensure button is still in DOM
-        if (!document.contains(this.currentButton)) {
+        if (!this.isVintedOwnedNodeConnected(this.currentButton)) {
             console.log('⚠️ [VINT] Button is no longer in DOM');
             return;
         }

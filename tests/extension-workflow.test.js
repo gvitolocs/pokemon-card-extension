@@ -50,7 +50,7 @@ function loadProcessor(relativePath, className, overrides = {}) {
                 sendMessage: async () => ({ success: true, results: [] }),
             },
         },
-        MutationObserver: class {
+        MutationObserver: overrides.MutationObserver || class {
             observe() {}
         },
         Node: { ELEMENT_NODE: 1 },
@@ -120,6 +120,20 @@ function createDomElement(tagName = 'div', attributes = {}) {
             this.updateSiblings();
             return child;
         },
+        remove() {
+            if (this.parentNode?.children) {
+                this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
+                this.parentNode.updateSiblings?.();
+            }
+            this.parentNode = null;
+            this.parentElement = null;
+        },
+        attachShadow() {
+            const root = createDomElement('#shadow-root');
+            root.host = this;
+            this.shadowRoot = root;
+            return root;
+        },
         prepend(child) {
             child.parentNode = this;
             child.parentElement = this;
@@ -170,6 +184,21 @@ function createDomElement(tagName = 'div', attributes = {}) {
             if (selector.includes(',')) {
                 return selector.split(',').some((part) => this.matches(part.trim()));
             }
+            if (/^[^\[]+\s+/.test(selector)) {
+                const [ancestorSelector, ...descendantParts] = selector.split(/\s+/);
+                const descendantSelector = descendantParts.join(' ');
+                return this.matches(descendantSelector) && Boolean(this.parentElement?.closest?.(ancestorSelector));
+            }
+            if (/^[a-z]+\[data-testid="[^"]+"\]$/i.test(selector)) {
+                const [tagSelector] = selector.split('[');
+                const expectedTestId = selector.match(/\[data-testid="([^"]+)"\]/)?.[1];
+                return this.tagName === tagSelector.toUpperCase() && this.attributes['data-testid'] === expectedTestId;
+            }
+            if (/^[a-z]+\.[\w-]+(?:__[\w-]+)*/i.test(selector)) {
+                const [tagSelector, ...classParts] = selector.split('.');
+                const expectedClass = classParts.join('.');
+                return this.tagName === tagSelector.toUpperCase() && String(this.attributes.class || '').split(/\s+/).includes(expectedClass);
+            }
             const testId = selector.match(/\[data-testid="([^"]+)"\]/)?.[1];
             if (testId) {
                 return this.attributes['data-testid'] === testId;
@@ -185,18 +214,24 @@ function createDomElement(tagName = 'div', attributes = {}) {
                 const classFragment = selector.match(/\[class\*="([^"]+)"\]/)?.[1] || '';
                 return String(this.attributes.class || '').includes(classFragment);
             }
-            if (/^[a-z]+\[data-testid="[^"]+"\]$/i.test(selector)) {
-                const [tagSelector] = selector.split('[');
-                const expectedTestId = selector.match(/\[data-testid="([^"]+)"\]/)?.[1];
-                return this.tagName === tagSelector.toUpperCase() && this.attributes['data-testid'] === expectedTestId;
-            }
-            if (/^[a-z]+\.[\w-]+(?:__[\w-]+)*/i.test(selector)) {
-                const [tagSelector, ...classParts] = selector.split('.');
-                const expectedClass = classParts.join('.');
-                return this.tagName === tagSelector.toUpperCase() && String(this.attributes.class || '').split(/\s+/).includes(expectedClass);
-            }
             if (selector.startsWith('[data-pokoin-vinted-panel]')) {
                 return this.attributes['data-pokoin-vinted-panel'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-vinted-panel-host]')) {
+                return this.attributes['data-pokoin-vinted-panel-host'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-extension-panel]')) {
+                const expected = selector.match(/\[data-pokoin-extension-panel="([^"]+)"\]/)?.[1];
+                if (expected) {
+                    return this.attributes['data-pokoin-extension-panel'] === expected;
+                }
+                return this.attributes['data-pokoin-extension-panel'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-vinted-keywords]')) {
+                return this.attributes['data-pokoin-vinted-keywords'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-candidate-preview]')) {
+                return this.attributes['data-pokoin-candidate-preview'] !== undefined;
             }
             return false;
         },
@@ -378,6 +413,8 @@ test('Vinted keyword defaults select Pokemon-name-like clues only', () => {
             body: {
                 appendChild(element) {
                     appended.push(element);
+                    element.parentNode = this;
+                    element.parentElement = this;
                 },
             },
         },
@@ -549,6 +586,8 @@ test('Vinted placement prefers the product details/title container', () => {
             body: {
                 appendChild(element) {
                     bodyAppends.push(element);
+                    element.parentNode = this;
+                    element.parentElement = this;
                 },
             },
         },
@@ -557,11 +596,14 @@ test('Vinted placement prefers the product details/title container', () => {
 
     const panel = processor.ensureVintedPanel(title);
 
-    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'anchored');
-    assert.equal(panel.parentNode, details);
-    assert.equal(details.children.indexOf(panel), details.children.indexOf(actionArea) - 1);
+    assert.equal(panel.attributes['data-pokoin-extension-panel'], 'vinted-content');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'anchored');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-extension-panel'], 'vinted');
+    assert.equal(processor.currentPanelHost.parentNode, details);
+    assert.equal(details.children.indexOf(processor.currentPanelHost), details.children.indexOf(actionArea) - 1);
     assert.equal(bodyAppends.length, 0, 'anchored panel should not be fixed on body');
-    assert.equal(panel.style.position, 'static');
+    assert.equal(processor.currentPanelHost.style.position, 'static');
+    assert.ok(processor.currentPanelHost.shadowRoot, 'Vinted panel should use a shadow root when available');
 });
 
 test('Vinted fallback fixed panel is only used without a safe anchor', () => {
@@ -575,6 +617,8 @@ test('Vinted fallback fixed panel is only used without a safe anchor', () => {
             body: {
                 appendChild(element) {
                     bodyAppends.push(element);
+                    element.parentNode = this;
+                    element.parentElement = this;
                 },
             },
         },
@@ -583,13 +627,13 @@ test('Vinted fallback fixed panel is only used without a safe anchor', () => {
 
     const panel = processor.ensureVintedPanel(null);
 
-    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'fallback-fixed');
-    assert.equal(panel.style.position, 'fixed');
-    assert.equal(panel.style.left, '16px');
-    assert.equal(panel.style.bottom, '16px');
-    assert.equal(panel.style.right, 'auto');
-    assert.equal(panel.style.top, 'auto');
-    assert.equal(bodyAppends[0], panel);
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'fallback-fixed');
+    assert.equal(processor.currentPanelHost.style.position, 'fixed');
+    assert.equal(processor.currentPanelHost.style.left, '16px');
+    assert.equal(processor.currentPanelHost.style.bottom, '16px');
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.style.top, 'auto');
+    assert.equal(bodyAppends[0], processor.currentPanelHost);
 });
 
 test('Vinted chip and button share normal inserted details container', () => {
@@ -619,16 +663,124 @@ test('Vinted chip and button share normal inserted details container', () => {
     processor.createVintedPanelButton(title);
     processor.renderKeywordToggles('Carta Pokemon Dragonite', 'SWSH154 Evolving Skies');
 
-    const panel = details.children.find((child) => child.attributes['data-pokoin-vinted-panel'] === 'true');
+    const host = details.children.find((child) => child.attributes['data-pokoin-vinted-panel-host'] === 'true');
+    const panel = host.shadowRoot.querySelector('[data-pokoin-vinted-panel]');
     assert.ok(panel, 'panel should be inserted into item details');
-    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'anchored');
-    assert.equal(panel.style.position, 'static');
+    assert.equal(host.attributes['data-pokoin-vinted-placement'], 'anchored');
+    assert.equal(host.style.position, 'static');
     assert.ok(panel.children.some((child) => child.attributes['data-pokemon-linker-button'] === 'true'));
     assert.ok(panel.children.some((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true'));
     assert.match(
         panel.children.find((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true').style.cssText,
         /flex-wrap:\s*wrap/
     );
+});
+
+test('Vinted panel host owns an isolated shadow root with reset styles', () => {
+    const details = createDomElement('section', { 'data-testid': 'item-details' });
+    const title = createDomElement('h1', { 'data-testid': 'item-title' });
+    details.appendChild(title);
+
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+    });
+    const processor = new Processor();
+
+    const panel = processor.ensureVintedPanel(title);
+    const host = processor.currentPanelHost;
+    const resetStyle = host.shadowRoot.children.find((child) => child.tagName === 'STYLE');
+
+    assert.equal(host.attributes['data-pokoin-extension-panel'], 'vinted');
+    assert.equal(panel.attributes['data-pokoin-extension-panel'], 'vinted-content');
+    assert.equal(host.shadowRoot.contains(panel), true);
+    assert.match(resetStyle.textContent, /:host\s*\{/);
+    assert.match(resetStyle.textContent, /all:\s*initial/);
+    assert.equal(host.style.all, 'initial');
+    assert.equal(host.style.contain, 'layout style');
+});
+
+test('Vinted ensure panel reuses owned host and removes duplicates', () => {
+    const details = createDomElement('section', { 'data-testid': 'item-details' });
+    const title = createDomElement('h1', { 'data-testid': 'item-title' });
+    details.appendChild(title);
+
+    const duplicateHost = createDomElement('div', { 'data-pokoin-vinted-panel-host': 'true' });
+    details.appendChild(duplicateHost);
+
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: () => null,
+            querySelectorAll: (selector) => selector === '[data-pokoin-vinted-panel-host]'
+                ? details.querySelectorAll(selector)
+                : [],
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+    });
+    const processor = new Processor();
+
+    const firstPanel = processor.ensureVintedPanel(title);
+    const firstHost = processor.currentPanelHost;
+    const secondPanel = processor.ensureVintedPanel(title);
+
+    assert.equal(secondPanel, firstPanel);
+    assert.equal(processor.currentPanelHost, firstHost);
+    assert.equal(details.querySelectorAll('[data-pokoin-vinted-panel-host]').length, 1);
+    assert.equal(details.querySelectorAll('[data-pokoin-vinted-panel]').length, 0, 'shadow panel should not leak into page queries');
+});
+
+test('Vinted panel reinserts owned root after SPA removal', () => {
+    const details = createDomElement('section', { 'data-testid': 'item-details' });
+    const title = createDomElement('h1', { 'data-testid': 'item-title' });
+    const actionArea = createDomElement('div', { 'data-testid': 'item-actions' });
+    details.appendChild(title);
+    details.appendChild(actionArea);
+    let observerCallback = null;
+    let scheduledCallback = null;
+
+    class TestMutationObserver {
+        constructor(callback) {
+            observerCallback = callback;
+        }
+        observe() {}
+    }
+
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        MutationObserver: TestMutationObserver,
+        document: {
+            querySelector: () => null,
+            querySelectorAll: (selector) => selector === '[data-pokoin-vinted-panel-host]'
+                ? details.querySelectorAll(selector)
+                : [],
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: details,
+        },
+        setTimeout: (callback) => {
+            scheduledCallback = callback;
+            return 1;
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitleElement = title;
+    const panel = processor.ensureVintedPanel(title);
+    const host = processor.currentPanelHost;
+
+    host.remove();
+    observerCallback();
+    scheduledCallback();
+
+    assert.equal(processor.currentPanel, panel);
+    assert.equal(processor.currentPanelHost, host);
+    assert.equal(host.parentNode, details);
+    assert.equal(details.querySelectorAll('[data-pokoin-vinted-panel-host]').length, 1);
 });
 
 test('Vinted safe anchor selection ignores ad, header, and category placeholders', () => {
@@ -671,8 +823,8 @@ test('Vinted safe anchor selection ignores ad, header, and category placeholders
 
     assert.equal(anchor.titleElement, productTitle);
     assert.equal(anchor.detailsContainer, details);
-    assert.equal(panel.parentNode, details);
-    assert.equal(panel.attributes['data-pokoin-vinted-placement'], 'anchored');
+    assert.equal(processor.currentPanelHost.parentNode, details);
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'anchored');
 });
 
 test('Vinted processing waits when only top skeleton title exists', () => {

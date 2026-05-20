@@ -15,6 +15,7 @@
 11. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
 12. Direct CardTrader state stores a human card name for the side-panel header. If CardTrader only provides a URL-like title, the extension derives the name from the card URL slug instead of showing the long `cardtrader.com/...` path.
 13. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
+14. Vinted renders its Pokoin button, clue chips, and candidate preview inside an extension-owned root marked with `data-pokoin-extension-panel`. The root uses Shadow DOM when the browser supports it, with reset styles on the host and inside the shadow tree so Vinted page CSS cannot restyle the Pokoin controls.
 
 ## Match Resolution Flow
 
@@ -47,9 +48,10 @@
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
 7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
-8. Vinted renders the Pokoin button and clue chips inside one compact panel inserted into the product details/title block, before the listing action area when Vinted exposes one. Anchor selection is Vinted-specific: it prefers `item-title` inside `item-page-summary-plugin`, `item-details`, or related item detail containers, ignores ad placeholders, skeletons, global headers, nav, category rows, and feed/catalog containers, and waits briefly for the real details block when Vinted initially renders only the top ad/skeleton area.
-9. The Vinted chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution.
-10. Vinted uses a fixed fallback panel only after no safe item title/details anchor exists. That fallback sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
+8. Vinted renders the Pokoin button and clue chips inside one compact extension-owned panel inserted into the product details/title block, before the listing action area when Vinted exposes one. Anchor selection is Vinted-specific: it prefers `item-title` inside `item-page-summary-plugin`, `item-details`, or related item detail containers, ignores ad placeholders, skeletons, global headers, nav, category rows, and feed/catalog containers, and waits briefly for the real details block when Vinted initially renders only the top ad/skeleton area.
+9. The Vinted chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution. Those controls live inside the owned root, so page queries and Vinted CSS do not own or override them.
+10. Vinted keeps one owned root per page. A MutationObserver watches for Vinted SPA rerenders that remove the host, then reattaches the same host to the safe product anchor without duplicating panels or losing the current button/chip/candidate state.
+11. Vinted uses a fixed fallback panel only after no safe item title/details anchor exists. That fallback is isolated the same way as the anchored panel and sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
 
 ## Processor Boundaries
 
