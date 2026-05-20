@@ -418,10 +418,9 @@ function patchCardTraderCardPage() {
         return;
     }
 
-    const link = document.createElement('a');
+    const link = document.createElement('button');
     link.setAttribute('data-pokoin-cardtrader-button', 'true');
-    link.href = '#';
-    link.rel = 'noreferrer';
+    link.type = 'button';
     setPokoinButtonLabel(link);
     Object.assign(link.style, {
         marginLeft: '12px',
@@ -449,8 +448,9 @@ function patchCardTraderCardPage() {
     link.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation();
         openPokoinSidePanel();
-    });
+    }, true);
 
     titleElement.insertAdjacentElement('afterend', link);
     console.log(`✅ [CardTrader] Added Pokoin button for blueprint ${blueprintId}`);

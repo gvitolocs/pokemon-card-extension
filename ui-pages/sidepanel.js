@@ -24,6 +24,51 @@ function cardTraderUrl(blueprintId) {
     return `${CARDVAULT_API_BASE_URL}/api/cardtrader-redirect?id=${encodeURIComponent(blueprintId)}`;
 }
 
+function nameFromCardTraderSlug(value = '') {
+    const rawValue = String(value || '').trim();
+    let pathname = rawValue;
+
+    try {
+        pathname = new URL(rawValue).pathname;
+    } catch (error) {
+        pathname = rawValue;
+    }
+
+    const slug = pathname.match(/\/(?:[a-z]{2}\/)?cards\/\d+(?:-|\/)([^/?#]+)/i)?.[1] || '';
+    if (!slug) {
+        return '';
+    }
+
+    return decodeURIComponent(slug)
+        .replace(/[-_]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b(?:ex|gx|vmax|vstar|v|lv x)\b/gi, (match) => match.toUpperCase())
+        .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function isSlugLikeCardName(value = '') {
+    const cleanValue = String(value || '').trim();
+    return /^https?:\/\//i.test(cleanValue) ||
+        /cardtrader\.com/i.test(cleanValue) ||
+        /\/cards\/\d+/i.test(cleanValue);
+}
+
+function directCardDisplayName(pageInfo = {}, best = null, blueprintId = '') {
+    const structuredName = pageInfo.structuredCard?.name || '';
+    const bestName = best?.name || '';
+    const pageTitle = pageInfo.structuredCard?.title || pageInfo.title || '';
+
+    for (const candidate of [bestName, structuredName, pageTitle]) {
+        const cleanCandidate = String(candidate || '').replace(/\s+/g, ' ').trim();
+        if (cleanCandidate && !isSlugLikeCardName(cleanCandidate)) {
+            return cleanCandidate;
+        }
+    }
+
+    return nameFromCardTraderSlug(pageInfo.url || pageTitle || bestName) || `Blueprint ${blueprintId}`;
+}
+
 const expansionLogoCache = new Map();
 let expansionLogoPromise = null;
 
@@ -201,6 +246,8 @@ function renderState(state) {
 
     elements.frameSection.hidden = true;
     elements.candidatesSection.hidden = true;
+    elements.frameSection.classList.toggle('frame-section-direct', false);
+    document.body.classList.toggle('direct-card-view', false);
     elements.candidateList.replaceChildren();
 
     if (state?.error) {
@@ -230,10 +277,14 @@ function renderState(state) {
     }
 
     const pokoinUrl = state.pokoinUrl || cardUrl(blueprintId);
-    elements.cardName.textContent = best.name || `Blueprint ${blueprintId}`;
+    elements.cardName.textContent = isCardTraderDirect
+        ? directCardDisplayName(pageInfo, best, blueprintId)
+        : best.name || `Blueprint ${blueprintId}`;
     elements.pokoinFrame.src = pokoinUrl;
 
     elements.frameSection.hidden = false;
+    elements.frameSection.classList.toggle('frame-section-direct', isCardTraderDirect);
+    document.body.classList.toggle('direct-card-view', isCardTraderDirect);
     setStatus('');
 
     if (isCardTraderDirect) {

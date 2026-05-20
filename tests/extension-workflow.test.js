@@ -186,6 +186,31 @@ function createDomElement(tagName = 'div', attributes = {}) {
     return element;
 }
 
+function createClassListStub() {
+    const classes = new Set();
+    return {
+        classes,
+        add(name) {
+            classes.add(name);
+        },
+        remove(name) {
+            classes.delete(name);
+        },
+        toggle(name, force) {
+            const shouldAdd = force === undefined ? !classes.has(name) : Boolean(force);
+            if (shouldAdd) {
+                classes.add(name);
+            } else {
+                classes.delete(name);
+            }
+            return shouldAdd;
+        },
+        contains(name) {
+            return classes.has(name);
+        },
+    };
+}
+
 test('content search fetch failures warn and return empty results', async () => {
     const source = readRepoFile('content.js');
     const globalSearchStart = source.indexOf('// Search cards in database');
@@ -604,7 +629,6 @@ test('Vinted background candidates turn button green and render preview', async 
     assert.equal(appended.at(-1).previewResults[0].name_en, 'Dragonite V');
 });
 
-
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
     const icon = { style: {} };
     const button = createButtonStub();
@@ -909,6 +933,241 @@ test('CardTrader direct URL opens side panel without page scrape or API search',
     assert.equal(finalState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/12345');
     assert.equal(finalState.debug.searched, false);
     assert.equal(finalState.debug.directCardTrader, true);
+});
+
+test('CardTrader direct side panel state uses clean card name from URL slug', async () => {
+    const source = readRepoFile('config/background.js');
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            throw new Error('CardTrader direct path should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct path should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 7,
+        title: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+        url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+    });
+
+    const finalState = storageWrites.at(-1).sidePanelState;
+    assert.equal(result.best.name, 'Charizard EX');
+    assert.equal(finalState.pageInfo.title, 'Charizard EX');
+    assert.equal(finalState.pageInfo.structuredCard.name, 'Charizard EX');
+    assert.equal(finalState.best.name, 'Charizard EX');
+    assert.equal(finalState.debug.searched, true);
+    assert.equal(finalState.debug.cardtraderBlueprintId, '12345');
+});
+
+test('side panel renders direct CardTrader card as full panel with clean header', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const classList = createClassListStub();
+        const element = {
+            id,
+            textContent: '',
+            hidden: false,
+            src: '',
+            classList,
+            replaceChildren() {
+                this.children = [];
+            },
+            appendChild(child) {
+                this.children = [...(this.children || []), child];
+                return child;
+            },
+            addEventListener() {},
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: {
+            title: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+            url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+            structuredCard: {},
+            cardtraderBlueprintId: '12345',
+        },
+        best: {
+            card_id: '12345',
+            name: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+            source: 'cardtrader_url',
+        },
+        blueprintId: '12345',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/12345',
+        rows: [],
+    });
+
+    assert.equal(elementsById.get('cardName').textContent, 'Charizard EX');
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/12345');
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+});
+
+test('CardTrader injected button intercepts click and opens side panel workflow', async () => {
+    const source = readRepoFile('content.js');
+    const contentStart = source.indexOf('function pokoinIconUrl');
+    const functions = [
+        'function setPokoinButtonLabel(button) { button.innerHTML = "Pokoin.com"; }',
+        'function applyPokoinButtonStyles() {}',
+        extractFunctionSource(source, 'extractCardTraderBlueprintId', contentStart),
+        extractFunctionSource(source, 'patchCardTraderCardPage', contentStart),
+        extractFunctionSource(source, 'openPokoinSidePanel', contentStart),
+    ].join('\n');
+    const messages = [];
+    const listeners = {};
+    const titleElement = {
+        textContent: 'Charizard ex',
+        querySelector: () => null,
+        insertAdjacentElement(_position, element) {
+            this.insertedElement = element;
+        },
+    };
+    const titleBlock = {
+        querySelector: (selector) => selector === 'h2' ? titleElement : null,
+    };
+    const documentStub = {
+        title: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+        querySelector(selector) {
+            if (selector === '[data-pokoin-cardtrader-button]') {
+                return null;
+            }
+            if (selector === '.py-3.text-center.text-sm-left') {
+                return titleBlock;
+            }
+            if (selector === '.py-3.text-center.text-sm-left h2, h1, h2') {
+                return titleElement;
+            }
+            return null;
+        },
+        createElement(tagName) {
+            return {
+                tagName: tagName.toUpperCase(),
+                style: {},
+                attributes: {},
+                setAttribute(name, value) {
+                    this.attributes[name] = value;
+                },
+                querySelector: () => ({ style: {} }),
+                addEventListener(type, listener, options) {
+                    listeners[type] = { listener, options };
+                },
+            };
+        },
+    };
+    const sandbox = {
+        window: {
+            location: {
+                hostname: 'www.cardtrader.com',
+                pathname: '/en/cards/12345-charizard-ex',
+                href: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+            },
+        },
+        document: documentStub,
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        console: { log() {}, warn() {}, error() {} },
+    };
+    sandbox.window.window = sandbox.window;
+    vm.createContext(sandbox);
+    vm.runInContext(`${functions}\nthis.patchCardTraderCardPage = patchCardTraderCardPage;`, sandbox, { filename: 'content.js' });
+
+    sandbox.patchCardTraderCardPage();
+    const event = {
+        prevented: false,
+        stopped: false,
+        immediateStopped: false,
+        preventDefault() {
+            this.prevented = true;
+        },
+        stopPropagation() {
+            this.stopped = true;
+        },
+        stopImmediatePropagation() {
+            this.immediateStopped = true;
+        },
+    };
+    await listeners.click.listener(event);
+
+    assert.equal(titleElement.insertedElement.attributes['data-pokoin-cardtrader-button'], 'true');
+    assert.equal(listeners.click.options, true);
+    assert.equal(event.prevented, true);
+    assert.equal(event.stopped, true);
+    assert.equal(event.immediateStopped, true);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
+    assert.equal(messages[0].cardtraderBlueprintId, '12345');
+    assert.equal(messages[0].title, 'Charizard ex');
 });
 
 test('site processors use background fallback and side-panel opening', async () => {

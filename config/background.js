@@ -72,13 +72,44 @@ function cardtraderBlueprintIdFromUrl(url = '') {
     }
 }
 
+function cleanCardTraderDirectName(value = '', url = '', blueprintId = '') {
+    const cleanValue = String(value || '')
+        .replace(/\s*\|\s*CardTrader\s*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const looksLikeUrl = /^https?:\/\//i.test(cleanValue) ||
+        /cardtrader\.com/i.test(cleanValue) ||
+        /\/cards\/\d+/i.test(cleanValue);
+
+    if (cleanValue && !looksLikeUrl) {
+        return cleanValue;
+    }
+
+    try {
+        const pathname = new URL(url || cleanValue).pathname;
+        const slug = pathname.match(/\/(?:[a-z]{2}\/)?cards\/\d+(?:-|\/)([^/?#]+)/i)?.[1] || '';
+        if (slug) {
+            return decodeURIComponent(slug)
+                .replace(/[-_]+/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim()
+                .replace(/\b(?:ex|gx|vmax|vstar|v|lv x)\b/gi, (match) => match.toUpperCase())
+                .replace(/\b\w/g, (match) => match.toUpperCase());
+        }
+    } catch (error) {
+        // Fall through to the stable blueprint fallback.
+    }
+
+    return blueprintId ? `CardTrader card ${blueprintId}` : '';
+}
+
 function buildCardTraderDirectPageInfo(tab = {}) {
     const blueprintId = cardtraderBlueprintIdFromUrl(tab.url || '');
     if (!blueprintId) {
         return null;
     }
 
-    const title = String(tab.title || '').replace(/\s+/g, ' ').trim() || `CardTrader card ${blueprintId}`;
+    const title = cleanCardTraderDirectName(tab.title || '', tab.url || '', blueprintId);
     return {
         title,
         url: tab.url || '',
@@ -892,9 +923,20 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         try {
             debug.searched = true;
             if (pageInfo.cardtraderBlueprintId) {
+                const directName = cleanCardTraderDirectName(
+                    pageInfo.title || pageInfo.structuredCard?.name,
+                    pageInfo.url,
+                    pageInfo.cardtraderBlueprintId
+                );
+                pageInfo.title = directName;
+                pageInfo.structuredCard = {
+                    ...(pageInfo.structuredCard || {}),
+                    name: directName,
+                    searchName: directName,
+                };
                 rows = [{
                     card_id: pageInfo.cardtraderBlueprintId,
-                    name: pageInfo.structuredCard?.name || pageInfo.title,
+                    name: directName,
                     set_name: pageInfo.structuredCard?.expansion || '',
                     card_number: pageInfo.structuredCard?.collectorNumber || '',
                     source: 'cardtrader_url',
@@ -1063,7 +1105,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
                 const requestTitle = buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
                 if (directCardTraderBlueprintId) {
-                    const directName = currentTitle || `CardTrader card ${directCardTraderBlueprintId}`;
+                    const directName = cleanCardTraderDirectName(currentTitle, currentUrl, directCardTraderBlueprintId);
                     const directRow = {
                         card_id: directCardTraderBlueprintId,
                         name: directName,

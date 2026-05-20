@@ -12,7 +12,8 @@
 8. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
 9. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
 10. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
-11. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
+11. Direct CardTrader state stores a human card name for the side-panel header. If CardTrader only provides a URL-like title, the extension derives the name from the card URL slug instead of showing the long `cardtrader.com/...` path.
+12. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
 
 ## Match Resolution Flow
 
@@ -51,3 +52,5 @@
 ## CardTrader Direct Path
 
 CardTrader was slower when the side panel opened because the background service worker still executed the generic page-title scraping path before it noticed the URL contained a blueprint id. The direct path now checks CardTrader URLs before injecting any page script or calling Cardvault APIs, writes the side-panel state with `source: cardtrader_url`, and opens the common side panel immediately.
+
+When direct CardTrader state is rendered, the side panel treats it as a full card page view: candidates remain hidden, the embedded Pokoin card page fills the remaining panel space, and the header uses a clean card name from the page title, structured card data, or URL slug fallback.
