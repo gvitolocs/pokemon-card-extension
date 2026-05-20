@@ -71,11 +71,6 @@ class VintedProcessor {
             font-family: Arial, sans-serif;
         `;
 
-        const title = document.createElement('div');
-        title.textContent = 'Best candidates';
-        title.style.cssText = 'font-size:13px;font-weight:800;margin-bottom:8px;';
-        preview.appendChild(title);
-
         results.slice(0, 8).forEach((result) => {
             const row = document.createElement('button');
             row.type = 'button';
@@ -259,7 +254,7 @@ class VintedProcessor {
                     });
                 }
             }).catch(error => {
-                console.error('❌ [VINT] Database lookup error:', error);
+                console.warn('⚠️ [VINT] Content search unavailable, trying background search:', error);
                 this.searchCardWithBackground(title).then((backgroundResults) => {
                     if (backgroundResults.length > 0) {
                         console.log(`✅ [VINT] Background fallback returned ${backgroundResults.length} results`);
@@ -573,7 +568,7 @@ class VintedProcessor {
                 console.log(`🔍 [VINT] Result length:`, results ? results.length : 'null/undefined');
                 return results;
             } catch (error) {
-                console.error(`❌ [VINT] Error in global searchCardInDatabase call:`, error);
+                console.warn(`⚠️ [VINT] Global searchCardInDatabase unavailable:`, error);
                 return [];
             }
         }

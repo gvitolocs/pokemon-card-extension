@@ -34,6 +34,15 @@ class EbayProcessor {
         return results.filter((result) => this.isHighConfidenceMatch(result)).length;
     }
 
+    async searchCardWithBackground(title) {
+        const response = await chrome.runtime.sendMessage({
+            action: 'searchCardForTitle',
+            title,
+            url: window.location.href,
+        });
+        return response?.success && Array.isArray(response.results) ? response.results : [];
+    }
+
     openPokoinSidePanel() {
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
@@ -394,11 +403,20 @@ class EbayProcessor {
      * Search database (delegates to `content.js`)
      */
     async searchCardInDatabase(titleInfo, title) {
-        // Delegate to global function when available
+        let results = [];
         if (typeof window.searchCardInDatabase === 'function') {
-            return await window.searchCardInDatabase(titleInfo, title);
+            try {
+                results = await window.searchCardInDatabase(titleInfo, title);
+            } catch (error) {
+                console.warn('⚠️ [EBAYE] Content search unavailable, using background search:', error);
+            }
         }
-        return [];
+
+        if (Array.isArray(results) && results.length > 0) {
+            return results;
+        }
+
+        return this.searchCardWithBackground(title);
     }
 
     /**

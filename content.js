@@ -2950,9 +2950,9 @@ function extractTitleInfo(title) {
 async function searchCardInDatabase(titleInfo, originalTitle = '') {
     try {
         const enrichedTitleInfo = await enrichTitleInfoWithCardvaultName(titleInfo, originalTitle);
-        return searchPokoinCardApi(enrichedTitleInfo, originalTitle);
+        return await searchPokoinCardApi(enrichedTitleInfo, originalTitle);
     } catch (error) {
-        console.error('❌ [CardTrader] Error during search:', error);
+        console.warn('⚠️ [Pokoin] Content search unavailable; processor/background fallback can continue:', error);
         return [];
     }
 }
