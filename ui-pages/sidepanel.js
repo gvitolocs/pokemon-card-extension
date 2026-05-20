@@ -8,6 +8,7 @@ const elements = {
     pokoinFrame: document.getElementById('pokoinFrame'),
     candidatesSection: document.getElementById('candidatesSection'),
     candidateList: document.getElementById('candidateList'),
+    debugSection: document.getElementById('debugSection'),
     debugOutput: document.getElementById('debugOutput'),
 };
 
@@ -249,9 +250,11 @@ function renderState(state) {
     const pageInfo = state?.pageInfo || {};
     const best = state?.best || null;
     const blueprintId = state?.blueprintId || best?.card_id || '';
+    const isCardTraderDirect = Boolean(pageInfo.cardtraderBlueprintId || best?.source === 'cardtrader_url');
 
     elements.frameSection.hidden = true;
     elements.candidatesSection.hidden = true;
+    elements.debugSection.hidden = false;
     elements.candidateList.replaceChildren();
     renderDebug(state);
 
@@ -287,6 +290,11 @@ function renderState(state) {
 
     elements.frameSection.hidden = false;
     setStatus('');
+
+    if (isCardTraderDirect) {
+        elements.debugSection.hidden = true;
+        return;
+    }
 
     const rows = state.rows?.length ? state.rows : [best];
     const candidates = sortCandidates(rows).slice(0, 5);
