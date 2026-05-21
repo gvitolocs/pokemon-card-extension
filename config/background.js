@@ -1318,9 +1318,9 @@ function hasExactSearchFastPath(structuredCard = {}) {
 function collectorNumberForExtensionPayload(structuredCard = {}) {
     const collectorNumber = structuredCard.collectorNumber || structuredCard.printedCollectorNumber || '';
     if (
-        /^POR$/i.test(structuredCard.collectorNumberPrefix || '') &&
+        /^(?:POR|TR)$/i.test(structuredCard.collectorNumberPrefix || '') &&
         structuredCard.numericCollectorNumber &&
-        compactSetValue(structuredCard.expansion || '') === 'perfectorder'
+        ['perfectorder', 'teamrocket'].includes(compactSetValue(structuredCard.expansion || ''))
     ) {
         return structuredCard.numericCollectorNumber;
     }

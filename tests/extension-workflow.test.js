@@ -3106,7 +3106,8 @@ test('Cardmarket Meowth TR 62 exact Team Rocket match ends after exact phase', a
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
                 assert.equal(body.name, 'Meowth');
-                assert.equal(body.collectorNumber, 'TR 62');
+                assert.equal(body.collectorNumber, '62');
+                assert.equal(body.printedCollectorNumber, 'TR 62');
                 assert.equal(body.expansion, 'Team Rocket');
                 return {
                     ok: true,
