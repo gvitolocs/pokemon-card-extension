@@ -168,6 +168,7 @@ function buildCardTraderDirectPageInfo(tab = {}) {
 async function extractTitleFromPage() {
     const hostname = window.location.hostname;
     const startedAt = Date.now();
+    const isCardmarketPage = hostname.includes('cardmarket');
     const selectorMap = {
         vinted: [
             '[data-testid="item-page-summary-plugin"] h1.web_ui__Text__title',
@@ -200,7 +201,7 @@ async function extractTitleFromPage() {
         ? selectorMap.vinted
         : hostname.includes('ebay')
             ? selectorMap.ebay
-            : hostname.includes('cardmarket')
+            : isCardmarketPage
                 ? selectorMap.cardmarket
                 : hostname.includes('cardtrader')
                     ? selectorMap.cardtrader
@@ -209,17 +210,65 @@ async function extractTitleFromPage() {
     const selectorChecks = [];
     let titleSource = '';
 
+    const isPokoinOwnedElement = (element) => Boolean(element?.closest?.(
+        '[data-pokemon-linker-button], [data-pokoin-extension-panel], [data-pokoin-vinted-panel], [data-pokoin-vinted-panel-host], [data-pokoin-candidate-preview]'
+    ));
+
+    const cleanElementText = (element) => {
+        if (!element) {
+            return '';
+        }
+        const clone = element.cloneNode?.(true);
+        if (clone?.querySelectorAll) {
+            [...clone.querySelectorAll('[data-pokemon-linker-button], [data-pokoin-extension-panel], [data-pokoin-vinted-panel], [data-pokoin-vinted-panel-host], [data-pokoin-candidate-preview], button, input, iframe')]
+                .forEach((child) => child.remove?.());
+        }
+        return cleanCardmarketText((clone?.textContent || element.textContent || '').replace(/\s+/g, ' '));
+    };
+
+    const findCardmarketTitleElement = () => {
+        const titleElements = [
+            ...document.querySelectorAll('.page-title-container h1'),
+            ...document.querySelectorAll('main h1'),
+            ...document.querySelectorAll('h1'),
+        ];
+        return titleElements.find((element) => {
+            if (!element || isPokoinOwnedElement(element)) {
+                return false;
+            }
+            const text = cleanElementText(element);
+            return /\([A-Z0-9]{1,6}\s*\d{1,4}[a-z]?\)/i.test(text) ||
+                Boolean(element.closest?.('.page-title-container'));
+        }) || null;
+    };
+
     const readPageTitle = () => {
         selectorChecks.length = 0;
+        if (isCardmarketPage) {
+            const titleElement = findCardmarketTitleElement();
+            const title = cleanElementText(titleElement);
+            selectorChecks.push({
+                selector: 'cardmarket-page-title',
+                found: Boolean(titleElement),
+                text: title ? title.replace(/\s+/g, ' ').slice(0, 160) : '',
+            });
+            if (title) {
+                titleSource = 'cardmarket-page-title';
+                return title;
+            }
+        }
+
         for (const selector of selectors) {
             const element = document.querySelector(selector);
-            const title = element?.textContent?.trim();
+            const title = isCardmarketPage
+                ? cleanElementText(element)
+                : element?.textContent?.trim();
             selectorChecks.push({
                 selector,
                 found: Boolean(element),
                 text: title ? title.replace(/\s+/g, ' ').slice(0, 160) : '',
             });
-            if (title) {
+            if (title && (!isCardmarketPage || !isPokoinOwnedElement(element))) {
                 titleSource = selector;
                 return title.replace(/\s+/g, ' ');
             }
@@ -248,7 +297,7 @@ async function extractTitleFromPage() {
     }
 
     const finalTitle = title || document.title.replace(/\s+/g, ' ').trim();
-    const cardmarketContext = hostname.includes('cardmarket')
+    const cardmarketContext = isCardmarketPage
         ? scrapeCardmarketContext(finalTitle)
         : null;
     const structuredCard = scrapeStructuredCardFields(finalTitle, cardmarketContext);
@@ -295,6 +344,42 @@ function isCardmarketExpansionText(value = '') {
     );
 }
 
+function normalizeCardmarketDetailLabel(value = '') {
+    return String(value || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function scrapeCardmarketDetailFields() {
+    const labels = {
+        number: new Set(['numero', 'number', 'nr', 'no']),
+        expansion: new Set(['stampata in', 'printed in', 'expansion', 'espansione', 'set']),
+        species: new Set(['specie', 'species']),
+        rarity: new Set(['rarita', 'rarity']),
+    };
+    const fields = {};
+    const detailRoot = document.querySelector('main.container #mainContent, #mainContent, main.container, main') || document;
+    const candidates = [...detailRoot.querySelectorAll('dl.labeled dt, dl.labeled th, dl.labeled strong, dl.labeled b, dt, th')];
+
+    for (const element of candidates) {
+        const label = normalizeCardmarketDetailLabel(element.textContent || '');
+        const fieldName = Object.entries(labels).find(([, values]) => values.has(label))?.[0];
+        if (!fieldName || fields[fieldName]) {
+            continue;
+        }
+        const valueElement = element.nextElementSibling || element.parentElement?.querySelector?.('dd, td, .col-6:last-child, .col-md-8, .col-md-9');
+        const value = cleanCardmarketText(valueElement?.textContent || '');
+        if (value && normalizeCardmarketDetailLabel(value) !== label) {
+            fields[fieldName] = value;
+        }
+    }
+
+    return fields;
+}
+
 function scrapeCardmarketContext(title = '') {
     const subtitleFromHeadingSpan = [...document.querySelectorAll('.page-title-container h1 span, h1 span.h4, h1 .text-muted')]
         .map((element) => element.textContent || '')
@@ -319,11 +404,13 @@ function scrapeCardmarketContext(title = '') {
     const documentTitleExpansion = cleanCardmarketText(title)
         .replace(/\s*\|\s*Cardmarket\s*$/i, '')
         .match(/\)\s*[-–]\s*(.+?)(?:\s*[-–]\s*Singles?)?$/i)?.[1] || '';
+    const details = scrapeCardmarketDetailFields();
 
     return {
         subtitle: subtitleFromHeadingSpan || subtitle,
         breadcrumbParts,
-        expansion: subtitleFromHeadingSpan || subtitle || pageUrlExpansion || expansionFromBreadcrumb || cleanCardmarketText(documentTitleExpansion),
+        details,
+        expansion: details.expansion || subtitleFromHeadingSpan || subtitle || pageUrlExpansion || expansionFromBreadcrumb || cleanCardmarketText(documentTitleExpansion),
     };
 }
 
@@ -337,7 +424,12 @@ function normalizeExpansionAlias(value = '') {
 }
 
 function parseCardmarketCollectorCode(value = '') {
-    const match = String(value || '').match(/\b([A-Z0-9]{1,6})?\s*(\d{1,4}[a-z]?)\b/i);
+    const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
+    if (/^\d{1,4}[a-z]?$/i.test(cleanValue)) {
+        return { collectorNumber: cleanValue, printedNumber: cleanValue };
+    }
+
+    const match = cleanValue.match(/\b([A-Z0-9]*[A-Z][A-Z0-9]{0,5})?\s*(\d{1,4}[a-z]?)\b/i);
     if (!match) {
         return { collectorNumber: '', printedNumber: '' };
     }
@@ -377,13 +469,18 @@ function scrapeStructuredCardFields(title = '', context = null) {
     const cardmarketMatch = cleanTitle.match(/^(.+?)\s*\((?:([A-Z0-9]{1,6})\s*)?(\d{1,4}[a-z]?)\)\s*(?:[-–]?\s*(.+?))?$/i);
     if (cardmarketMatch) {
         const [, cardName, cardPrefix, cardNumber, trailingExpansion] = cardmarketMatch;
-        const printedCollectorNumber = cardPrefix ? `${cardPrefix.toUpperCase()} ${cardNumber}` : cardNumber;
+        const detailsCollector = typeof parseCardmarketCollectorCode === 'function'
+            ? parseCardmarketCollectorCode(context?.details?.number || '')
+            : { collectorNumber: '', printedNumber: '' };
+        const titleCollectorNumber = cardPrefix ? `${cardPrefix.toUpperCase()} ${cardNumber}` : cardNumber;
+        const printedCollectorNumber = cardPrefix ? titleCollectorNumber : (detailsCollector.collectorNumber || titleCollectorNumber);
+        const numericCollectorNumber = detailsCollector.printedNumber || cardNumber;
         const expansion = normalizeExpansionAlias(cleanCardmarketText(
             context?.expansion ||
             trailingExpansion ||
             ''
         ));
-        const cleanName = removeMarketplaceSearchNoise(cardName);
+        const cleanName = removeMarketplaceSearchNoise(context?.details?.species || cardName);
 
         return {
             rawTitle: cleanTitle,
@@ -391,7 +488,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
             collectorNumber: printedCollectorNumber,
             collectorNumberPrefix: cardPrefix?.toUpperCase() || '',
             printedCollectorNumber,
-            numericCollectorNumber: cardNumber,
+            numericCollectorNumber,
             expansion,
             rarity: '',
             variation: '',
@@ -1652,6 +1749,7 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 }
 
 async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
+    const resolveStartedAt = Date.now();
     let pageInfo;
     let pageInfoError = '';
     try {
@@ -1801,10 +1899,20 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     }
 
     const { sidePanelState: latestSidePanelState } = await chrome.storage.session.get('sidePanelState');
+    const latestStateUrl = latestSidePanelState?.pageInfo?.url || '';
     if (
-        isLockedCardTraderDirectState(latestSidePanelState, latestSidePanelState?.pageInfo?.url || '') &&
+        latestSidePanelState?.updatedAt > resolveStartedAt &&
+        latestStateUrl &&
+        !sameUrlWithoutHash(latestStateUrl, pageInfo.url || tab?.url || '') &&
+        isSupportedMarketplaceUrl(latestStateUrl)
+    ) {
+        console.log('ℹ️ [Background] Ignored stale side panel result behind newer page state');
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+    if (
+        isLockedCardTraderDirectState(latestSidePanelState, latestStateUrl) &&
         !pageInfo.cardtraderBlueprintId &&
-        !sameCardTraderDirectBlueprint(latestSidePanelState?.pageInfo?.url || '', pageInfo.url || tab?.url || '')
+        !sameCardTraderDirectBlueprint(latestStateUrl, pageInfo.url || tab?.url || '')
     ) {
         console.log('ℹ️ [Background] Ignored stale refresh behind CardTrader direct state');
         return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
@@ -2144,6 +2252,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     url: currentUrl || tab.url,
                     title: requestTitle || currentTitle || tab.title,
                 }, {
+                    expectedUrl: currentUrl || tab.url || '',
                     originalTitle: request.originalTitle || currentTitle,
                     clues: requestClues,
                     primaryClues: requestPrimaryClues,

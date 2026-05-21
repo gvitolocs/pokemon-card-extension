@@ -1987,6 +1987,151 @@ test('Cardmarket matched button remains visually distinct after relabel', () => 
     assert.match(button.style.boxShadow, /14, 165, 233/);
 });
 
+function createCardmarketFixture({ includeDetails = true, includeButton = false } = {}) {
+    const main = createDomElement('main', { class: 'container' });
+    const mainContent = createDomElement('div', { id: 'mainContent' });
+    const titleContainer = createDomElement('div', { class: 'page-title-container' });
+    const h1 = createDomElement('h1');
+    h1.textContent = 'Piplup (MEP 042)';
+    const actionArea = createDomElement('div', { class: 'ms-auto' });
+    titleContainer.appendChild(h1);
+    titleContainer.appendChild(actionArea);
+    mainContent.appendChild(titleContainer);
+
+    const section = createDomElement('section', { id: 'tabs' });
+    const dl = createDomElement('dl', { class: 'labeled' });
+    if (includeDetails) {
+        [
+            ['Numero', '042'],
+            ['Stampata in', 'MEP Black Star Promos'],
+            ['Specie', 'Piplup'],
+        ].forEach(([label, value]) => {
+            const dt = createDomElement('dt');
+            dt.textContent = label;
+            const dd = createDomElement('dd');
+            dd.textContent = value;
+            dt.nextElementSibling = dd;
+            dl.appendChild(dt);
+            dl.appendChild(dd);
+        });
+    }
+    section.appendChild(dl);
+    mainContent.appendChild(section);
+
+    const articleRow = createDomElement('div', { class: 'article-row' });
+    articleRow.textContent = 'Red Card 012 HMD comment filter seller';
+    mainContent.appendChild(articleRow);
+    main.appendChild(mainContent);
+
+    if (includeButton) {
+        const existingButton = createDomElement('button', { 'data-pokemon-linker-button': 'true' });
+        existingButton.textContent = 'Pokoin.com (1)';
+        actionArea.appendChild(existingButton);
+    }
+
+    return {
+        main,
+        mainContent,
+        titleContainer,
+        h1,
+        actionArea,
+        dl,
+        articleRow,
+        querySelector(selector) {
+            if (selector === 'main.container #mainContent' || selector === '#mainContent') return mainContent;
+            if (selector === 'main.container' || selector === 'main') return main;
+            if (selector === '.page-title-container h1') return h1;
+            if (selector === '[data-pokemon-linker-button="true"]') return main.querySelector('[data-pokemon-linker-button]');
+            return main.querySelector(selector);
+        },
+        querySelectorAll(selector) {
+            if (selector === 'dl.labeled dt, dl.labeled th, dt, th') {
+                return includeDetails ? dl.children.filter((child) => child.tagName === 'DT') : [];
+            }
+            return main.querySelectorAll(selector);
+        },
+        createElement: (tagName) => createDomElement(tagName),
+        body: main,
+        contains: (element) => main.contains(element),
+        title: 'Piplup (MEP 042) | Cardmarket',
+    };
+}
+
+test('Cardmarket product injection waits for title and labeled identity details', async () => {
+    const messages = [];
+    const { Processor, sandbox } = loadProcessor('processors/CME.js', 'CardmarketProcessor', {
+        window: {
+            location: {
+                href: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                hostname: 'www.cardmarket.com',
+                pathname: '/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+            extractTitleInfo: (title) => ({ pokemonName: /Piplup/i.test(title) ? 'Piplup' : null }),
+        },
+        document: createCardmarketFixture({ includeDetails: false }),
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+        setTimeout: (fn) => {
+            sandbox.pendingRetry = fn;
+            return 1;
+        },
+        clearTimeout() {},
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    assert.equal(messages.length, 0);
+    assert.equal(sandbox.document.querySelector('[data-pokemon-linker-button="true"]'), null);
+
+    sandbox.document = createCardmarketFixture({ includeDetails: true });
+    processor.processProductPage();
+    await Promise.resolve();
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].title, 'Piplup (MEP 042)');
+    assert.ok(sandbox.document.querySelector('[data-pokemon-linker-button="true"]'));
+});
+
+test('Cardmarket product injection is once per stable ready product URL', async () => {
+    const messages = [];
+    const documentStub = createCardmarketFixture({ includeDetails: true });
+    const { Processor } = loadProcessor('processors/CME.js', 'CardmarketProcessor', {
+        window: {
+            location: {
+                href: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042?foo=1#seller',
+                hostname: 'www.cardmarket.com',
+                pathname: '/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+            extractTitleInfo: () => ({ pokemonName: 'Piplup' }),
+        },
+        document: documentStub,
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    processor.processProductPage();
+    await Promise.resolve();
+
+    assert.equal(messages.length, 1);
+    assert.equal(documentStub.actionArea.querySelectorAll('[data-pokemon-linker-button]').length, 1);
+});
+
 test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
@@ -2062,6 +2207,70 @@ test('Cardmarket provided title HTML yields name, prefixed collector, and span e
     assert.match(queryTitle, /\b042\b/);
     assert.match(queryTitle, /MEP Black Star Promos/);
     assert.doesNotMatch(structured.rawTitle, /Pokoin\.com/);
+});
+
+test('Cardmarket Italian product DOM extracts exact Piplup title and ignores extension noise', async () => {
+    const fixture = createCardmarketFixture({ includeDetails: true });
+    const h1 = fixture.h1;
+    const span = createDomElement('span', { class: 'h4 text-muted fst-italic fw-normal' });
+    span.textContent = ' MEP Black Star Promos - Singles';
+    h1.appendChild(span);
+    const pokoinButton = createDomElement('button', { 'data-pokemon-linker-button': 'true' });
+    pokoinButton.textContent = 'Pokoin.com (1) Red Card';
+    h1.appendChild(pokoinButton);
+
+    const redCardSidebar = createDomElement('div', { 'data-pokoin-extension-panel': 'true' });
+    redCardSidebar.textContent = 'Red Card 012 HMD';
+    const searchInput = createDomElement('input');
+    searchInput.textContent = 'Red Card';
+    const iframe = createDomElement('iframe');
+    iframe.textContent = 'Japanese Red Card';
+
+    const documentStub = {
+        ...fixture,
+        title: 'Piplup (MEP 042) | Cardmarket',
+        readyState: 'complete',
+        body: { innerText: 'Prodotti Piplup (MEP 042) Numero 042 Stampata in MEP Black Star Promos Specie Piplup Red Card' },
+        querySelector: (selector) => {
+            if (selector === 'main.container #mainContent' || selector === '#mainContent') return fixture.mainContent;
+            if (selector === 'main.container' || selector === 'main') return fixture.main;
+            if (selector === '.page-title-container h1' || selector === 'h1') return h1;
+            if (selector === '.page-title-container h1 + div, .page-title-container .font-italic, .page-title-container em, .page-title-container small') return null;
+            if (selector === 'meta[property="og:title"], meta[name="twitter:title"]') return null;
+            return fixture.querySelector(selector);
+        },
+        querySelectorAll: (selector) => {
+            if (selector === '.page-title-container h1') return [h1];
+            if (selector === 'main h1') return [];
+            if (selector === 'h1') return [h1];
+            if (selector === '.page-title-container h1 span, h1 span.h4, h1 .text-muted') return [pokoinButton, span];
+            if (selector === '.breadcrumb a, nav a') return [];
+            if (selector.includes('[data-pokoin-extension-panel]')) return [redCardSidebar];
+            if (selector === 'input') return [searchInput];
+            if (selector === 'iframe') return [iframe];
+            return fixture.querySelectorAll(selector);
+        },
+    };
+
+    const sandbox = loadBackgroundHelpers(['extractTitleFromPage']);
+    sandbox.window = {
+        location: {
+            hostname: 'www.cardmarket.com',
+            href: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+        },
+    };
+    sandbox.document = documentStub;
+
+    const pageInfo = await sandbox.extractTitleFromPage();
+
+    assert.equal(pageInfo.title, 'Piplup (MEP 042)');
+    assert.equal(pageInfo.structuredCard.name, 'Piplup');
+    assert.equal(pageInfo.structuredCard.collectorNumber, 'MEP 042');
+    assert.equal(pageInfo.structuredCard.numericCollectorNumber, '042');
+    assert.equal(pageInfo.structuredCard.expansion, 'MEP Black Star Promos');
+    assert.equal(pageInfo.debug.titleSource, 'cardmarket-page-title');
+    assert.equal(pageInfo.debug.cardmarketContext.details.number, '042');
+    assert.doesNotMatch(pageInfo.title, /Red Card|Pokoin|012|HMD/i);
 });
 
 test('Cardmarket structured parser keeps trainer composite card names', () => {
@@ -2945,6 +3154,110 @@ test('Cardmarket side panel refresh clears loading after search failure', async 
     assert.equal(finalState.loading, undefined);
     assert.equal(finalState.error, 'network down');
     assert.equal(finalState.rows.length, 0);
+});
+
+test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state', async () => {
+    const source = readRepoFile('config/background.js');
+    const storageWrites = [];
+    const piplupUrl = 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042';
+    const staleRedCardUrl = 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Holo-McDonalds/Red-Card-HMD012';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: 'red-card',
+                            name: 'Red Card',
+                            expansionName: 'Holo McDonalds',
+                            collectorNumber: '012',
+                            score: 99,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Red Card (HMD 012)',
+                        url: staleRedCardUrl,
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: {
+                            rawTitle: 'Red Card (HMD 012)',
+                            name: 'Red Card',
+                            searchName: 'Red Card',
+                            collectorNumber: 'HMD 012',
+                            numericCollectorNumber: '012',
+                            expansion: 'Holo McDonalds',
+                        },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async () => ({
+                        sidePanelState: {
+                            updatedAt: Date.now() + 1000,
+                            pageInfo: {
+                                title: 'Piplup (MEP 042)',
+                                url: piplupUrl,
+                            },
+                            rows: [{
+                                card_id: 'mep-042',
+                                name: 'Piplup',
+                                set_name: 'MEP Black Star Promos',
+                                card_number: 'MEP 042',
+                            }],
+                            best: { card_id: 'mep-042', name: 'Piplup' },
+                            blueprintId: 'mep-042',
+                        },
+                    }),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 8,
+        title: 'Red Card (HMD 012)',
+        url: staleRedCardUrl,
+    });
+
+    assert.equal(result.stale, true);
+    assert.equal(result.pageInfo.structuredCard.name, 'Red Card');
+    assert.equal(storageWrites.length, 0, 'stale Red Card result must not write sidePanelState over Piplup');
 });
 
 test('background clue helpers remove generic card words from request titles', () => {

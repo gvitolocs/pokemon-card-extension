@@ -7,6 +7,8 @@ class CardmarketProcessor {
     constructor() {
         this.isEnabled = true;
         this.processedPages = new Set();
+        this.inFlightProductSearches = new Map();
+        this.readyRetryTimers = new Map();
     }
 
     pokoinIconUrl() {
@@ -127,7 +129,7 @@ class CardmarketProcessor {
         
         // Process immediately if current page is a product page
         if (this.isProductPage()) {
-            this.processProductPage();
+            this.scheduleProductPageProcessing('init');
         }
         
         // Start observer for new listings
@@ -143,47 +145,122 @@ class CardmarketProcessor {
                 document.querySelector('.page-title-container h1'));
     }
 
+    stableProductKey() {
+        try {
+            const url = new URL(window.location.href);
+            url.search = '';
+            url.hash = '';
+            return url.href.replace(/\/+$/, '');
+        } catch (error) {
+            return String(window.location.href || '').split('#')[0].split('?')[0].replace(/\/+$/, '');
+        }
+    }
+
+    normalizeDetailLabel(value = '') {
+        return String(value || '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+    }
+
+    findProductRoot() {
+        return document.querySelector('main.container #mainContent, #mainContent, main.container, main') || document;
+    }
+
+    extractProductDetailFields() {
+        const root = this.findProductRoot();
+        const labels = {
+            number: new Set(['numero', 'number', 'nr', 'no']),
+            expansion: new Set(['stampata in', 'printed in', 'expansion', 'espansione', 'set']),
+        };
+        const fields = {};
+        const detailLabels = root?.querySelectorAll
+            ? [...root.querySelectorAll('dl.labeled dt, dl.labeled th, dt, th')]
+            : [];
+
+        for (const element of detailLabels) {
+            const label = this.normalizeDetailLabel(element.textContent || '');
+            const fieldName = Object.entries(labels).find(([, values]) => values.has(label))?.[0];
+            if (!fieldName || fields[fieldName]) {
+                continue;
+            }
+            const valueElement = element.nextElementSibling || element.parentElement?.querySelector?.('dd, td');
+            const value = (valueElement?.textContent || '').replace(/\s+/g, ' ').trim();
+            if (value && this.normalizeDetailLabel(value) !== label) {
+                fields[fieldName] = value;
+            }
+        }
+
+        return fields;
+    }
+
+    getReadyProductContext() {
+        const titleElement = document.querySelector('.page-title-container h1');
+        const title = this.cleanProductTitleText(titleElement);
+        const details = this.extractProductDetailFields();
+        const hasExpansionLink = Boolean(this.findProductRoot()?.querySelector?.('dl.labeled a[href*="/Products/Singles/"]'));
+        const hasIdentityDetails = Boolean(details.number && (details.expansion || hasExpansionLink));
+
+        if (!titleElement || !title || !hasIdentityDetails) {
+            return null;
+        }
+
+        return {
+            titleElement,
+            title,
+            details,
+            key: this.stableProductKey(),
+        };
+    }
+
+    scheduleProductPageProcessing(reason = 'mutation') {
+        const key = this.stableProductKey();
+        clearTimeout(this.readyRetryTimers.get(key));
+
+        const attempt = (remainingAttempts = 20) => {
+            if (!this.isEnabled || !this.isProductPage()) {
+                return;
+            }
+            const context = this.getReadyProductContext();
+            if (context) {
+                this.processProductPage(context);
+                return;
+            }
+            if (remainingAttempts <= 0) {
+                console.log(`⚠️ [CME] Cardmarket product not ready after ${reason}`);
+                return;
+            }
+            const timer = setTimeout(() => attempt(remainingAttempts - 1), 250);
+            this.readyRetryTimers.set(key, timer);
+        };
+
+        attempt();
+    }
+
     /**
      * Process a Cardmarket product page
      */
-    processProductPage() {
-        if (this.processedPages.has(window.location.href)) {
-            console.log('🚫 [CME] Product page already processed, skipping');
-            return;
-        }
-
+    processProductPage(readyContext = null) {
         try {
+            const context = readyContext || this.getReadyProductContext();
+            if (!context) {
+                this.scheduleProductPageProcessing('not-ready');
+                return;
+            }
+
+            if (this.processedPages.has(context.key) && document.querySelector('[data-pokemon-linker-button="true"]')) {
+                console.log('🚫 [CME] Product page already processed, skipping');
+                return;
+            }
+
             console.log('🔍 [CME] Processing Cardmarket product page...');
             
-            // Find product title
-            const titleSelectors = [
-                '.page-title-container h1',
-                'h1',
-                '.product-title',
-                '.card-title'
-            ];
-            
-            let titleElement = null;
-            for (const selector of titleSelectors) {
-                titleElement = document.querySelector(selector);
-                if (titleElement) break;
-            }
-            
-            if (!titleElement) {
-                console.log('⚠️ [CME] Product title not found');
-                return;
-            }
-            
-            const title = this.cleanProductTitleText(titleElement);
-            if (!title) {
-                console.log('⚠️ [CME] Product title is empty');
-                return;
-            }
-            
-            console.log(`🔍 [CME] Product title: "${title}"`);
+            console.log(`🔍 [CME] Product title: "${context.title}"`);
             
             // Extract title information
-            const titleInfo = this.extractTitleInfo(title);
+            const titleInfo = this.extractTitleInfo(context.title);
             
             // Create button
             const button = document.createElement('button');
@@ -199,25 +276,24 @@ class CardmarketProcessor {
             this.attachSidePanelClick(button);
             
             // Look for "Contact Support" link and replace with Pokoin button
-            const supportLink = document.querySelector('a[href*="support/tickets/new"]');
             let buttonInserted = false; // Track whether the button was inserted
+            const titleContainer = context.titleElement.closest?.('.page-title-container') || context.titleElement.parentElement;
+            const actionArea = titleContainer?.querySelector?.('.ms-auto, .ml-auto, .align-self-end, [class*="ms-auto"], [class*="ml-auto"]');
             
             // Insert button
-            if (supportLink && supportLink.parentNode) {
-                supportLink.parentNode.replaceChild(button, supportLink);
-                console.log(`✅ [CME] Replaced support link with Pokoin button on Cardmarket (loading)`);
+            if (actionArea) {
+                actionArea.appendChild(button);
+                console.log(`✅ [CME] Inserted Pokoin button in Cardmarket title action area (loading)`);
                 buttonInserted = true;
             } else {
-                // Try support-link container and insert button there
-                const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
-                if (supportContainer) {
-                    supportContainer.appendChild(button);
-                    console.log(`✅ [CME] Inserted Pokoin button in support container on Cardmarket (loading)`);
+                const supportLink = document.querySelector('a[href*="support/tickets/new"]');
+                if (supportLink && supportLink.parentNode) {
+                    supportLink.parentNode.replaceChild(button, supportLink);
+                    console.log(`✅ [CME] Replaced support link with Pokoin button on Cardmarket (loading)`);
                     buttonInserted = true;
-                } else {
-                    // Fallback: insert directly in h1
-                    titleElement.appendChild(button);
-                    console.log(`✅ [CME] Added Pokoin button to Cardmarket product page (loading fallback)`);
+                } else if (titleContainer) {
+                    titleContainer.appendChild(button);
+                    console.log(`✅ [CME] Added Pokoin button to Cardmarket title container (loading fallback)`);
                     buttonInserted = true;
                 }
             }
@@ -227,8 +303,10 @@ class CardmarketProcessor {
             let targetButton = button;
             
             // Always run database lookup if button exists (new or already present)
-            console.log('🔍 [CME] Starting database lookup for:', titleInfo.pokemonName || title);
-            this.searchCardInDatabase(titleInfo, title).then(results => {
+            console.log('🔍 [CME] Starting database lookup for:', titleInfo.pokemonName || context.title);
+            const searchPromise = this.inFlightProductSearches.get(context.key) || this.searchCardInDatabase(titleInfo, context.title);
+            this.inFlightProductSearches.set(context.key, searchPromise);
+            searchPromise.then(results => {
                 if (results && results.length > 0) {
                     this.applyPokoinButtonState(targetButton, 'matched', this.countHighConfidenceMatches(results));
                     console.log(`✅ [CME] Link found, button marked as matched`);
@@ -265,7 +343,9 @@ class CardmarketProcessor {
             });
             
             // Mark page as processed
-            this.processedPages.add(window.location.href);
+            if (buttonInserted) {
+                this.processedPages.add(context.key);
+            }
             
         } catch (error) {
             console.error('❌ [CME] Error while processing product page:', error);
@@ -283,6 +363,9 @@ class CardmarketProcessor {
                 if (mutation.type === 'childList') {
                     mutation.addedNodes.forEach((node) => {
                         if (node.nodeType === Node.ELEMENT_NODE) {
+                            if (this.isProductPage()) {
+                                this.scheduleProductPageProcessing('mutation');
+                            }
                             this.processNewListings(node);
                         }
                     });
