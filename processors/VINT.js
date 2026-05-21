@@ -19,6 +19,7 @@ class VintedProcessor {
         this.lastAppliedSearchSignature = '';
         this.searchResultsBySignature = new Map();
         this.inFlightSearches = new Map();
+        this.pendingSearchApplications = new Map();
         this.vintedPanelObserver = null;
         this.vintedNavigationObserver = null;
         this.vintedNavigationTimer = null;
@@ -26,6 +27,9 @@ class VintedProcessor {
         this.vintedProcessAttempts = new Map();
         this.vintedProcessRetryDelayMs = 500;
         this.vintedProcessMaxRetries = 10;
+        this.vintedSessionId = `vinted-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        this.vintedSequenceId = 0;
+        this.vintedDiagnostics = [];
     }
 
     pokoinIconUrl() {
@@ -58,6 +62,7 @@ class VintedProcessor {
             .normalize('NFKD')
             .replace(/[\u0300-\u036f]/g, '')
             .replace(/[’`]/g, "'")
+            .replace(/\bvastro\b/gi, 'vstar')
             .replace(/[^a-z0-9/'\s-]+/gi, ' ')
             .replace(/\s+/g, ' ')
             .trim();
@@ -198,7 +203,7 @@ class VintedProcessor {
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
             /\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|holo|promo|rare)\b/gi,
-            /\b(?:vmax|vstar|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
+            /\b(?:vmax|vstar|vastro|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
         ];
         cluePatterns.forEach((pattern) => {
             for (const match of sourceText.matchAll(pattern)) {
@@ -244,6 +249,10 @@ class VintedProcessor {
         return clues.filter((clue) => selectedCompacts.has(this.compactClueValue(clue)));
     }
 
+    selectedVariationClues(clues = this.selectedKeywordLabels()) {
+        return clues.filter((clue) => /\b(?:vmax|vstar|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(clue)));
+    }
+
     currentVintedListingKey(url = window.location.href) {
         try {
             const parsed = new URL(url);
@@ -253,6 +262,32 @@ class VintedProcessor {
         } catch (error) {
             return String(url || '').split('#')[0].split('?')[0].replace(/\/+$/, '');
         }
+    }
+
+    recordVintedDiagnostic(event, details = {}) {
+        const entry = {
+            sessionId: this.vintedSessionId,
+            sequenceId: ++this.vintedSequenceId,
+            event,
+            listingKey: details.listingKey || this.currentVintedListingKey(),
+            searchSignature: details.searchSignature || '',
+            reason: details.reason || '',
+            trigger: details.trigger || '',
+            anchorMounted: Boolean(details.anchorMounted ?? this.findVintedDetailsContainer(this.currentTitleElement)),
+            uiMounted: Boolean(details.uiMounted ?? this.isVintedOwnedNodeConnected(this.currentButton)),
+            hasCachedResults: Boolean(details.hasCachedResults),
+            inFlight: Boolean(details.inFlight),
+            skippedDuplicateReason: details.skippedDuplicateReason || '',
+            staleResponseIgnored: Boolean(details.staleResponseIgnored),
+            title: String(details.title || this.currentTitle || '').slice(0, 160),
+            timestamp: Date.now(),
+        };
+        this.vintedDiagnostics.push(entry);
+        if (this.vintedDiagnostics.length > 80) {
+            this.vintedDiagnostics.shift();
+        }
+        window.__pokoinVintedDiagnostics = this.vintedDiagnostics;
+        return entry;
     }
 
     buildVintedSearchSignature(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
@@ -285,12 +320,18 @@ class VintedProcessor {
         this.lastAppliedSearchSignature = '';
         this.searchResultsBySignature.clear();
         this.inFlightSearches.clear();
+        this.pendingSearchApplications.clear();
+        this.recordVintedDiagnostic('listing-reset', {
+            listingKey: nextListingKey,
+            reason: 'stable listing URL changed',
+        });
     }
 
     buildVintedSearchTitle(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
         const primaryClues = this.selectedPrimaryClues(clues);
+        const variationClues = this.selectedVariationClues(clues);
         const searchParts = primaryClues.length > 0
-            ? primaryClues
+            ? [...primaryClues, ...variationClues]
             : [this.removeVintedMarketplaceNoise(title), ...clues];
 
         return searchParts
@@ -437,14 +478,31 @@ class VintedProcessor {
     async searchCardWithBackground(title, clues = this.selectedKeywordLabels()) {
         const signature = this.buildVintedSearchSignature(title, clues);
         if (this.searchResultsBySignature.has(signature)) {
+            this.recordVintedDiagnostic('search-skip', {
+                searchSignature: signature,
+                skippedDuplicateReason: 'cached-results',
+                hasCachedResults: true,
+                title,
+            });
             return this.searchResultsBySignature.get(signature);
         }
         if (this.inFlightSearches.has(signature)) {
+            this.recordVintedDiagnostic('search-skip', {
+                searchSignature: signature,
+                skippedDuplicateReason: 'in-flight',
+                inFlight: true,
+                title,
+            });
             return this.inFlightSearches.get(signature);
         }
 
         const primaryClues = this.selectedPrimaryClues(clues);
         const requestUrl = window.location.href;
+        this.recordVintedDiagnostic('search-start', {
+            searchSignature: signature,
+            trigger: 'background-preview',
+            title,
+        });
         const searchPromise = chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: this.buildVintedSearchTitle(title, clues),
@@ -455,6 +513,12 @@ class VintedProcessor {
         }).then((response) => {
             const results = response?.success && Array.isArray(response.results) ? response.results : [];
             this.searchResultsBySignature.set(signature, results);
+            this.recordVintedDiagnostic('search-complete', {
+                searchSignature: signature,
+                reason: `${results.length} result(s)`,
+                hasCachedResults: true,
+                title,
+            });
             return results;
         }).finally(() => {
             this.inFlightSearches.delete(signature);
@@ -618,6 +682,10 @@ class VintedProcessor {
         return Boolean(this.findVintedDetailsContainer(element));
     }
 
+    isVintedSearchableTitleElement(element) {
+        return Boolean(element && this.isVintedTitleText(element.textContent) && !this.isVintedUnsafeAnchorElement(element));
+    }
+
     findVintedTitleElement() {
         const titleSelectors = [
             '[data-testid="item-title"]',
@@ -640,6 +708,40 @@ class VintedProcessor {
             if (titleElement) {
                 return titleElement;
             }
+        }
+
+        return null;
+    }
+
+    findVintedSearchableTitleElement() {
+        const titleSelectors = [
+            '[data-testid="item-title"]',
+            'h1[data-testid="item-title"]',
+            '[data-testid="item-page-summary-plugin"] h1',
+            '[data-testid="item-page-summary-plugin"] .web_ui__Text__title',
+            '[data-testid="item-details"] h1',
+            '[data-testid="item-page-details"] h1',
+            '[data-testid="item-details-container"] h1',
+            '[class*="item-details"] h1',
+            '[class*="ItemDetails"] h1',
+            'h1.web_ui__Text__title',
+            'h1',
+            'meta[property="og:title"]',
+            'meta[name="twitter:title"]',
+        ];
+
+        for (const selector of titleSelectors) {
+            const candidates = Array.from(document.querySelectorAll?.(selector) || []);
+            const titleElement = candidates.find((candidate) => this.isVintedSearchableTitleElement(candidate));
+            if (titleElement) {
+                return titleElement;
+            }
+        }
+
+        const metaTitle = document.querySelector?.('meta[property="og:title"], meta[name="twitter:title"]');
+        const metaText = metaTitle?.getAttribute?.('content')?.replace(/\s+/g, ' ').trim() || '';
+        if (this.isVintedTitleText(metaText)) {
+            return metaTitle;
         }
 
         return null;
@@ -678,6 +780,21 @@ class VintedProcessor {
         return {
             titleElement,
             title,
+            detailsContainer: this.findVintedDetailsContainer(titleElement),
+        };
+    }
+
+    resolveVintedSearchSource() {
+        const titleElement = this.findVintedSearchableTitleElement();
+        const title = (
+            titleElement?.getAttribute?.('content') ||
+            titleElement?.textContent ||
+            ''
+        ).replace(/\s+/g, ' ').replace(/\s*\|\s*Vinted\s*$/i, '').trim();
+        return {
+            titleElement,
+            title,
+            description: this.extractVintedDescription(),
             detailsContainer: this.findVintedDetailsContainer(titleElement),
         };
     }
@@ -942,59 +1059,75 @@ class VintedProcessor {
             this.processedPages.has(pageKey) &&
             this.isVintedOwnedNodeConnected(this.currentButton)
         ) {
-            console.log('🚫 [VINT] Product page already processed, skipping');
+            this.recordVintedDiagnostic('process-skip', {
+                skippedDuplicateReason: 'same listing already mounted',
+                uiMounted: true,
+            });
             return;
         }
 
         try {
-            console.log('🔍 [VINT] Processing Vinted product page...');
-            
-            const { titleElement, title, detailsContainer } = this.resolveVintedProductAnchor();
-            if (!titleElement) {
-                this.scheduleVintedProductRetry('safe item title not found');
+            const searchSource = this.resolveVintedSearchSource();
+            if (!searchSource.titleElement) {
+                this.recordVintedDiagnostic('process-wait', { reason: 'searchable item title not found' });
+                this.scheduleVintedProductRetry('searchable item title not found');
                 return;
             }
-            
-            if (!title) {
+
+            if (!searchSource.title) {
+                this.recordVintedDiagnostic('process-wait', { reason: 'item title is empty' });
                 this.scheduleVintedProductRetry('item title is empty');
                 return;
             }
 
-            if (!detailsContainer && this.hasVintedRetryBudget()) {
-                this.scheduleVintedProductRetry('item details block not ready');
+            this.currentTitle = searchSource.title;
+            this.currentTitleElement = searchSource.titleElement;
+            this.prepareVintedKeywords(searchSource.title, searchSource.description);
+            const titleInfo = this.extractTitleInfo(searchSource.title);
+            this.runVintedSearch(titleInfo, searchSource.title, 'product-data');
+
+            const { titleElement, title, detailsContainer } = this.resolveVintedProductAnchor();
+            if (!titleElement || !detailsContainer) {
+                this.recordVintedDiagnostic('ui-wait', {
+                    reason: !titleElement ? 'safe item title not found' : 'item details block not ready',
+                    anchorMounted: Boolean(detailsContainer),
+                    title: searchSource.title,
+                });
+                if (this.hasVintedRetryBudget()) {
+                    this.scheduleVintedProductRetry(!titleElement ? 'safe item title not found' : 'item details block not ready');
+                }
                 return;
             }
-            
-            console.log(`🔍 [VINT] Product title: "${title}"`);
-            this.currentTitle = title;
+
+            this.currentTitle = title || searchSource.title;
             this.currentTitleElement = titleElement;
-            
-            // Extract title information
-            const titleInfo = this.extractTitleInfo(title);
-            
-            // Always create a gray fallback button (even for non-Pokemon titles)
-            console.log('🔍 [VINT] Creating gray fallback button...');
+            this.recordVintedDiagnostic('ui-mount', {
+                reason: 'safe details anchor ready',
+                anchorMounted: true,
+                title: this.currentTitle,
+            });
             this.createFallbackButton(titleElement);
-            this.renderKeywordToggles(title, this.extractVintedDescription());
-            
-            this.runVintedSearch(titleInfo, title);
-            
-            // Mark page as processed
+            this.renderKeywordToggles(this.currentTitle, searchSource.description);
+            this.applyPendingVintedSearchResults();
             this.processedPages.add(pageKey);
-            
+
         } catch (error) {
             console.error('❌ [VINT] Error while processing product page:', error);
         }
     }
 
-    renderKeywordToggles(title, description) {
-        this.removeOwnedPanelChildren('[data-pokoin-vinted-keywords]');
+    prepareVintedKeywords(title, description) {
         this.currentKeywords = this.extractVintedKeywords(title, description);
         this.selectedKeywordValues = new Set(
             this.currentKeywords
                 .filter((keyword) => keyword.selectedByDefault)
                 .map((keyword) => keyword.compact)
         );
+    }
+
+    renderKeywordToggles(title, description) {
+        this.removeOwnedPanelChildren('[data-pokoin-vinted-keywords]');
+        this.prepareVintedKeywords(title, description);
         if (!this.currentButton || this.currentKeywords.length === 0) {
             return;
         }
@@ -1029,7 +1162,7 @@ class VintedProcessor {
                     this.selectedKeywordValues.add(keyword.compact);
                 }
                 this.applyKeywordChipStyle(chip, !isSelected);
-                this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle);
+                this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle, 'keyword-toggle');
             });
             container.appendChild(chip);
         });
@@ -1052,10 +1185,17 @@ class VintedProcessor {
         chip.setAttribute('aria-pressed', selected ? 'true' : 'false');
     }
 
-    async runVintedSearch(titleInfo, title) {
+    async runVintedSearch(titleInfo, title, trigger = 'process') {
         const clues = this.selectedKeywordLabels();
         const searchSignature = this.buildVintedSearchSignature(title, clues);
         if (searchSignature === this.lastAppliedSearchSignature && this.searchResultsBySignature.has(searchSignature)) {
+            this.recordVintedDiagnostic('search-skip', {
+                searchSignature,
+                trigger,
+                skippedDuplicateReason: 'already applied',
+                hasCachedResults: true,
+                title,
+            });
             return;
         }
 
@@ -1064,15 +1204,73 @@ class VintedProcessor {
         const backgroundResults = await this.searchCardWithBackground(title, clues);
 
         if (searchToken !== this.latestSearchToken || searchSignature !== this.buildVintedSearchSignature(title, clues)) {
+            this.recordVintedDiagnostic('search-stale', {
+                searchSignature,
+                trigger,
+                staleResponseIgnored: true,
+                title,
+            });
             return;
         }
 
+        this.applyVintedSearchResults(searchSignature, backgroundResults, { title, trigger });
+    }
+
+    applyVintedSearchResults(searchSignature, results = [], details = {}) {
+        if (!this.isVintedOwnedNodeConnected(this.currentButton)) {
+            this.pendingSearchApplications.set(searchSignature, results);
+            this.recordVintedDiagnostic('search-pending-ui', {
+                searchSignature,
+                trigger: details.trigger || '',
+                reason: 'results ready before UI mount',
+                hasCachedResults: true,
+                title: details.title || this.currentTitle,
+            });
+            return false;
+        }
+
         this.lastAppliedSearchSignature = searchSignature;
-        if (backgroundResults.length > 0) {
-            this.updateButtonWithResults(backgroundResults);
+        this.pendingSearchApplications.delete(searchSignature);
+        this.recordVintedDiagnostic('search-apply', {
+            searchSignature,
+            trigger: details.trigger || '',
+            reason: `${results.length} result(s) applied`,
+            hasCachedResults: true,
+            uiMounted: true,
+            title: details.title || this.currentTitle,
+        });
+        if (results.length > 0) {
+            this.updateButtonWithResults(results);
         } else {
             this.updateButtonWithoutResults();
         }
+        return true;
+    }
+
+    applyPendingVintedSearchResults() {
+        const signature = this.buildVintedSearchSignature(this.currentTitle);
+        if (this.pendingSearchApplications.has(signature)) {
+            this.applyVintedSearchResults(signature, this.pendingSearchApplications.get(signature), {
+                trigger: 'ui-mount',
+                title: this.currentTitle,
+            });
+            return true;
+        }
+        if (this.searchResultsBySignature.has(signature) && this.lastAppliedSearchSignature !== signature) {
+            this.applyVintedSearchResults(signature, this.searchResultsBySignature.get(signature), {
+                trigger: 'ui-mount-cache',
+                title: this.currentTitle,
+            });
+            return true;
+        }
+        this.recordVintedDiagnostic('search-apply-skip', {
+            searchSignature: signature,
+            trigger: 'ui-mount',
+            skippedDuplicateReason: this.lastAppliedSearchSignature === signature ? 'already applied' : 'no cached results',
+            hasCachedResults: this.searchResultsBySignature.has(signature),
+            title: this.currentTitle,
+        });
+        return false;
     }
 
     updateButtonWithoutResults() {

@@ -1915,6 +1915,7 @@ function extractTitleInfo(title) {
     let cleanTitle = title.replace(/\b(CardTrader|Pokoin)\b/g, '').trim();
     cleanTitle = cleanTitle.replace(/\bDB offline\b/g, '').trim();
     cleanTitle = cleanTitle.replace(/\bCaricamento\.\.\.\b/g, '').trim();
+    cleanTitle = cleanTitle.replace(/\bvastro\b/gi, 'vstar').trim();
     
     console.log(`🔍 [CardTrader] Processing title: "${cleanTitle}" (original: "${title}")`);
     const titleLower = cleanTitle.toLowerCase();
@@ -2982,7 +2983,7 @@ async function searchCardInDatabase(titleInfo, originalTitle = '') {
 }
 
 function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
-    const title = originalTitle || titleInfo.originalTitle || '';
+    const title = String(originalTitle || titleInfo.originalTitle || '').replace(/\bvastro\b/gi, 'vstar');
     const promoNumber = title.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0]?.replace(/\s+/g, '');
     const collectorNumber = promoNumber || titleInfo.collectorNumber || titleInfo.cardNumber || '';
     const expansionAlias = /\b(?:set\s+base|base\s+set)\b/i.test(title)
@@ -3010,6 +3011,7 @@ function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
 
 function removeMarketplaceSearchNoise(value = '') {
     return String(value || '')
+        .replace(/\bvastro\b/gi, 'vstar')
         .replace(/\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/gi, ' ')
         .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')

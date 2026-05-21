@@ -479,6 +479,133 @@ test('Vinted process renders button, clue chips, and candidate preview once', as
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
 });
 
+test('Vinted search starts before UI anchor and applies cached results on mount', async () => {
+    const details = createDomElement('section', { 'data-testid': 'item-details' });
+    const earlyTitle = createDomElement('h1', { 'data-testid': 'item-title' });
+    earlyTitle.textContent = 'Carta Pokemon Reshiram';
+    const description = createDomElement('p', { 'data-testid': 'item-description' });
+    description.textContent = 'Reshiram card SWSH154';
+    const messages = [];
+    let detailsReady = false;
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/30-reshiram',
+                hostname: 'www.vinted.it',
+                pathname: '/items/30-reshiram',
+            },
+            extractTitleInfo: () => ({ pokemonName: 'Reshiram' }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Reshiram', search_score: 95 }] };
+                },
+            },
+        },
+        document: {
+            querySelector: (selector) => {
+                if (selector === '[data-testid="item-description"]') return description;
+                if (selector === '[data-pokoin-vinted-panel-host]') return details.querySelector(selector);
+                if (selector === '[data-testid="item-details"]') return detailsReady ? details : null;
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return [earlyTitle].filter((element) => element.matches(selector) || selector === 'h1');
+                }
+                if (selector === '[data-pokoin-vinted-panel-host]') {
+                    return details.querySelectorAll(selector);
+                }
+                return [];
+            },
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: details,
+            body: details,
+        },
+        setTimeout: () => 1,
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
+    assert.equal(processor.currentButton, null, 'UI should not mount before safe details anchor');
+    assert.ok(processor.vintedDiagnostics.some((entry) => entry.event === 'search-pending-ui'));
+
+    details.appendChild(earlyTitle);
+    details.appendChild(description);
+    detailsReady = true;
+    processor.processProductPage();
+    await Promise.resolve();
+
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1, 'UI mount should not trigger duplicate search');
+    assert.equal(processor.currentButton.style.background, '#28a745');
+    assert.ok(processor.vintedDiagnostics.some((entry) => entry.event === 'search-apply' && /^ui-mount/.test(entry.trigger)));
+});
+
+test('Vinted diagnostics record duplicate same-listing skips', async () => {
+    const { details, title, description } = createVintedProductDom();
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/31-reshiram?ref=feed',
+                hostname: 'www.vinted.it',
+                pathname: '/items/31-reshiram',
+            },
+            extractTitleInfo: () => ({ pokemonName: 'Reshiram' }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Reshiram', search_score: 91 }] };
+                },
+            },
+        },
+        document: {
+            querySelector: (selector) => {
+                if (selector === '[data-testid="item-description"]') return description;
+                if (selector === '[data-pokoin-vinted-panel-host]') return details.querySelector(selector);
+                if (selector === '[data-testid="item-details"]') return details;
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return [title].filter((element) => element.matches(selector) || selector === 'h1');
+                }
+                if (selector === '[data-pokoin-vinted-panel-host]') return details.querySelectorAll(selector);
+                return [];
+            },
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: details,
+            body: details,
+        },
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+    processor.processProductPage();
+
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
+    const duplicate = processor.vintedDiagnostics.find((entry) => entry.event === 'process-skip');
+    assert.equal(duplicate.skippedDuplicateReason, 'same listing already mounted');
+    assert.equal(duplicate.uiMounted, true);
+    assert.match(duplicate.listingKey, /\/items\/31-reshiram$/);
+});
+
 test('Vinted rerender reinsertion does not search again unless clues change', async () => {
     const { details, title, description } = createVintedProductDom();
     const messages = [];
@@ -633,6 +760,47 @@ test('Vinted description keywords ignore generic card words and keep useful clue
     assert.ok(compactLabels.includes('swsh154'), 'promo code should be extracted');
     assert.ok(labels.includes('evolving skies'), 'expansion should be extracted');
     assert.ok(labels.includes('192/203'), 'collector number should be extracted');
+});
+
+test('Vinted normalizes Vastro typo to VSTAR in clues and payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/32-regigigas', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /regigigas/i.test(String(title || '')) ? 'Regigigas' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Reggigas Vastro carta Pokemon';
+    processor.currentKeywords = processor.extractVintedKeywords(
+        processor.currentTitle,
+        'Regigigas Vastro promo'
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => ['regigigas', 'vstar'].includes(keyword.compact))
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const labels = processor.currentKeywords.map((keyword) => keyword.label.toLowerCase());
+    assert.ok(labels.includes('vstar'));
+    assert.equal(labels.includes('vastro'), false);
+    assert.match(messages[0].title, /vstar/i);
+    assert.doesNotMatch(messages[0].title, /vastro/i);
+    assert.ok(messages[0].clues.some((clue) => /^vstar$/i.test(clue)));
 });
 
 test('Vinted keyword defaults select Pokemon-name-like clues only', () => {
@@ -1469,6 +1637,27 @@ test('background clue helpers remove generic card words from request titles', ()
         sandbox.buildPrimaryClueSearchTitle('Carta Pokémon reshiram B/N ita', ['reshiram', 'Nita'], ['reshiram']),
         'reshiram'
     );
+});
+
+test('background normalizes Vastro typo to VSTAR in request parsing', () => {
+    const source = readRepoFile('config/background.js');
+    const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
+    const compact = extractFunctionSource(source, 'compactSearchValue');
+    const normalize = extractFunctionSource(source, 'normalizeRequestClues');
+    const build = extractFunctionSource(source, 'buildTitleWithRequestClues');
+    const buildPrimary = extractFunctionSource(source, 'buildPrimaryClueSearchTitle');
+    const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${compact}\n${normalize}\n${build}\n${buildPrimary}\n${scrapeStructured}\nthis.normalizeRequestClues = normalizeRequestClues; this.buildPrimaryClueSearchTitle = buildPrimaryClueSearchTitle; this.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
+
+    assert.deepEqual(sandbox.normalizeRequestClues(['Vastro']), ['vstar']);
+    assert.equal(sandbox.buildPrimaryClueSearchTitle('Reggigas Vastro', ['Vastro'], []), 'Reggigas vstar');
+    assert.equal(sandbox.buildPrimaryClueSearchTitle('Reggigas Vastro', ['Vastro'], ['Regigigas']), 'Regigigas vstar');
+    const structured = sandbox.scrapeStructuredCardFields('Regigigas Vastro');
+    assert.equal(structured.variation, 'vstar');
+    assert.equal(structured.searchName, 'Regigigas vstar');
 });
 
 test('CardTrader direct URL opens side panel without page scrape or API search', async () => {

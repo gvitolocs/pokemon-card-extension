@@ -274,6 +274,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
     const cleanTitle = String(title || '')
         .replace(/\s*\|\s*Vinted\s*$/i, '')
         .replace(/\s*\|\s*Cardmarket\s*$/i, '')
+        .replace(/\bvastro\b/gi, 'vstar')
         .replace(/\s+/g, ' ')
         .trim();
     const cardmarketMatch = cleanTitle.match(/^(.+?)\s*\((?:[A-Z0-9]{2,6}\s*)?(\d{1,4}[a-z]?)\)\s*(?:[-–]\s*(.+?))?$/i);
@@ -363,6 +364,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
 
 function removeMarketplaceSearchNoise(value = '') {
     return String(value || '')
+        .replace(/\bvastro\b/gi, 'vstar')
         .replace(/\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/gi, ' ')
         .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
@@ -394,15 +396,20 @@ function normalizeRequestClues(clues = []) {
 function buildTitleWithRequestClues(title = '', clues = []) {
     const normalizedClues = normalizeRequestClues(clues);
     const seen = new Set();
+    const selectedParts = [];
     return [removeMarketplaceSearchNoise(title), ...normalizedClues]
         .map((part) => removeMarketplaceSearchNoise(part).replace(/\s+/g, ' ').trim())
         .filter(Boolean)
         .filter((part) => {
             const compact = compactSearchValue(part);
-            if (seen.has(compact)) {
+            const isContainedInExistingPart = selectedParts.some((existingPart) =>
+                new RegExp(`\\b${part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')}\\b`, 'i').test(existingPart)
+            );
+            if (seen.has(compact) || isContainedInExistingPart) {
                 return false;
             }
             seen.add(compact);
+            selectedParts.push(part);
             return true;
         })
         .join(' ');
@@ -411,7 +418,11 @@ function buildTitleWithRequestClues(title = '', clues = []) {
 function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) {
     const normalizedPrimaryClues = normalizeRequestClues(primaryClues);
     if (normalizedPrimaryClues.length > 0) {
-        return buildTitleWithRequestClues('', normalizedPrimaryClues);
+        const normalizedClues = normalizeRequestClues(clues);
+        const variationClues = normalizedClues.filter((clue) =>
+            /\b(?:vmax|vstar|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(clue)
+        );
+        return buildTitleWithRequestClues('', [...normalizedPrimaryClues, ...variationClues]);
     }
     return buildTitleWithRequestClues(title, clues);
 }
