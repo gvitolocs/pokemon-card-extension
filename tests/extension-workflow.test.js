@@ -80,7 +80,7 @@ function loadProcessor(relativePath, className, overrides = {}) {
 
 function createButtonStub() {
     return {
-        style: {},
+        style: { cssText: '' },
         attributes: {},
         tagName: 'BUTTON',
         parentNode: {
@@ -114,7 +114,7 @@ function createDomElement(tagName = 'div', attributes = {}) {
     const element = {
         tagName: tagName.toUpperCase(),
         nodeType: 1,
-        style: {},
+        style: { cssText: '' },
         attributes: { ...attributes },
         children: [],
         textContent: '',
@@ -254,6 +254,10 @@ function createDomElement(tagName = 'div', attributes = {}) {
             if (selector.startsWith('[class*="')) {
                 const classFragment = selector.match(/\[class\*="([^"]+)"\]/)?.[1] || '';
                 return String(this.attributes.class || '').includes(classFragment);
+            }
+            if (selector.startsWith('.')) {
+                const expectedClass = selector.slice(1);
+                return String(this.attributes.class || '').split(/\s+/).includes(expectedClass);
             }
             if (selector.startsWith('[data-pokoin-vinted-panel]')) {
                 return this.attributes['data-pokoin-vinted-panel'] !== undefined;
@@ -475,18 +479,19 @@ test('Vinted process renders button, clue chips, and candidate preview once', as
     assert.equal(panel.querySelectorAll('[data-pokemon-linker-button]').length, 1);
     assert.ok(panel.querySelectorAll('[data-pokoin-vinted-keyword]').length > 0, 'clue chips should render');
     assert.equal(panel.querySelectorAll('[data-pokoin-candidate-preview]').length, 1);
-    assert.equal(processor.currentButton.style.background, '#28a745');
+    assert.equal(processor.currentButton.style.background, '#0ea5e9');
+    assert.equal(host.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
+    assert.equal(host.parentNode, details, 'test body receives overlay host');
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
 });
 
-test('Vinted search starts before UI anchor and applies cached results on mount', async () => {
+test('Vinted search and overlay mount without details anchor', async () => {
     const details = createDomElement('section', { 'data-testid': 'item-details' });
     const earlyTitle = createDomElement('h1', { 'data-testid': 'item-title' });
     earlyTitle.textContent = 'Carta Pokemon Reshiram';
     const description = createDomElement('p', { 'data-testid': 'item-description' });
     description.textContent = 'Reshiram card SWSH154';
     const messages = [];
-    let detailsReady = false;
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
             location: {
@@ -509,7 +514,7 @@ test('Vinted search starts before UI anchor and applies cached results on mount'
             querySelector: (selector) => {
                 if (selector === '[data-testid="item-description"]') return description;
                 if (selector === '[data-pokoin-vinted-panel-host]') return details.querySelector(selector);
-                if (selector === '[data-testid="item-details"]') return detailsReady ? details : null;
+                if (selector === '[data-testid="item-details"]') return null;
                 return null;
             },
             querySelectorAll: (selector) => {
@@ -536,18 +541,10 @@ test('Vinted search starts before UI anchor and applies cached results on mount'
     await Promise.resolve();
 
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
-    assert.equal(processor.currentButton, null, 'UI should not mount before safe details anchor');
-    assert.ok(processor.vintedDiagnostics.some((entry) => entry.event === 'search-pending-ui'));
-
-    details.appendChild(earlyTitle);
-    details.appendChild(description);
-    detailsReady = true;
-    processor.processProductPage();
-    await Promise.resolve();
-
-    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1, 'UI mount should not trigger duplicate search');
-    assert.equal(processor.currentButton.style.background, '#28a745');
-    assert.ok(processor.vintedDiagnostics.some((entry) => entry.event === 'search-apply' && /^ui-mount/.test(entry.trigger)));
+    assert.ok(processor.currentButton, 'overlay UI should mount from title/description alone');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
+    assert.equal(processor.currentButton.style.background, '#0ea5e9');
+    assert.ok(processor.vintedDiagnostics.some((entry) => entry.event === 'ui-mount' && /overlay/.test(entry.reason)));
 });
 
 test('Vinted diagnostics record duplicate same-listing skips', async () => {
@@ -762,7 +759,48 @@ test('Vinted description keywords ignore generic card words and keep useful clue
     assert.ok(labels.includes('192/203'), 'collector number should be extracted');
 });
 
-test('Vinted normalizes Vastro typo to VSTAR in clues and payload', async () => {
+test('Vinted scrapes provided product HTML selectors for title and description', () => {
+    const details = createDomElement('section', {
+        class: 'box--item-details',
+        itemtype: 'https://schema.org/Product',
+        'data-testid': 'item-page-summary-plugin',
+    });
+    const title = createDomElement('h1', { class: 'web_ui__Text__title' });
+    const description = createDomElement('div', { itemprop: 'description' });
+    title.textContent = 'Regigigas Vastro Pokémon';
+    description.textContent = 'Carta Regigigas Vastro Astral Radiance 114/189';
+    details.appendChild(title);
+    details.appendChild(description);
+
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: (selector) => {
+                if (selector === '[itemprop="description"]') return description;
+                if (selector === '[data-pokoin-vinted-panel-host]') return null;
+                if (selector === '.box--item-details') return details;
+                return details.querySelector(selector);
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return [title].filter((element) => element.matches(selector) || selector === 'h1');
+                }
+                return details.querySelectorAll(selector);
+            },
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: details,
+            body: details,
+        },
+    });
+    const processor = new Processor();
+    const source = processor.resolveVintedSearchSource();
+
+    assert.equal(source.title, 'Regigigas Vastro Pokémon');
+    assert.equal(source.description, 'Carta Regigigas Vastro Astral Radiance 114/189');
+    assert.equal(source.detailsContainer, details);
+});
+
+test('Vinted normalizes Vastro typo to preselected VSTAR in clues and payload', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -789,7 +827,7 @@ test('Vinted normalizes Vastro typo to VSTAR in clues and payload', async () => 
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => ['regigigas', 'vstar'].includes(keyword.compact))
+            .filter((keyword) => keyword.selectedByDefault)
             .map((keyword) => keyword.compact)
     );
 
@@ -798,12 +836,14 @@ test('Vinted normalizes Vastro typo to VSTAR in clues and payload', async () => 
     const labels = processor.currentKeywords.map((keyword) => keyword.label.toLowerCase());
     assert.ok(labels.includes('vstar'));
     assert.equal(labels.includes('vastro'), false);
+    assert.equal(processor.currentKeywords.find((keyword) => keyword.compact === 'vstar').selectedByDefault, true);
     assert.match(messages[0].title, /vstar/i);
     assert.doesNotMatch(messages[0].title, /vastro/i);
     assert.ok(messages[0].clues.some((clue) => /^vstar$/i.test(clue)));
+    assert.ok(messages[0].primaryClues.some((clue) => /^vstar$/i.test(clue)));
 });
 
-test('Vinted keyword defaults select Pokemon-name-like clues only', () => {
+test('Vinted keyword defaults select Pokemon-name-like and variation clues', () => {
     const appended = [];
     const chips = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -996,8 +1036,9 @@ test('Vinted selected keyword toggles shape background and side-panel messages',
     assert.deepEqual([...messages[1].primaryClues], []);
 });
 
-test('Vinted placement prefers the product details/title container', () => {
+test('Vinted placement uses transparent overlay outside product details', () => {
     const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
     const details = createDomElement('section', { 'data-testid': 'item-details' });
     const titleWrapper = createDomElement('div');
     const title = createDomElement('h1', { 'data-testid': 'item-title' });
@@ -1012,13 +1053,7 @@ test('Vinted placement prefers the product details/title container', () => {
             querySelectorAll: () => [],
             contains: () => true,
             createElement: (tagName) => createDomElement(tagName),
-            body: {
-                appendChild(element) {
-                    bodyAppends.push(element);
-                    element.parentNode = this;
-                    element.parentElement = this;
-                },
-            },
+            body,
         },
     });
     const processor = new Processor();
@@ -1026,37 +1061,42 @@ test('Vinted placement prefers the product details/title container', () => {
     const panel = processor.ensureVintedPanel(title);
 
     assert.equal(panel.attributes['data-pokoin-extension-panel'], 'vinted-content');
-    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'anchored');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-extension-panel'], 'vinted');
-    assert.equal(processor.currentPanelHost.parentNode, details);
-    assert.equal(details.children.indexOf(processor.currentPanelHost), details.children.indexOf(actionArea) - 1);
-    assert.equal(bodyAppends.length, 0, 'anchored panel should not be fixed on body');
-    assert.equal(processor.currentPanelHost.style.position, 'static');
+    assert.equal(processor.currentPanelHost.parentNode, body);
+    assert.equal(details.children.includes(processor.currentPanelHost), false);
+    assert.equal(bodyAppends[0], processor.currentPanelHost, 'overlay should mount on document body');
+    assert.equal(processor.currentPanelHost.style.position, 'fixed');
     assert.ok(processor.currentPanelHost.shadowRoot, 'Vinted panel should use a shadow root when available');
 });
 
-test('Vinted fallback fixed panel is only used without a safe anchor', () => {
+function documentStubBody(appends) {
+    return {
+        appendChild(element) {
+            appends.push(element);
+            element.parentNode = this;
+            element.parentElement = this;
+        },
+    };
+}
+
+test('Vinted overlay panel is fixed without a safe anchor', () => {
     const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         document: {
             querySelector: () => null,
             querySelectorAll: () => [],
             contains: () => true,
             createElement: (tagName) => createDomElement(tagName),
-            body: {
-                appendChild(element) {
-                    bodyAppends.push(element);
-                    element.parentNode = this;
-                    element.parentElement = this;
-                },
-            },
+            body,
         },
     });
     const processor = new Processor();
 
     const panel = processor.ensureVintedPanel(null);
 
-    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'fallback-fixed');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(processor.currentPanelHost.style.position, 'fixed');
     assert.equal(processor.currentPanelHost.style.left, '16px');
     assert.equal(processor.currentPanelHost.style.bottom, '16px');
@@ -1065,13 +1105,15 @@ test('Vinted fallback fixed panel is only used without a safe anchor', () => {
     assert.equal(bodyAppends[0], processor.currentPanelHost);
 });
 
-test('Vinted chip and button share normal inserted details container', () => {
+test('Vinted chip and button share overlay panel', () => {
     const details = createDomElement('section', { 'data-testid': 'item-details' });
     const title = createDomElement('h1', { 'data-testid': 'item-title' });
     const actionArea = createDomElement('div', { 'data-testid': 'item-actions' });
     details.appendChild(title);
     details.appendChild(actionArea);
 
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
             extractTitleInfo: () => ({ pokemonName: null }),
@@ -1081,9 +1123,7 @@ test('Vinted chip and button share normal inserted details container', () => {
             querySelectorAll: () => [],
             contains: () => true,
             createElement: (tagName) => createDomElement(tagName),
-            body: {
-                appendChild() {},
-            },
+            body,
         },
     });
     const processor = new Processor();
@@ -1092,11 +1132,12 @@ test('Vinted chip and button share normal inserted details container', () => {
     processor.createVintedPanelButton(title);
     processor.renderKeywordToggles('Carta Pokemon Dragonite', 'SWSH154 Evolving Skies');
 
-    const host = details.children.find((child) => child.attributes['data-pokoin-vinted-panel-host'] === 'true');
+    const host = bodyAppends.find((child) => child.attributes['data-pokoin-vinted-panel-host'] === 'true');
     const panel = host.shadowRoot.querySelector('[data-pokoin-vinted-panel]');
-    assert.ok(panel, 'panel should be inserted into item details');
-    assert.equal(host.attributes['data-pokoin-vinted-placement'], 'anchored');
-    assert.equal(host.style.position, 'static');
+    assert.ok(panel, 'panel should be inserted into overlay');
+    assert.equal(host.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
+    assert.equal(host.style.position, 'fixed');
+    assert.equal(details.children.includes(host), false);
     assert.ok(panel.children.some((child) => child.attributes['data-pokemon-linker-button'] === 'true'));
     assert.ok(panel.children.some((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true'));
     assert.match(
@@ -1135,6 +1176,8 @@ test('Vinted panel host owns an isolated shadow root with reset styles', () => {
 });
 
 test('Vinted ensure panel reuses owned host and removes duplicates', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
     const details = createDomElement('section', { 'data-testid': 'item-details' });
     const title = createDomElement('h1', { 'data-testid': 'item-title' });
     details.appendChild(title);
@@ -1148,9 +1191,9 @@ test('Vinted ensure panel reuses owned host and removes duplicates', () => {
             querySelectorAll: (selector) => selector === '[data-pokoin-vinted-panel-host]'
                 ? details.querySelectorAll(selector)
                 : [],
-            contains: (element) => details.contains(element),
+            contains: (element) => details.contains(element) || bodyAppends.includes(element),
             createElement: (tagName) => createDomElement(tagName),
-            body: { appendChild() {} },
+            body,
         },
     });
     const processor = new Processor();
@@ -1161,7 +1204,8 @@ test('Vinted ensure panel reuses owned host and removes duplicates', () => {
 
     assert.equal(secondPanel, firstPanel);
     assert.equal(processor.currentPanelHost, firstHost);
-    assert.equal(details.querySelectorAll('[data-pokoin-vinted-panel-host]').length, 1);
+    assert.equal(bodyAppends.filter((child) => child.attributes['data-pokoin-vinted-panel-host'] === 'true').length, 1);
+    assert.equal(details.querySelectorAll('[data-pokoin-vinted-panel-host]').length, 0);
     assert.equal(details.querySelectorAll('[data-pokoin-vinted-panel]').length, 0, 'shadow panel should not leak into page queries');
 });
 
@@ -1209,6 +1253,7 @@ test('Vinted panel reinserts owned root after SPA removal', () => {
     assert.equal(processor.currentPanel, panel);
     assert.equal(processor.currentPanelHost, host);
     assert.equal(host.parentNode, details);
+    assert.equal(host.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(details.querySelectorAll('[data-pokoin-vinted-panel-host]').length, 1);
 });
 
@@ -1252,8 +1297,8 @@ test('Vinted safe anchor selection ignores ad, header, and category placeholders
 
     assert.equal(anchor.titleElement, productTitle);
     assert.equal(anchor.detailsContainer, details);
-    assert.equal(processor.currentPanelHost.parentNode, details);
-    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'anchored');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
+    assert.notEqual(processor.currentPanelHost.parentNode, details);
 });
 
 test('Vinted processing waits when only top skeleton title exists', () => {
@@ -1295,7 +1340,7 @@ test('Vinted processing waits when only top skeleton title exists', () => {
     assert.equal(processor.processedPages.has('https://www.vinted.it/items/9-loading'), false);
 });
 
-test('Vinted background candidates turn button green and render preview', async () => {
+test('Vinted background candidates keep button blue and render preview', async () => {
     const appended = [];
     const button = createButtonStub();
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -1328,9 +1373,73 @@ test('Vinted background candidates turn button green and render preview', async 
 
     processor.updateButtonWithResults([{ name_en: 'Dragonite V', search_score: 92, collector_number: 'SWSH154' }]);
 
-    assert.equal(processor.currentButton.style.background, '#28a745');
+    assert.equal(processor.currentButton.style.background, '#0ea5e9');
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], undefined);
     assert.equal(appended.at(-1).previewResults[0].name_en, 'Dragonite V');
+});
+
+test('Vinted candidate preview is scrollable, compact, and clickable', async () => {
+    const messages = [];
+    const panel = createDomElement('div', { 'data-pokoin-vinted-panel': 'true' });
+    const button = createButtonStub();
+    button.contains = (target) => target === button;
+    panel.appendChild(button);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            querySelectorAll: () => [],
+            contains: (element) => panel.contains(element),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                let cssText = '';
+                Object.defineProperty(element.style, 'cssText', {
+                    get() {
+                        return cssText;
+                    },
+                    set(value) {
+                        cssText = value;
+                    },
+                });
+                return element;
+            },
+            body: panel,
+        },
+    });
+    const processor = new Processor();
+    processor.currentPanel = panel;
+    processor.currentButton = button;
+    processor.currentTitle = 'Regigigas VSTAR';
+
+    processor.renderCandidatePreview(Array.from({ length: 12 }, (_, index) => ({
+        name_en: 'Regigigas VSTAR',
+        collector_number: `${114 + index}/189`,
+        expansion_name_en: 'Astral Radiance',
+    })));
+
+    const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
+    const rows = preview.children;
+    assert.equal(preview.style.maxHeight, '320px');
+    assert.equal(preview.style.overflowY, 'auto');
+    assert.equal(rows.length, 8);
+    assert.doesNotMatch(rows[0].innerHTML, /Regigigas VSTAR/);
+    assert.match(rows[0].innerHTML, /114/);
+    assert.match(rows[0].innerHTML, /Astral Radiance/);
+
+    await rows[0].eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+
+    assert.equal(messages.at(-1).action, 'openSidePanelForCurrentTab');
 });
 
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {

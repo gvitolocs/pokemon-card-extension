@@ -4,7 +4,7 @@
 
 1. Marketplace content scripts add a Pokoin button to supported listing pages.
 2. Buttons are created immediately in a gray/loading state and still open the Chrome side panel. A resolved match is not required before the user can click.
-3. When matches arrive, the button shows `Pokoin.com (N)`, where `N` is the count of matches above the high-confidence threshold, and turns green.
+3. When matches arrive, the button shows `Pokoin.com (N)`, where `N` is the count of matches above the high-confidence threshold. Vinted keeps the Pokoin brand blue in both empty and matched states.
 4. Clicking any marketplace button opens the Chrome side panel for the current tab instead of opening a new browser tab.
 5. The background service worker refreshes the side panel state for the sender tab.
 6. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.
@@ -15,7 +15,7 @@
 11. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
 12. Direct CardTrader state stores a human card name for the side-panel header. If CardTrader only provides a URL-like title, the extension derives the name from the card URL slug instead of showing the long `cardtrader.com/...` path.
 13. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
-14. Vinted renders its Pokoin button, clue chips, and candidate preview inside an extension-owned root marked with `data-pokoin-extension-panel`. The root uses Shadow DOM when the browser supports it, with reset styles on the host and inside the shadow tree so Vinted page CSS cannot restyle the Pokoin controls.
+14. Vinted renders its Pokoin button, clue chips, and candidate preview in a compact transparent fixed overlay marked with `data-pokoin-extension-panel`. The overlay uses Shadow DOM when the browser supports it, with reset styles on the host and inside the shadow tree so Vinted page CSS cannot restyle the Pokoin controls.
 15. Vinted processing is keyed by a stable listing URL that ignores query strings and hashes. Repeated `processProductPage()` calls, MutationObserver callbacks, and same-listing SPA rerenders reattach or reuse the existing owned root instead of creating another button, clue chip group, preview list, or background search.
 16. Vinted starts preview search as soon as the item title and description are available. It does not wait for the final safe details anchor before sending `searchCardForTitle`.
 17. Vinted preview searches are keyed by listing URL plus the selected clue signature. One in-flight search is shared for identical listing/clue inputs, stale responses are ignored, and cached results prevent identical repeated `searchCardForTitle` messages. Toggling a clue intentionally creates one new signature and runs exactly one new preview search.
@@ -43,7 +43,7 @@
 
 ## Candidate Display Flow
 
-1. Candidate rows show the card name and compact metadata.
+1. Candidate rows show compact metadata only: collector/card number plus expansion name. Vinted intentionally hides the card name in preview rows because it repeats the listing/search name.
 2. Collector metadata shows only the first collector number:
    - `SVP 129` becomes `129`
    - `232/091` becomes `232`
@@ -52,11 +52,11 @@
 4. If no explicit expansion code exists, use the collector prefix such as `SVP` or `XY`.
 5. If no useful prefix exists, derive initials from the expansion name.
 6. If no compact shortname can be derived, show the expansion name.
-7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
-8. Vinted renders the Pokoin button and clue chips inside one compact extension-owned panel inserted into the product details/title block, before the listing action area when Vinted exposes one. Anchor selection is Vinted-specific: it prefers `item-title` inside `item-page-summary-plugin`, `item-details`, or related item detail containers, ignores ad placeholders, skeletons, global headers, nav, category rows, and feed/catalog containers, and waits briefly to mount UI when Vinted initially renders only the top ad/skeleton area.
-9. The Vinted chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution. Those controls live inside the owned root, so page queries and Vinted CSS do not own or override them.
-10. Vinted keeps one owned root per listing. A MutationObserver watches for Vinted SPA rerenders that remove the host, then reattaches the same host to the safe product anchor without duplicating panels, searches, or losing the current button/chip/candidate state. Vinted-specific navigation watching detects true listing URL changes and resets the guard so the new listing renders and searches once.
-11. Vinted uses a fixed fallback panel only after no safe item title/details anchor exists. That fallback is isolated the same way as the anchored panel and sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
+7. Vinted's preview and the side panel can show up to eight candidates without a visible "Best candidates" heading. The Vinted preview is scrollable when candidates overflow and its rows are clickable side-panel openers.
+8. Vinted scrapes title, description, and detail context from the product DOM, including `h1.web_ui__Text__title`, `[itemprop="description"]`, `[data-testid="item-page-summary-plugin"]`, `.box--item-details`, and related item-detail containers. That DOM is a data source only; the extension UI is not inserted into the product details/title block.
+9. Vinted clue chips live inside the overlay and wrap naturally there. Pokemon-name-like chips start on; directly present variation chips such as `v`, `ex`, `gx`, `vmax`, and normalized `vastro` -> `vstar` also start on and are included in primary clue/search payloads. Other useful but non-name-like clues start off. Changing a chip re-runs the background search and updates the same blue button state and candidate preview list used by side-panel resolution.
+10. Vinted keeps one overlay root per listing. A MutationObserver watches for Vinted SPA rerenders that remove the host, then reattaches the same fixed overlay without duplicating panels, searches, or losing the current button/chip/candidate state. Vinted-specific navigation watching detects true listing URL changes and resets the guard so the new listing renders and searches once.
+11. The Vinted overlay sits at the lower-left viewport edge to avoid covering the listing content and remains isolated from Vinted CSS.
 
 ## Processor Boundaries
 

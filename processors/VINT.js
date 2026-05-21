@@ -57,6 +57,14 @@ class VintedProcessor {
         return results.filter((result) => this.isHighConfidenceMatch(result)).length;
     }
 
+    pokoinBlue() {
+        return '#0ea5e9';
+    }
+
+    pokoinBlueHover() {
+        return '#0284c7';
+    }
+
     normalizeClueValue(value = '') {
         return String(value || '')
             .normalize('NFKD')
@@ -133,14 +141,20 @@ class VintedProcessor {
         }
     }
 
+    isVariationClue(value = '') {
+        return /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(value));
+    }
+
     prepareVintedKeywordCandidates(candidates = []) {
         return candidates
             .map((candidate, index) => {
                 const nameLike = this.isPokemonNameLikeClue(candidate);
+                const variation = this.isVariationClue(candidate.label || candidate.value);
                 return {
                     ...candidate,
                     nameLike,
-                    selectedByDefault: nameLike,
+                    variation,
+                    selectedByDefault: nameLike || variation,
                     _index: index,
                 };
             })
@@ -158,6 +172,7 @@ class VintedProcessor {
         const selectors = [
             '[data-testid="item-description"]',
             '[data-testid="item-description"] p',
+            '[itemprop="description"]',
             '[data-testid="item-page-description"]',
             '[data-testid="item-details-description"]',
             '[data-testid="item-details"] [class*="description"]',
@@ -242,7 +257,7 @@ class VintedProcessor {
         const selectedCompacts = new Set(
             this.currentKeywords
                 .filter((keyword) => this.selectedKeywordValues.has(keyword.compact))
-                .filter((keyword) => keyword.nameLike)
+                .filter((keyword) => keyword.nameLike || keyword.variation)
                 .map((keyword) => keyword.compact)
         );
 
@@ -250,7 +265,7 @@ class VintedProcessor {
     }
 
     selectedVariationClues(clues = this.selectedKeywordLabels()) {
-        return clues.filter((clue) => /\b(?:vmax|vstar|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(clue)));
+        return clues.filter((clue) => this.isVariationClue(clue));
     }
 
     currentVintedListingKey(url = window.location.href) {
@@ -342,16 +357,12 @@ class VintedProcessor {
     }
 
     compactCandidateMeta(result = {}) {
-        const number = String(result.collector_number || result.card_number || '')
+        const rawNumber = String(result.collector_number || result.card_number || result.collectorNumber || '')
+            .trim();
+        const number = rawNumber
             .match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)(?:\s*\/\s*\d{1,4}[a-z]?)?\b/i)?.[1] || '';
-        const setName = result.expansion_name_en || result.set_name || '';
-        const setShort = String(setName)
-            .replace(/\b(?:and|of|the|a|an)\b/gi, ' ')
-            .split(/\s+/)
-            .map((part) => part[0])
-            .join('')
-            .toUpperCase();
-        return [number, setShort || setName].filter(Boolean).join(' · ');
+        const setName = result.expansion_name_en || result.expansionName || result.set_name || result.setName || '';
+        return [number || rawNumber, setName].filter(Boolean).join(' · ');
     }
 
     vintedPanelRoot(panel = this.currentPanel) {
@@ -417,6 +428,8 @@ class VintedProcessor {
         preview.setAttribute('data-pokoin-candidate-preview', 'true');
         preview.style.cssText = `
             width: 100%;
+            max-height: 320px;
+            overflow-y: auto;
             padding: 12px;
             border: 1px solid rgba(56, 189, 248, 0.35);
             border-radius: 16px;
@@ -425,6 +438,10 @@ class VintedProcessor {
             box-shadow: 0 18px 42px rgba(2, 6, 23, 0.35);
             font-family: Arial, sans-serif;
         `;
+        Object.assign(preview.style, {
+            maxHeight: '320px',
+            overflowY: 'auto',
+        });
 
         results.slice(0, 8).forEach((result) => {
             const row = document.createElement('button');
@@ -433,7 +450,7 @@ class VintedProcessor {
                 display: grid;
                 grid-template-columns: 1fr;
                 width: 100%;
-                padding: 8px 0;
+                padding: 10px 0;
                 border: 0;
                 border-top: 1px solid rgba(148, 163, 184, 0.18);
                 background: transparent;
@@ -442,14 +459,14 @@ class VintedProcessor {
                 cursor: pointer;
             `;
             row.innerHTML = `
-                <strong style="display:block;font-size:13px;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${result.name_en || result.pokemon_name || 'Candidate'}</strong>
-                <span style="display:block;margin-top:3px;color:#94a3b8;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result)}</span>
+                <span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result) || 'Candidate'}</span>
             `;
             row.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                event.stopImmediatePropagation?.();
                 this.openPokoinSidePanel();
-            });
+            }, true);
             preview.appendChild(row);
         });
 
@@ -587,14 +604,15 @@ class VintedProcessor {
             right: 'auto',
             top: 'auto',
             zIndex: '9999',
-            width: 'min(280px, calc(100vw - 32px))',
-            maxWidth: '280px',
+            width: 'min(320px, calc(100vw - 32px))',
+            maxWidth: '320px',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'stretch',
             gap: '8px',
             pointerEvents: 'auto',
             fontFamily: 'Arial, sans-serif',
+            opacity: '0.96',
         };
     }
 
@@ -619,6 +637,8 @@ class VintedProcessor {
             '[data-testid="item-info"]',
             '[data-testid="item-summary"]',
             '[data-testid="item-overview"]',
+            '[itemtype*="schema.org/Product"]',
+            '.box--item-details',
             '[class*="item-details"]',
             '[class*="ItemDetails"]',
             '[class*="item-page-summary"]',
@@ -842,43 +862,17 @@ class VintedProcessor {
     }
 
     insertVintedPanelNearDetails(host, titleElement) {
-        const detailsContainer = this.findVintedDetailsContainer(titleElement);
-        if (!detailsContainer) {
-            return false;
-        }
-
-        Object.assign(host.style, this.vintedPanelBaseStyles(), this.vintedInsertedPanelStyles());
-        host.setAttribute('data-pokoin-vinted-placement', 'anchored');
-
-        const actionArea = this.findVintedActionArea(detailsContainer);
-        if (actionArea?.parentNode === detailsContainer) {
-            detailsContainer.insertBefore(host, actionArea);
-            return true;
-        }
-
-        if (titleElement?.parentNode === detailsContainer && titleElement.nextSibling) {
-            detailsContainer.insertBefore(host, titleElement.nextSibling);
-            return true;
-        }
-
-        if (titleElement?.parentNode === detailsContainer) {
-            detailsContainer.appendChild(host);
-            return true;
-        }
-
-        detailsContainer.appendChild(host);
-        return true;
+        void host;
+        void titleElement;
+        return false;
     }
 
     placeVintedPanelHost(host, titleElement = this.currentTitleElement) {
-        if (this.insertVintedPanelNearDetails(host, titleElement)) {
-            return true;
-        }
-
+        void titleElement;
         Object.assign(host.style, this.vintedPanelBaseStyles(), this.vintedFallbackPanelStyles());
-        host.setAttribute('data-pokoin-vinted-placement', 'fallback-fixed');
+        host.setAttribute('data-pokoin-vinted-placement', 'overlay-fixed');
         document.body.appendChild(host);
-        return false;
+        return true;
     }
 
     removeDuplicateVintedPanelHosts(ownedHost) {
@@ -949,7 +943,7 @@ class VintedProcessor {
             alignItems: 'center',
             justifyContent: 'center',
             gap: '8px',
-            background: '#0ea5e9',
+            background: this.pokoinBlue(),
             color: 'white',
             border: 'none',
             borderRadius: '8px',
@@ -968,6 +962,18 @@ class VintedProcessor {
                 display: 'block',
             });
         }
+    }
+
+    attachVintedSidePanelClick(button) {
+        if (!button) {
+            return;
+        }
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            this.openPokoinSidePanel();
+        }, true);
     }
 
     /**
@@ -1086,27 +1092,14 @@ class VintedProcessor {
             const titleInfo = this.extractTitleInfo(searchSource.title);
             this.runVintedSearch(titleInfo, searchSource.title, 'product-data');
 
-            const { titleElement, title, detailsContainer } = this.resolveVintedProductAnchor();
-            if (!titleElement || !detailsContainer) {
-                this.recordVintedDiagnostic('ui-wait', {
-                    reason: !titleElement ? 'safe item title not found' : 'item details block not ready',
-                    anchorMounted: Boolean(detailsContainer),
-                    title: searchSource.title,
-                });
-                if (this.hasVintedRetryBudget()) {
-                    this.scheduleVintedProductRetry(!titleElement ? 'safe item title not found' : 'item details block not ready');
-                }
-                return;
-            }
-
-            this.currentTitle = title || searchSource.title;
-            this.currentTitleElement = titleElement;
+            this.currentTitle = searchSource.title;
+            this.currentTitleElement = searchSource.titleElement;
             this.recordVintedDiagnostic('ui-mount', {
-                reason: 'safe details anchor ready',
-                anchorMounted: true,
+                reason: 'overlay mounted from scraped item data',
+                anchorMounted: Boolean(searchSource.detailsContainer),
                 title: this.currentTitle,
             });
-            this.createFallbackButton(titleElement);
+            this.createFallbackButton(searchSource.titleElement);
             this.renderKeywordToggles(this.currentTitle, searchSource.description);
             this.applyPendingVintedSearchResults();
             this.processedPages.add(pageKey);
@@ -1287,7 +1280,7 @@ class VintedProcessor {
      * Create gray fallback button
      */
     createFallbackButton(titleElement) {
-        console.log(`🔍 [VINT] Creating Pokoin action panel near Vinted item details`);
+        console.log(`🔍 [VINT] Creating Pokoin overlay panel`);
         this.createVintedPanelButton(titleElement);
     }
 
@@ -1336,11 +1329,7 @@ class VintedProcessor {
         }
         console.log(`✅ [VINT] Added compact panel button`);
         this.currentButton = button;
-        button.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            this.openPokoinSidePanel();
-        });
+        this.attachVintedSidePanelClick(button);
     }
 
     createFixedPositionButton() {
@@ -1385,6 +1374,7 @@ class VintedProcessor {
             titleElement.parentNode.insertBefore(button, titleElement.nextSibling);
             console.log(`✅ [VINT] Added alternate button`);
             this.currentButton = button;
+            this.attachVintedSidePanelClick(button);
         } else {
             console.log('⚠️ [VINT] Unable to insert alternate button');
         }
@@ -1447,10 +1437,10 @@ class VintedProcessor {
             button.removeAttribute('data-pokemon-linker-fallback');
             this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
             this.applyPokoinButtonStyles(button, {
-                background: '#28a745',
+                background: this.pokoinBlue(),
                 color: '#ffffff',
-                border: '2px solid #16a34a',
-                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.35)',
+                border: '2px solid #38bdf8',
+                boxShadow: '0 4px 12px rgba(14, 165, 233, 0.35)',
             });
         };
         
@@ -1466,37 +1456,25 @@ class VintedProcessor {
                 </span>
             `;
             this.applyPokoinButtonStyles(this.currentButton, {
-                background: '#28a745',
+                background: this.pokoinBlue(),
                 color: '#ffffff',
-                border: '2px solid #16a34a',
-                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.35)',
+                border: '2px solid #38bdf8',
+                boxShadow: '0 4px 12px rgba(14, 165, 233, 0.35)',
             });
         } else {
             applyResolvedButtonState(this.currentButton);
         }
+        this.attachVintedSidePanelClick(this.currentButton);
         
-        // Remove previous listeners by cloning the button
-        const newButton = this.currentButton.cloneNode(true);
-        this.currentButton.parentNode.replaceChild(newButton, this.currentButton);
-        this.currentButton = newButton;
-        applyResolvedButtonState(this.currentButton);
-        
-        // Add click handler
-        this.currentButton.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            this.openPokoinSidePanel();
-        });
-        
-        // Hover effects (green)
+        // Hover effects (blue)
         this.currentButton.addEventListener('mouseenter', () => {
-            this.currentButton.style.background = '#218838';
+            this.currentButton.style.background = this.pokoinBlueHover();
             this.currentButton.style.transform = 'scale(1.05)';
             this.currentButton.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
         });
         
         this.currentButton.addEventListener('mouseleave', () => {
-            this.currentButton.style.background = '#28a745';
+            this.currentButton.style.background = this.pokoinBlue();
             this.currentButton.style.transform = 'scale(1)';
             this.currentButton.style.boxShadow = 'none';
         });
@@ -1524,25 +1502,21 @@ class VintedProcessor {
             min-width: 120px;
             font-family: Arial, sans-serif;
         `;
-        this.applyPokoinButtonStyles(button, { background: '#28a745' });
+        this.applyPokoinButtonStyles(button, { background: this.pokoinBlue() });
         
         // Add click handler with top-ranked result
         const bestResult = results[0];
-        button.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            this.openPokoinSidePanel();
-        });
+        this.attachVintedSidePanelClick(button);
         
         // Hover effects
         button.addEventListener('mouseenter', () => {
-            button.style.background = '#218838';
+            button.style.background = this.pokoinBlueHover();
             button.style.transform = 'scale(1.05)';
             button.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
         });
         
         button.addEventListener('mouseleave', () => {
-            button.style.background = '#28a745';
+            button.style.background = this.pokoinBlue();
             button.style.transform = 'scale(1)';
             button.style.boxShadow = 'none';
         });
