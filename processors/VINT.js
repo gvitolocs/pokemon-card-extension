@@ -480,6 +480,8 @@ class VintedProcessor {
         results.slice(0, 8).forEach((result) => {
             const row = document.createElement('button');
             row.type = 'button';
+            row.setAttribute('data-pokoin-candidate-row', 'true');
+            row.setAttribute('aria-label', `Open ${this.compactCandidateMeta(result) || 'candidate'} in Pokoin side panel`);
             row.style.cssText = `
                 display: grid;
                 grid-template-columns: 1fr;
@@ -491,6 +493,7 @@ class VintedProcessor {
                 color: inherit;
                 text-align: left;
                 cursor: pointer;
+                pointer-events: auto;
             `;
             row.innerHTML = `
                 <span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result) || 'Candidate'}</span>
@@ -539,7 +542,7 @@ class VintedProcessor {
     openPokoinSidePanel(candidate = null) {
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
-        return chrome.runtime.sendMessage({
+        const message = {
             action: 'openSidePanelForCurrentTab',
             url: window.location.href,
             title: this.buildVintedSearchTitle(this.currentTitle || document.title, clues),
@@ -547,7 +550,8 @@ class VintedProcessor {
             clues,
             primaryClues,
             ...this.buildSidePanelCandidatePayload(candidate || {}),
-        }).catch((error) => {
+        };
+        return Promise.resolve(chrome.runtime.sendMessage(message)).catch((error) => {
             console.warn('⚠️ [VINT] Unable to open side panel:', error);
         });
     }
@@ -663,7 +667,7 @@ class VintedProcessor {
             bottom: '16px',
             right: 'auto',
             top: 'auto',
-            zIndex: '9999',
+            zIndex: '2147483647',
             width: 'min(320px, calc(100vw - 32px))',
             maxWidth: '320px',
             display: 'flex',
@@ -1028,6 +1032,10 @@ class VintedProcessor {
         if (!button) {
             return;
         }
+        if (button.__pokoinVintedSidePanelClickAttached) {
+            return;
+        }
+        button.__pokoinVintedSidePanelClickAttached = true;
         button.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();

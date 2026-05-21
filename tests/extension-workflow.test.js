@@ -1548,6 +1548,9 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.equal(preview.style.maxHeight, '320px');
     assert.equal(preview.style.overflowY, 'auto');
     assert.equal(rows.length, 8);
+    assert.equal(rows[0].tagName, 'BUTTON');
+    assert.equal(rows[0].type, 'button');
+    assert.equal(rows[0].attributes['data-pokoin-candidate-row'], 'true');
     assert.doesNotMatch(rows[0].innerHTML, /Regigigas VSTAR/);
     assert.match(rows[0].innerHTML, /114/);
     assert.match(rows[0].innerHTML, /Astral Radiance/);
@@ -1567,6 +1570,13 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.ok(messages.at(-1).clues.some((clue) => /^vstar$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^regigigas$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^vstar$/i.test(clue)));
+
+    await rows[0].eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(messages.length, 2, 'one runtime message should be sent for each real candidate click');
 });
 
 test('Vinted candidate metadata includes Pokoin price when available', () => {
@@ -1593,7 +1603,6 @@ test('Vinted candidate metadata includes Pokoin price when available', () => {
 test('Vinted main Pokoin button opens side panel from shadow overlay', async () => {
     const messages = [];
     const details = createDomElement('section');
-    const listeners = {};
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
             location: {
@@ -1635,23 +1644,26 @@ test('Vinted main Pokoin button opens side panel from shadow overlay', async () 
     );
 
     processor.createVintedPanelButton();
-    processor.currentButton.addEventListener = (type, listener, options) => {
-        listeners[type] = { listener, options };
-    };
     processor.attachVintedSidePanelClick(processor.currentButton);
-    await listeners.click.listener({
+    await processor.currentButton.eventListeners.click({
         preventDefault() {},
         stopPropagation() {},
         stopImmediatePropagation() {},
     });
 
-    assert.equal(listeners.click.options, true);
     assert.equal(processor.currentPanelHost.shadowRoot.contains(processor.currentButton), true);
     assert.equal(messages.length, 1);
     assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
     assert.equal(messages[0].url, 'https://www.vinted.it/items/40-dragonite');
     assert.ok(messages[0].primaryClues.some((clue) => /^dragonite$/i.test(clue)));
     assert.ok(messages[0].primaryClues.some((clue) => /\bv\b/i.test(clue)));
+
+    await processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(messages.length, 2, 'idempotent listener attachment should not duplicate one click');
 });
 
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
@@ -2029,6 +2041,7 @@ test('background side panel open honors selected Vinted candidate without reorde
     const finalState = storageWrites.at(-1).sidePanelState;
     assert.equal(response.success, true);
     assert.deepEqual(openedPanels.map((panel) => panel.tabId), [8]);
+    assert.equal(openedPanels.length, 1, 'open should be requested once for the sender tab');
     assert.equal(fetchCalls, 0);
     assert.equal(finalState.blueprintId, '9876');
     assert.equal(finalState.best.name, 'Regigigas VSTAR');

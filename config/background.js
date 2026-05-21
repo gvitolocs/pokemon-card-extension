@@ -1301,6 +1301,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             return false;
         }
 
+        const openSidePanelPromise = chrome.sidePanel?.open
+            ? chrome.sidePanel.open({ tabId: senderTab.id })
+            : Promise.resolve();
         Promise.resolve()
             .then(async () => {
                 const tab = await chrome.tabs.get(senderTab.id);
@@ -1308,7 +1311,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const currentTitle = request.title || tab.title || senderTab.title || '';
                 const directCardTraderBlueprintId = request.cardtraderBlueprintId || cardtraderBlueprintIdFromUrl(currentUrl);
                 clearTimeout(sidePanelRefreshTimers.get(tab.id));
-                await chrome.sidePanel?.open({ tabId: tab.id });
+                await openSidePanelPromise;
                 const requestClues = normalizeRequestClues(request.clues);
                 const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
                 const requestTitle = buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
