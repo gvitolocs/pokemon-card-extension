@@ -3891,6 +3891,176 @@ test('Vinted side panel Refresh waits when canonical overlay state is not ready'
     assert.equal(scraped, false);
 });
 
+test('Vinted navigation waits for token scanner, then token-ready drives scoped side-panel search', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const storageWrites = [];
+    const fetchBodies = [];
+    let scraped = false;
+    let activeTab = {
+        id: 84,
+        title: 'Cleffa 20/111',
+        url: 'https://www.vinted.it/items/84-cleffa-20-111',
+    };
+    const expectedByUrl = {
+        [activeTab.url]: {
+            name: 'Cleffa',
+            collectorNumber: '20/111',
+            row: { cardId: 'cleffa-20', name: 'Cleffa', expansionName: 'Neo Genesis', collectorNumber: '20/111', score: 99 },
+        },
+        'https://www.vinted.it/items/85-magneton-promo-159': {
+            name: 'Magneton',
+            collectorNumber: 'PROMO 159',
+            row: { cardId: 'magneton-promo-159', name: 'Magneton', expansionName: 'SV Black Star Promos', collectorNumber: '159', score: 98 },
+        },
+        'https://www.vinted.it/items/86-rocket-zapdos-15-132': {
+            name: 'Rocket Zapdos',
+            collectorNumber: '15/132',
+            row: { cardId: 'rocket-zapdos-15', name: 'Rocket Zapdos', expansionName: 'Gym Challenge', collectorNumber: '15/132', score: 97 },
+        },
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                const expected = expectedByUrl[activeTab.url];
+                assert.equal(body.name, expected.name);
+                assert.equal(body.collectorNumber, expected.collectorNumber);
+                assert.equal(body.variation || '', '');
+                return {
+                    ok: true,
+                    json: async () => ({ matches: [expected.row] }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [activeTab],
+                get: async () => activeTab,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    scraped = true;
+                    throw new Error('Vinted token-ready path must not scrape active tab');
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener({ action: 'marketplaceNavigationChanged' }, { tab: activeTab }, resolve);
+    });
+
+    assert.equal(storage.sidePanelState.loading, true);
+    assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+    assert.equal(fetchBodies.length, 0, 'navigation must not search before tokens are ready');
+    assert.equal(scraped, false);
+
+    for (const [url, expected] of Object.entries(expectedByUrl)) {
+        activeTab = {
+            id: 84,
+            title: `${expected.name} ${expected.collectorNumber}`,
+            url,
+        };
+        await new Promise((resolve) => {
+            messageListener({ action: 'marketplaceNavigationChanged' }, { tab: activeTab }, resolve);
+        });
+        assert.equal(storage.sidePanelState.loading, true);
+        assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+        const selectedClues = [expected.name, expected.collectorNumber];
+        const response = await new Promise((resolve) => {
+            messageListener(
+                {
+                    action: 'marketplacePreviewReady',
+                    source: 'vinted',
+                    tokensReady: true,
+                    url,
+                    title: `${expected.name} ${expected.collectorNumber}`,
+                    originalTitle: `${expected.name} ${expected.collectorNumber}`,
+                    clues: selectedClues,
+                    selectedClues,
+                    primaryClues: [expected.name],
+                    previewSource: 'vinted_overlay_tokens',
+                    previewSignature: `vinted|${expected.name}|${expected.collectorNumber}`,
+                    vintedPayload: {
+                        source: 'vinted',
+                        listingKey: url,
+                        originalTitle: `${expected.name} ${expected.collectorNumber}`,
+                        searchTitle: `${expected.name} ${expected.collectorNumber}`,
+                        name: expected.name,
+                        variation: '',
+                        collectorNumber: expected.collectorNumber,
+                        numericCollectorNumber: expected.collectorNumber.match(/\d+/)?.[0] || '',
+                        selectedClues,
+                        primaryClues: [expected.name],
+                        selectedChipCategories: [
+                            { label: expected.name, value: expected.name, category: 'name' },
+                            { label: expected.collectorNumber, value: expected.collectorNumber, category: 'collector' },
+                        ],
+                    },
+                },
+                { tab: activeTab },
+                resolve
+            );
+        });
+
+        assert.equal(response.success, true);
+        assert.deepEqual([...response.result.rows.map((row) => row.card_id)], [expected.row.cardId]);
+        assert.equal(storage.sidePanelState.pageInfo.vintedPayload.name, expected.name);
+        assert.equal(storage.sidePanelState.pageInfo.vintedPayload.collectorNumber, expected.collectorNumber);
+        assert.equal(storage.sidePanelState.debug.vintedTokenReadyDriven, true);
+
+        const refreshResponse = await new Promise((resolve) => {
+            messageListener({ action: 'resolveActiveTabForSidePanel', forceRefresh: true }, {}, resolve);
+        });
+        assert.equal(refreshResponse.success, true);
+        assert.equal(refreshResponse.result.pageInfo.vintedPayload.name, expected.name);
+        assert.equal(refreshResponse.result.pageInfo.vintedPayload.collectorNumber, expected.collectorNumber);
+    }
+
+    assert.equal(scraped, false);
+    assert.ok(fetchBodies.every((entry) => entry.url.includes('/api/extension-card-search') || entry.url.includes('/api/cardtrader-redirect')));
+});
+
 test('Vinted stale old-page preview-ready message is ignored', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;

@@ -1883,6 +1883,7 @@ class VintedProcessor {
                 title: searchSource.title,
             });
             this.prepareVintedKeywords(searchSource.title, searchSource.description);
+            this.sendVintedTokensReady('title-ready');
             const titleInfo = this.extractTitleInfo(searchSource.title);
             this.runVintedSearch(titleInfo, searchSource.title, 'product-data');
 
@@ -1949,6 +1950,7 @@ class VintedProcessor {
                     this.selectedKeywordValues.add(keyword.compact);
                 }
                 this.applyKeywordChipStyle(chip, !isSelected);
+                this.sendVintedTokensReady('keyword-toggle');
                 this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle, 'keyword-toggle');
             });
             container.appendChild(chip);
@@ -2047,13 +2049,22 @@ class VintedProcessor {
     }
 
     sendVintedPreviewReady(searchSignature, details = {}) {
+        return this.sendVintedTokensReady(details.trigger || 'preview-ready', {
+            searchSignature,
+            includePreviewRows: true,
+        });
+    }
+
+    sendVintedTokensReady(trigger = 'tokens-ready', options = {}) {
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
         const vintedPayload = this.buildVintedPayload(this.currentTitle || document.title, clues);
-        const previewPayload = this.buildSidePanelPreviewRowsPayload();
+        const previewPayload = options.includePreviewRows ? this.buildSidePanelPreviewRowsPayload() : {};
+        const previewSignature = options.searchSignature || this.buildVintedSearchSignature(this.currentTitle || document.title, clues);
         const message = {
             action: 'marketplacePreviewReady',
             source: 'vinted',
+            tokensReady: true,
             url: window.location.href,
             title: this.buildVintedSearchTitle(this.currentTitle || document.title, clues),
             originalTitle: this.currentTitle || document.title,
@@ -2062,23 +2073,25 @@ class VintedProcessor {
             primaryClues,
             selectedClues: clues,
             vintedPayload,
-            previewSignature: searchSignature || this.buildVintedSearchSignature(this.currentTitle || document.title, clues),
-            previewSource: 'vinted_overlay',
+            previewSignature,
+            previewSource: options.includePreviewRows ? 'vinted_overlay' : 'vinted_overlay_tokens',
             ...previewPayload,
         };
-        this.recordVintedDiagnostic('preview-ready', {
-            trigger: details.trigger || '',
+        this.recordVintedDiagnostic(options.includePreviewRows ? 'preview-ready' : 'tokens-ready', {
+            trigger,
             searchSignature: message.previewSignature,
-            reason: `${message.previewRows?.length || 0} preview row(s) ready`,
+            reason: options.includePreviewRows
+                ? `${message.previewRows?.length || 0} preview row(s) ready`
+                : 'selected Vinted tokens ready',
             selectedChipCategories: vintedPayload.selectedChipCategories,
             payload: vintedPayload,
             title: message.title,
         });
         return Promise.resolve(chrome.runtime.sendMessage(message)).catch((error) => {
-            this.recordVintedDiagnostic('preview-ready-send-failed', {
-                trigger: details.trigger || '',
+            this.recordVintedDiagnostic(options.includePreviewRows ? 'preview-ready-send-failed' : 'tokens-ready-send-failed', {
+                trigger,
                 searchSignature: message.previewSignature,
-                reason: error?.message || 'Unable to send preview-ready message',
+                reason: error?.message || 'Unable to send Vinted ready message',
                 title: message.title,
             });
         });

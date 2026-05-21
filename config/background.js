@@ -14,6 +14,7 @@ const CARDMARKET_OBSERVATION_ENDPOINT = `${CARDVAULT_API_BASE_URL}/api/cardmarke
 const MAX_PENDING_CARDMARKET_OBSERVATIONS = 20;
 const CARDVAULT_FETCH_TIMEOUT_MS = 6000;
 const CARDVAULT_FETCH_RETRY_DELAY_MS = 250;
+const VINTED_TOKEN_READY_TIMEOUT_MS = 6000;
 
 let stats = {
     cardsProcessed: 0,
@@ -2058,6 +2059,7 @@ const sidePanelOwnersByTab = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
 const latestVintedCanonicalByTabUrl = new Map();
+const vintedTokenWaitTimers = new Map();
 const cardvaultNameResolutionCache = new Map();
 const pokoinPriceCache = new Map();
 const cardmarketObservationSignatures = new Set();
@@ -2093,6 +2095,10 @@ async function ensureRuntimeStorageCurrent() {
     }
     backgroundSearchInFlight.clear();
     backgroundSearchResultCache.clear();
+    for (const timeoutId of vintedTokenWaitTimers.values()) {
+        clearTimeout(timeoutId);
+    }
+    vintedTokenWaitTimers.clear();
     latestVintedCanonicalByTabUrl.clear();
     cardvaultNameResolutionCache.clear();
     sidePanelCurrentOwner = null;
@@ -2638,6 +2644,8 @@ function rememberVintedCanonicalPreview(canonical = null) {
     if (!cacheKey) {
         return null;
     }
+    clearTimeout(vintedTokenWaitTimers.get(cacheKey));
+    vintedTokenWaitTimers.delete(cacheKey);
     latestVintedCanonicalByTabUrl.set(cacheKey, canonical);
     return canonical;
 }
@@ -2668,7 +2676,78 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
             refreshFailureReason: reason,
         },
     };
-    return setSidePanelState(state, owner);
+    const writtenState = await setSidePanelState(state, owner);
+    const cacheKey = vintedCanonicalCacheKey(tab?.id, tab?.url || '');
+    if (cacheKey && typeof setTimeout === 'function') {
+        clearTimeout(vintedTokenWaitTimers.get(cacheKey));
+        const timeoutId = setTimeout(async () => {
+            vintedTokenWaitTimers.delete(cacheKey);
+            const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+            const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
+            if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
+                return;
+            }
+            if (owner && !isSidePanelOwnerCurrent(owner, tab?.url || '')) {
+                return;
+            }
+            await setSidePanelState({
+                updatedAt: Date.now(),
+                loading: false,
+                pageInfo: {
+                    title: tab?.title || '',
+                    url: tab?.url || '',
+                    hostname: safeUrlHostname(tab?.url),
+                },
+                rows: [],
+                best: null,
+                blueprintId: '',
+                pokoinUrl: '',
+                error: 'Waiting for Vinted listing details.',
+                debug: {
+                    waitingForVintedPreview: true,
+                    vintedTokenReadyTimeout: true,
+                    refreshFailureReason: reason,
+                },
+            }, owner);
+        }, VINTED_TOKEN_READY_TIMEOUT_MS);
+        timeoutId?.unref?.();
+        vintedTokenWaitTimers.set(cacheKey, timeoutId);
+    }
+    return writtenState;
+}
+
+async function resolveVintedCanonicalTokensForSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    const vintedPayload = normalizeVintedPayload(canonical.vintedPayload);
+    if (!vintedPayload) {
+        return applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, options);
+    }
+    const tokenTab = {
+        ...tab,
+        url: canonical.url || tab?.url || '',
+        title: canonical.title || vintedPayload.searchTitle || tab?.title || '',
+    };
+    return resolveActiveTabForSidePanel(tokenTab, {
+        expectedUrl: canonical.url || tab?.url || '',
+        originalTitle: canonical.originalTitle || vintedPayload.originalTitle || tab?.title || '',
+        clues: canonical.clues || vintedPayload.selectedClues,
+        primaryClues: canonical.primaryClues || vintedPayload.primaryClues,
+        vintedPayload,
+        owner,
+        vintedTokenReadyDriven: true,
+        vintedPreviewSignature: canonical.previewSignature || '',
+        vintedPreviewSource: canonical.previewSource || 'vinted_overlay_tokens',
+        reason: options.reason || '',
+    });
+}
+
+async function applyVintedCanonicalToSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    if (canonical?.previewRows?.length > 0) {
+        return applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, options);
+    }
+    if (canonical?.vintedPayload) {
+        return resolveVintedCanonicalTokensForSidePanel(tab, canonical, owner, options);
+    }
+    return setVintedWaitingForPreviewState(tab, options.reason || 'awaiting-vinted-tokens', owner);
 }
 
 async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
@@ -2806,8 +2885,8 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
         clearTimeout(sidePanelRefreshTimers.get(tab.id));
         sidePanelRefreshTimers.delete(tab.id);
         const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
-        if (canonical?.previewRows?.length > 0) {
-            await applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, { reason });
+        if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
+            await applyVintedCanonicalToSidePanel(tab, canonical, owner, { reason });
             return;
         }
         await setVintedWaitingForPreviewState(tab, reason, owner);
@@ -2975,6 +3054,9 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         bestId: '',
         error,
         phaseTimings,
+        vintedTokenReadyDriven: Boolean(requestContext.vintedTokenReadyDriven),
+        vintedPreviewSignature: requestContext.vintedPreviewSignature || '',
+        vintedPreviewSource: requestContext.vintedPreviewSource || '',
     };
 
     if (!pageInfo.unsupported && pageInfo.title) {
@@ -3231,9 +3313,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
                 if (isVintedUrl(tab.url || '')) {
                     const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
-                    if (canonical?.previewRows?.length > 0) {
+                    if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
                         const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-canonical' : 'resolve-vinted-canonical');
-                        return applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, {
+                        return applyVintedCanonicalToSidePanel(tab, canonical, owner, {
                             reason: request.forceRefresh ? 'side-panel-refresh' : 'resolve-active-tab',
                         });
                     }
@@ -3711,7 +3793,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     url: currentUrl,
                     title: request.title || currentTab.title || '',
                 }, 'vinted-preview-ready');
-                const result = await applyVintedCanonicalPreviewToSidePanel({
+                const result = await applyVintedCanonicalToSidePanel({
                     ...currentTab,
                     id: senderTab.id,
                     url: currentUrl,
