@@ -212,7 +212,8 @@ function expansionShortName(row = {}) {
 function compactCandidateMeta(row = {}) {
     const collector = firstCollectorNumber(row.card_number);
     const expansion = expansionShortName(row);
-    return [collector, expansion].filter(Boolean).join(' · ');
+    const price = row.pokoin_price || row.pokoinPrice || row.price_formatted || row.priceFormatted || '';
+    return [collector, expansion, price].filter(Boolean).join(' · ');
 }
 
 function renderCandidate(row, isBest = false) {

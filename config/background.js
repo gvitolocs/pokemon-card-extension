@@ -1176,6 +1176,8 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         }
     }
 
+    await enrichRowsWithPokoinPrices(rows);
+
     const best = rows[0] || null;
     const blueprintId = best?.card_id ? String(best.card_id) : '';
     const pokoinUrl = blueprintId ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${blueprintId}` : '';
@@ -1274,9 +1276,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
                     const searchResult = await searchExtensionCard(structuredCard);
                     if (searchResult.rows.length > 0) {
+                        await enrichRowsWithPokoinPrices(searchResult.rows);
                         return searchResult.rows.map(legacyResultFromRow);
                     }
                     const fallbackSearch = await searchCardvault(title, structuredCard?.name || '');
+                    await enrichRowsWithPokoinPrices(fallbackSearch.rows);
                     return fallbackSearch.rows.map(legacyResultFromRow);
                 })
                 .then((results) => {

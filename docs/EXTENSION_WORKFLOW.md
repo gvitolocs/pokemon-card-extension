@@ -13,14 +13,15 @@
 9. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
 10. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
 11. CardTrader card URLs already contain the Pokoin/CardTrader blueprint id, so CardTrader button clicks construct side-panel state immediately from the URL id and do not wait for page scraping, Cardvault name resolution, extension search, or autocomplete.
-12. Direct CardTrader state stores a human card name for the side-panel header. If CardTrader only provides a URL-like title, the extension derives the name from the card URL slug instead of showing the long `cardtrader.com/...` path.
-13. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
-14. Vinted renders its Pokoin button, clue chips, and candidate preview in a compact transparent fixed overlay marked with `data-pokoin-extension-panel`. The overlay uses Shadow DOM when the browser supports it, with reset styles on the host and inside the shadow tree so Vinted page CSS cannot restyle the Pokoin controls.
-15. Vinted processing is keyed by a stable listing URL that ignores query strings and hashes. Repeated `processProductPage()` calls, MutationObserver callbacks, and same-listing SPA rerenders reattach or reuse the existing owned root instead of creating another button, clue chip group, preview list, or background search.
-16. Vinted starts preview search as soon as the item title and description are available. It does not wait for the final safe details anchor before sending `searchCardForTitle`.
-17. Vinted preview searches are keyed by listing URL plus the selected clue signature. One in-flight search is shared for identical listing/clue inputs, stale responses are ignored, and cached results prevent identical repeated `searchCardForTitle` messages. Toggling a clue intentionally creates one new signature and runs exactly one new preview search.
-18. When search results arrive before Vinted has finished loading the details anchor, the processor stores them by signature. The UI mounts later inside the safe detail container and immediately applies cached results without sending another search.
-19. Each Vinted processing session records lightweight diagnostics on `window.__pokoinVintedDiagnostics`: stable listing key, search signature, trigger/reason, sequence id, duplicate skip reason, stale-response status, and anchor/UI mount status. These records are for debugging repeated same-page searches and avoid noisy per-selector console spam.
+12. Direct CardTrader state stores a human card name for the side-panel header. The header keeps only the card name and variation, such as `Hypno` or `Gengar & Mimikyu GX`, and drops expansion/category/site suffixes from CardTrader titles and URL slugs.
+13. CardTrader injects the Pokoin button as a real `type="button"` beside the card title and handles click events in capture phase. The handler prevents default page actions, stops propagation, ignores duplicate clicks while an open request is in flight, and sends a single side-panel message instead of letting CardTrader links/forms/navigation handlers react.
+14. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
+15. Vinted renders its Pokoin button, clue chips, and candidate preview in a compact transparent fixed overlay marked with `data-pokoin-extension-panel`. The overlay uses Shadow DOM when the browser supports it, with reset styles on the host and inside the shadow tree so Vinted page CSS cannot restyle the Pokoin controls.
+16. Vinted processing is keyed by a stable listing URL that ignores query strings and hashes. Repeated `processProductPage()` calls, MutationObserver callbacks, and same-listing SPA rerenders reattach or reuse the existing owned root instead of creating another button, clue chip group, preview list, or background search.
+17. Vinted starts preview search as soon as the item title and description are available. It does not wait for the final safe details anchor before sending `searchCardForTitle`.
+18. Vinted preview searches are keyed by listing URL plus the selected clue signature. One in-flight search is shared for identical listing/clue inputs, stale responses are ignored, and cached results prevent identical repeated `searchCardForTitle` messages. Toggling a clue intentionally creates one new signature and runs exactly one new preview search.
+19. When search results arrive before Vinted has finished loading the details anchor, the processor stores them by signature. The UI mounts later inside the safe detail container and immediately applies cached results without sending another search.
+20. Each Vinted processing session records lightweight diagnostics on `window.__pokoinVintedDiagnostics`: stable listing key, search signature, trigger/reason, sequence id, duplicate skip reason, stale-response status, and anchor/UI mount status. These records are for debugging repeated same-page searches and avoid noisy per-selector console spam.
 
 ## Match Resolution Flow
 
@@ -43,7 +44,7 @@
 
 ## Candidate Display Flow
 
-1. Candidate rows show compact metadata only: collector/card number plus expansion name. Vinted intentionally hides the card name in preview rows because it repeats the listing/search name.
+1. Candidate rows show compact metadata only: collector/card number, expansion name, and Pokoin listing price when available. Vinted intentionally hides the card name in preview rows because it repeats the listing/search name.
 2. Collector metadata shows only the first collector number:
    - `SVP 129` becomes `129`
    - `232/091` becomes `232`
@@ -58,6 +59,7 @@
 10. Vinted keeps one overlay root per listing. A MutationObserver watches for Vinted SPA rerenders that remove the host, then reattaches the same fixed overlay without duplicating panels, searches, or losing the current button/chip/candidate state. Vinted-specific navigation watching detects true listing URL changes and resets the guard so the new listing renders and searches once.
 11. The Vinted overlay sits at the lower-left viewport edge to avoid covering the listing content and remains isolated from Vinted CSS.
 12. Expansion logos only decorate candidate rows when available. They do not reorder side-panel results; candidate order remains the order returned by the background/API ranking.
+13. The background service worker enriches up to eight returned candidates with a cached lookup to `/api/cardtrader-redirect?id=:blueprintId` and reads the first formatted product listing price. Price lookup failures are ignored so candidate rendering is never blocked by marketplace inventory data.
 
 ## Processor Boundaries
 
@@ -73,4 +75,4 @@ The background `searchCardForTitle` path also de-dupes identical active requests
 
 CardTrader was slower when the side panel opened because the background service worker still executed the generic page-title scraping path before it noticed the URL contained a blueprint id. The direct path now checks CardTrader URLs before injecting any page script or calling Cardvault APIs, writes the side-panel state with `source: cardtrader_url`, and opens the common side panel immediately.
 
-When direct CardTrader state is rendered, the side panel treats it as a full card page view: candidates remain hidden, the embedded Pokoin card page fills the remaining panel space, and the header uses a clean card name from the page title, structured card data, or URL slug fallback. The same cleanup is used for direct CardTrader preview/search responses, so URL-like titles never leak into the side-panel header or candidate payload.
+When direct CardTrader state is rendered, the side panel treats it as a full card page view: candidates remain hidden, the embedded Pokoin card page fills the remaining panel space, and the header uses a clean card name from the page title, structured card data, or URL slug fallback. The same cleanup is used for direct CardTrader preview/search responses, so URL-like titles and verbose expansion/category/site suffixes never leak into the side-panel header or candidate payload.

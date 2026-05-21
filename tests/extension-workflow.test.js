@@ -1540,6 +1540,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
         name_en: 'Regigigas VSTAR',
         collector_number: `${114 + index}/189`,
         expansion_name_en: 'Astral Radiance',
+        pokoin_price: index === 0 ? '$12.34' : '',
     })));
 
     const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
@@ -1550,6 +1551,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.doesNotMatch(rows[0].innerHTML, /Regigigas VSTAR/);
     assert.match(rows[0].innerHTML, /114/);
     assert.match(rows[0].innerHTML, /Astral Radiance/);
+    assert.match(rows[0].innerHTML, /\$12\.34/);
 
     await rows[0].eventListeners.click({
         preventDefault() {},
@@ -1565,6 +1567,27 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.ok(messages.at(-1).clues.some((clue) => /^vstar$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^regigigas$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^vstar$/i.test(clue)));
+});
+
+test('Vinted candidate metadata includes Pokoin price when available', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor');
+    const processor = new Processor();
+
+    assert.equal(
+        processor.compactCandidateMeta({
+            collector_number: 'SVP 129',
+            expansion_name_en: 'Black Star Promos',
+            pokoin_price: '$9.99',
+        }),
+        '129 · Black Star Promos · $9.99'
+    );
+    assert.equal(
+        processor.compactCandidateMeta({
+            collector_number: '232/091',
+            expansion_name_en: 'Paldean Fates',
+        }),
+        '232 · Paldean Fates'
+    );
 });
 
 test('Vinted main Pokoin button opens side panel from shadow overlay', async () => {
@@ -1742,6 +1765,16 @@ test('Cardmarket background search payload uses structured card name first', asy
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        products: [{
+                            price: { non_layered_price_formatted: '$3.21' },
+                        }],
+                    }),
+                };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/marketplace-autocomplete')) {
@@ -1812,6 +1845,7 @@ test('Cardmarket background search payload uses structured card name first', asy
 
     assert.equal(response.success, true);
     assert.equal(response.results[0].name_en, 'Camerupt');
+    assert.equal(response.results[0].pokoin_price, '$3.21');
     assert.equal(fetchBodies[0].body.search_term, 'Camerupt');
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Camerupt');
@@ -1834,6 +1868,12 @@ test('background search de-dupes repeated identical title requests', async () =>
         fetch: async (url, options = {}) => {
             fetchCalls += 1;
             await fetchGate;
+            if (url.includes('/api/cardtrader-redirect')) {
+                return {
+                    ok: true,
+                    json: async () => ({ products: [] }),
+                };
+            }
             const body = JSON.parse(options.body || '{}');
             if (url.includes('/api/marketplace-autocomplete')) {
                 return {
@@ -1906,7 +1946,7 @@ test('background search de-dupes repeated identical title requests', async () =>
     assert.equal(responses[1].success, true);
     assert.equal(responses[0].results[0].name_en, 'Reshiram');
     assert.equal(responses[1].results[0].name_en, 'Reshiram');
-    assert.equal(fetchCalls, 2, 'name resolution and structured search should run once each for duplicate requests');
+    assert.equal(fetchCalls, 3, 'name resolution, structured search, and one price lookup should run once for duplicate requests');
 });
 
 test('background side panel open honors selected Vinted candidate without reordering search', async () => {
@@ -2260,6 +2300,61 @@ test('CardTrader direct background search returns clean URL slug name', async ()
     assert.equal(fetchCalls, 0);
 });
 
+test('CardTrader direct title cleanup drops expansion and site suffix', async () => {
+    const source = readRepoFile('config/background.js');
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            throw new Error('CardTrader direct cleanup should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct cleanup should not scrape');
+                },
+            },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.cleanCardTraderDirectName = cleanCardTraderDirectName;`, sandbox, { filename: 'config/background.js' });
+
+    assert.equal(
+        sandbox.cleanCardTraderDirectName(
+            'Hypno Wizards of the Coast Era Promos | Pokémon',
+            'https://www.cardtrader.com/en/cards/99999-hypno-wizards-of-the-coast-era-promos',
+            '99999'
+        ),
+        'Hypno'
+    );
+    assert.equal(
+        sandbox.cleanCardTraderDirectName(
+            'Gengar & Mimikyu GX Team Up | Pokémon',
+            'https://www.cardtrader.com/en/cards/88888-gengar-and-mimikyu-gx-team-up',
+            '88888'
+        ),
+        'Gengar & Mimikyu GX'
+    );
+});
+
 test('CardTrader direct side panel state uses clean card name from URL slug', async () => {
     const source = readRepoFile('config/background.js');
     const storageWrites = [];
@@ -2467,6 +2562,7 @@ test('CardTrader injected button intercepts click and opens side panel workflow'
         'function setPokoinButtonLabel(button) { button.innerHTML = "Pokoin.com"; }',
         'function applyPokoinButtonStyles() {}',
         extractFunctionSource(source, 'extractCardTraderBlueprintId', contentStart),
+        extractFunctionSource(source, 'cardTraderDirectTitle', contentStart),
         extractFunctionSource(source, 'patchCardTraderCardPage', contentStart),
         extractFunctionSource(source, 'openPokoinSidePanel', contentStart),
     ].join('\n');
@@ -2551,6 +2647,7 @@ test('CardTrader injected button intercepts click and opens side panel workflow'
         },
     };
     await listeners.click.listener(event);
+    await listeners.click.listener(event);
 
     assert.equal(titleElement.insertedElement.attributes['data-pokoin-cardtrader-button'], 'true');
     assert.equal(listeners.click.options, true);
@@ -2563,11 +2660,113 @@ test('CardTrader injected button intercepts click and opens side panel workflow'
     assert.equal(messages[0].title, 'Charizard ex');
 });
 
+test('CardTrader button click sends one side-panel message and blocks page handlers', async () => {
+    const source = readRepoFile('content.js');
+    const contentStart = source.indexOf('function pokoinIconUrl');
+    const functions = [
+        'function setPokoinButtonLabel(button) { button.innerHTML = "Pokoin.com"; }',
+        'function applyPokoinButtonStyles() {}',
+        extractFunctionSource(source, 'extractCardTraderBlueprintId', contentStart),
+        extractFunctionSource(source, 'cardTraderDirectTitle', contentStart),
+        extractFunctionSource(source, 'patchCardTraderCardPage', contentStart),
+        extractFunctionSource(source, 'openPokoinSidePanel', contentStart),
+    ].join('\n');
+    const messages = [];
+    const listeners = {};
+    let resolveSendMessage;
+    const sendMessagePromise = new Promise((resolve) => {
+        resolveSendMessage = resolve;
+    });
+    const titleElement = {
+        textContent: 'Hypno Wizards of the Coast Era Promos',
+        insertAdjacentElement(_position, element) {
+            this.insertedElement = element;
+        },
+    };
+    const titleBlock = {
+        querySelector: (selector) => selector === 'h2' ? titleElement : null,
+    };
+    const sandbox = {
+        window: {
+            location: {
+                hostname: 'www.cardtrader.com',
+                pathname: '/en/cards/99999-hypno-wizards-of-the-coast-era-promos',
+                href: 'https://www.cardtrader.com/en/cards/99999-hypno-wizards-of-the-coast-era-promos',
+            },
+        },
+        document: {
+            title: 'Hypno Wizards of the Coast Era Promos | Pokémon',
+            querySelector(selector) {
+                if (selector === '[data-pokoin-cardtrader-button]') return null;
+                if (selector === '.py-3.text-center.text-sm-left') return titleBlock;
+                if (selector === '.py-3.text-center.text-sm-left h2, h1, h2') return titleElement;
+                return null;
+            },
+            createElement(tagName) {
+                return {
+                    tagName: tagName.toUpperCase(),
+                    style: {},
+                    attributes: {},
+                    setAttribute(name, value) {
+                        this.attributes[name] = value;
+                    },
+                    querySelector: () => ({ style: {} }),
+                    addEventListener(type, listener, options) {
+                        listeners[type] = { listener, options };
+                    },
+                };
+            },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: (message) => {
+                    messages.push(message);
+                    return sendMessagePromise;
+                },
+            },
+        },
+        console: { log() {}, warn() {}, error() {} },
+    };
+    sandbox.window.window = sandbox.window;
+    vm.createContext(sandbox);
+    vm.runInContext(`${functions}\nthis.patchCardTraderCardPage = patchCardTraderCardPage;`, sandbox, { filename: 'content.js' });
+
+    sandbox.patchCardTraderCardPage();
+    const event = {
+        defaultPrevented: false,
+        propagationStopped: false,
+        immediatePropagationStopped: false,
+        preventDefault() {
+            this.defaultPrevented = true;
+        },
+        stopPropagation() {
+            this.propagationStopped = true;
+        },
+        stopImmediatePropagation() {
+            this.immediatePropagationStopped = true;
+        },
+    };
+    const firstClick = listeners.click.listener(event);
+    const secondClick = listeners.click.listener(event);
+    assert.equal(messages.length, 1);
+    assert.equal(event.defaultPrevented, true);
+    assert.equal(event.propagationStopped, true);
+    assert.equal(event.immediatePropagationStopped, true);
+    assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
+    assert.equal(messages[0].cardtraderBlueprintId, '99999');
+    assert.equal(messages[0].title, 'Hypno Wizards of the Coast Era Promos');
+
+    resolveSendMessage({ success: true });
+    await Promise.all([firstClick, secondClick]);
+});
+
 test('content legacy gray buttons attach side-panel click before search results', async () => {
     const source = readRepoFile('content.js');
     const contentStart = source.indexOf('function pokoinIconUrl');
     const functions = [
         extractFunctionSource(source, 'extractCardTraderBlueprintId', contentStart),
+        extractFunctionSource(source, 'cardTraderDirectTitle', contentStart),
         extractFunctionSource(source, 'openPokoinSidePanel', contentStart),
         extractFunctionSource(source, 'attachPokoinSidePanelClick', contentStart),
     ].join('\n');
@@ -2608,6 +2807,7 @@ test('content legacy gray buttons attach side-panel click before search results'
     await listeners.click({
         preventDefault() {},
         stopPropagation() {},
+        stopImmediatePropagation() {},
     });
 
     assert.equal(messages.length, 1);

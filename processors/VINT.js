@@ -395,7 +395,8 @@ class VintedProcessor {
         const number = rawNumber
             .match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)(?:\s*\/\s*\d{1,4}[a-z]?)?\b/i)?.[1] || '';
         const setName = result.expansion_name_en || result.expansionName || result.set_name || result.setName || '';
-        return [number || rawNumber, setName].filter(Boolean).join(' · ');
+        const price = result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '';
+        return [number || rawNumber, setName, price].filter(Boolean).join(' · ');
     }
 
     vintedPanelRoot(panel = this.currentPanel) {
@@ -530,6 +531,7 @@ class VintedProcessor {
                 expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
                 source: result.source || 'vinted_overlay',
                 search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
+                pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
             },
         };
     }
