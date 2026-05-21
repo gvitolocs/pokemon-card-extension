@@ -786,6 +786,7 @@ function normalizeMarketplacePayload(payload = null) {
         expansion: removeMarketplaceSearchNoise(payload.expansion || ''),
         rarity: removeMarketplaceSearchNoise(payload.rarity || (features.includes('illustration') ? 'illustration' : '')),
         variation: removeMarketplaceSearchNoise(payload.variation || ''),
+        strictVariation: payload.source === 'vinted' && !payload.variation,
         searchName: removeMarketplaceSearchNoise([payload.name || primaryClues[0] || '', payload.variation || ''].filter(Boolean).join(' ')),
     };
     return {
@@ -935,6 +936,9 @@ function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
     }
 
     const resolvedCompact = compactSearchValue(resolvedName);
+    if (requestedName && requestedName.length > resolvedCompact.length && requestedName.includes(resolvedCompact)) {
+        return false;
+    }
     const searchCompact = compactSearchValue(structuredCard?.searchName || '');
     const requestedWithoutNumbers = compactSearchValue(String(structuredCard?.name || '').replace(/\b\d{1,4}[a-z]?\b/gi, ' '));
     const searchWithoutNumbers = compactSearchValue(String(structuredCard?.searchName || '').replace(/\b\d{1,4}[a-z]?\b/gi, ' '));
@@ -1246,6 +1250,9 @@ function rowMatchesStructuredName(row, structuredCard) {
     if (hasStructuredCollectorIdentity(structuredCard) && !normalizeVariationValue(structuredCard?.variation || '')) {
         return rowName === requestedName;
     }
+    if (requestedName.length > rowName.length && requestedName.includes(rowName)) {
+        return false;
+    }
     return rowName === requestedName ||
         rowName.includes(requestedName) ||
         requestedName.includes(rowName);
@@ -1414,13 +1421,13 @@ function explicitVariationFromName(value = '') {
 
 function rowMatchesStructuredVariation(row = {}, structuredCard = {}) {
     const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
+    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
     if (!requestedVariation) {
-        return true;
+        return !structuredCard?.strictVariation || !rowVariation;
     }
     if (requestedVariation === 'v' && !hasExplicitVariationStructuredRows([row], structuredCard)) {
         return false;
     }
-    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
     return !rowVariation || rowVariation === requestedVariation;
 }
 
@@ -2050,6 +2057,7 @@ let sidePanelStaleIgnoredCount = 0;
 const sidePanelOwnersByTab = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
+const latestVintedCanonicalByTabUrl = new Map();
 const cardvaultNameResolutionCache = new Map();
 const pokoinPriceCache = new Map();
 const cardmarketObservationSignatures = new Set();
@@ -2085,6 +2093,7 @@ async function ensureRuntimeStorageCurrent() {
     }
     backgroundSearchInFlight.clear();
     backgroundSearchResultCache.clear();
+    latestVintedCanonicalByTabUrl.clear();
     cardvaultNameResolutionCache.clear();
     sidePanelCurrentOwner = null;
     sidePanelOwnersByTab.clear();
@@ -2566,6 +2575,214 @@ function stableSearchUrl(url = '') {
     }
 }
 
+function vintedCanonicalCacheKey(tabId, url = '') {
+    const stableUrl = stableSearchUrl(url);
+    return tabId && stableUrl ? `${tabId}|${stableUrl}` : '';
+}
+
+function vintedCanonicalFromPinnedState(state = {}, tab = {}) {
+    if (!samePinnedVintedPreviewState(state, tab?.url || '')) {
+        return null;
+    }
+    const pageInfo = state.pageInfo || {};
+    return {
+        tabId: tab?.id || null,
+        url: pageInfo.url || tab?.url || '',
+        title: pageInfo.title || tab?.title || '',
+        originalTitle: pageInfo.originalTitle || tab?.title || pageInfo.title || '',
+        listingKey: pageInfo.vintedPayload?.listingKey || stableSearchUrl(pageInfo.url || tab?.url || ''),
+        clues: normalizeRequestClues(pageInfo.selectedClues || pageInfo.clues),
+        primaryClues: normalizeRequestClues(pageInfo.primaryClues),
+        vintedPayload: normalizeVintedPayload(pageInfo.vintedPayload),
+        previewSignature: pageInfo.previewSignature || state.debug?.previewSignature || '',
+        previewSource: state.debug?.previewSource || 'vinted_overlay',
+        previewRows: (Array.isArray(state.rows) ? state.rows : [])
+            .map(sidePanelRowFromPreview)
+            .filter(Boolean),
+        selectedCandidateId: pageInfo.selectedCandidateId || '',
+        updatedAt: state.updatedAt || Date.now(),
+        source: 'vinted',
+    };
+}
+
+function vintedCanonicalFromRequest(request = {}, senderTab = {}) {
+    const url = request.url || senderTab?.url || '';
+    if (!isVintedUrl(url) || (senderTab?.url && !sameUrlWithoutHash(url, senderTab.url))) {
+        return null;
+    }
+    const vintedPayload = normalizeVintedPayload(request.vintedPayload || request.marketplacePayload);
+    const previewRows = previewRowsFromRequest(request);
+    if (!vintedPayload && previewRows.length === 0) {
+        return null;
+    }
+    return {
+        tabId: senderTab?.id || null,
+        url,
+        title: request.title || vintedPayload?.searchTitle || senderTab?.title || '',
+        originalTitle: request.originalTitle || vintedPayload?.originalTitle || senderTab?.title || '',
+        listingKey: request.listingKey || vintedPayload?.listingKey || stableSearchUrl(url),
+        clues: vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues),
+        primaryClues: vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues),
+        vintedPayload,
+        previewSignature: request.previewSignature || '',
+        previewSource: request.previewSource || 'vinted_overlay',
+        previewRows,
+        selectedCandidateId: request.selectedCandidateId || '',
+        updatedAt: Date.now(),
+        source: 'vinted',
+    };
+}
+
+function rememberVintedCanonicalPreview(canonical = null) {
+    const cacheKey = vintedCanonicalCacheKey(canonical?.tabId, canonical?.url);
+    if (!cacheKey) {
+        return null;
+    }
+    latestVintedCanonicalByTabUrl.set(cacheKey, canonical);
+    return canonical;
+}
+
+function latestVintedCanonicalPreview(tab = {}, state = null) {
+    const cacheKey = vintedCanonicalCacheKey(tab?.id, tab?.url || '');
+    return (cacheKey && latestVintedCanonicalByTabUrl.get(cacheKey)) ||
+        vintedCanonicalFromPinnedState(state, tab);
+}
+
+async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-vinted-preview', owner = null) {
+    const state = {
+        updatedAt: Date.now(),
+        loading: true,
+        pageInfo: {
+            title: tab?.title || '',
+            url: tab?.url || '',
+            hostname: safeUrlHostname(tab?.url),
+        },
+        rows: [],
+        best: null,
+        blueprintId: '',
+        pokoinUrl: '',
+        error: '',
+        debug: {
+            loading: true,
+            waitingForVintedPreview: true,
+            refreshFailureReason: reason,
+        },
+    };
+    return setSidePanelState(state, owner);
+}
+
+async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    if (!canonical?.url || !sameUrlWithoutHash(canonical.url, tab?.url || canonical.url)) {
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'Vinted canonical URL is stale');
+        }
+        return null;
+    }
+    const vintedPayload = normalizeVintedPayload(canonical.vintedPayload);
+    const requestClues = vintedPayload?.selectedClues || normalizeRequestClues(canonical.clues);
+    const requestPrimaryClues = vintedPayload?.primaryClues || normalizeRequestClues(canonical.primaryClues);
+    const requestTitle = vintedPayload?.searchTitle ||
+        buildPrimaryClueSearchTitle(canonical.originalTitle || canonical.title || tab?.title || '', requestClues, requestPrimaryClues);
+    const requestStructuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || canonical.title || tab?.title || '');
+    const previewRows = (Array.isArray(canonical.previewRows) ? canonical.previewRows : [])
+        .map(sidePanelRowFromPreview)
+        .filter(Boolean)
+        .slice(0, 8);
+    const bestPreviewRow = canonical.selectedCandidateId
+        ? previewRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || previewRows[0] || null
+        : previewRows[0] || null;
+    const previewResult = {
+        pageInfo: {
+            title: requestTitle || canonical.title || tab?.title || '',
+            url: canonical.url || tab?.url || '',
+            hostname: safeUrlHostname(canonical.url || tab?.url),
+            originalTitle: canonical.originalTitle || tab?.title || '',
+            clues: requestClues,
+            primaryClues: requestPrimaryClues,
+            selectedClues: requestClues,
+            structuredCard: requestStructuredCard,
+            vintedPayload,
+            previewSignature: canonical.previewSignature || '',
+            selectedCandidateId: canonical.selectedCandidateId || '',
+        },
+        rows: previewRows,
+        best: bestPreviewRow,
+        blueprintId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+        pokoinUrl: bestPreviewRow?.card_id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${bestPreviewRow.card_id}` : '',
+        error: previewRows.length > 0 ? '' : 'Waiting for Vinted product details.',
+        debug: {
+            version: 2,
+            tab: {
+                id: tab?.id || null,
+                title: tab?.title || '',
+                url: tab?.url || '',
+            },
+            query: requestTitle || canonical.title || tab?.title || '',
+            apiBaseUrl: CARDVAULT_API_BASE_URL,
+            attemptedQueries: [],
+            searched: false,
+            rowCount: previewRows.length,
+            bestId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+            selectedCandidateId: canonical.selectedCandidateId || '',
+            pinnedPreviewRows: previewRows.length > 0,
+            pinnedVintedPreview: previewRows.length > 0,
+            previewSignature: canonical.previewSignature || '',
+            previewSource: canonical.previewSource || 'vinted_overlay',
+            vintedReadyDriven: true,
+            vintedCanonicalUpdatedAt: canonical.updatedAt || null,
+            refreshFailureReason: options.reason || '',
+            vintedPayload: vintedPayload ? {
+                selectedChipCategories: vintedPayload.selectedChipCategories || [],
+                structuredCard: requestStructuredCard,
+            } : null,
+            error: '',
+        },
+    };
+    await setSidePanelState({
+        updatedAt: Date.now(),
+        ...previewResult,
+    }, owner);
+    if (previewRows.length > 0) {
+        void schedulePriceEnrichment(previewRows, async (enrichedRows) => {
+            if (owner && !isSidePanelOwnerCurrent(owner, canonical.url || tab?.url || '')) {
+                markStaleSidePanelOwner(owner, 'Vinted preview price enrichment owner no longer current');
+                return enrichedRows;
+            }
+            const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
+            if (
+                !currentSidePanelState?.debug?.pinnedVintedPreview ||
+                !sameUrlWithoutHash(currentSidePanelState.pageInfo?.url || '', canonical.url || tab?.url || '') ||
+                String(currentSidePanelState.blueprintId || '') !== String(bestPreviewRow?.card_id || '')
+            ) {
+                return enrichedRows;
+            }
+            const enrichedBest = canonical.selectedCandidateId
+                ? enrichedRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || enrichedRows[0] || null
+                : enrichedRows[0] || null;
+            const enrichedCanonical = {
+                ...canonical,
+                previewRows: enrichedRows,
+                updatedAt: Date.now(),
+            };
+            rememberVintedCanonicalPreview(enrichedCanonical);
+            await setSidePanelState({
+                updatedAt: Date.now(),
+                ...previewResult,
+                rows: enrichedRows,
+                best: enrichedBest,
+                blueprintId: enrichedBest?.card_id ? String(enrichedBest.card_id) : '',
+                pokoinUrl: enrichedBest?.card_id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${enrichedBest.card_id}` : '',
+                debug: {
+                    ...previewResult.debug,
+                    priceEnriched: true,
+                },
+            }, owner);
+            return enrichedRows;
+        });
+    }
+    return previewResult;
+}
+
 function buildBackgroundSearchSignature({ title = '', originalTitle = '', clues = [], primaryClues = [], url = '' } = {}) {
     return [
         stableSearchUrl(url),
@@ -2584,6 +2801,18 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 
     const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
     const currentStateUrl = sidePanelState?.pageInfo?.url || '';
+    if (isVintedUrl(tab.url)) {
+        const owner = createSidePanelRequestOwner(tab, reason);
+        clearTimeout(sidePanelRefreshTimers.get(tab.id));
+        sidePanelRefreshTimers.delete(tab.id);
+        const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
+        if (canonical?.previewRows?.length > 0) {
+            await applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, { reason });
+            return;
+        }
+        await setVintedWaitingForPreviewState(tab, reason, owner);
+        return;
+    }
     if (isLockedCardTraderDirectState(sidePanelState, tab.url)) {
         clearTimeout(sidePanelRefreshTimers.get(tab.id));
         sidePanelRefreshTimers.delete(tab.id);
@@ -3000,8 +3229,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     throw new Error('No active tab found.');
                 }
                 const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
-                if (!request.forceRefresh && samePinnedVintedPreviewState(sidePanelState, tab.url || '')) {
-                    return sidePanelState;
+                if (isVintedUrl(tab.url || '')) {
+                    const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
+                    if (canonical?.previewRows?.length > 0) {
+                        const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-canonical' : 'resolve-vinted-canonical');
+                        return applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, {
+                            reason: request.forceRefresh ? 'side-panel-refresh' : 'resolve-active-tab',
+                        });
+                    }
+                    const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-waiting' : 'resolve-vinted-waiting');
+                    await setVintedWaitingForPreviewState(tab, request.forceRefresh ? 'side-panel-refresh-awaiting-vinted-preview' : 'awaiting-vinted-preview', owner);
+                    return {
+                        pageInfo: {
+                            title: tab.title || '',
+                            url: tab.url || '',
+                            hostname: safeUrlHostname(tab.url),
+                        },
+                        rows: [],
+                        best: null,
+                        blueprintId: '',
+                        pokoinUrl: '',
+                        error: '',
+                        loading: true,
+                        debug: sidePanelOwnerDebug(owner, {
+                            waitingForVintedPreview: true,
+                            searched: false,
+                        }),
+                    };
                 }
                 return resolveActiveTabForSidePanel(tab, {
                     forceRefresh: Boolean(request.forceRefresh),
@@ -3166,6 +3420,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     scrapeStructuredCardFields(requestTitle || currentTitle, cardmarketContextFromRequest(request, currentUrl));
                 const selectedCandidateRow = selectedCandidateRowFromRequest(request);
                 const previewRows = previewRowsFromRequest(request);
+                const vintedCanonical = vintedCanonicalFromRequest(request, {
+                    ...tab,
+                    id: senderTab.id,
+                    url: currentUrl || tab.url || senderTab.url || '',
+                });
+                if (vintedCanonical) {
+                    rememberVintedCanonicalPreview({
+                        ...vintedCanonical,
+                        selectedCandidateId: selectedCandidateRow?.card_id || vintedCanonical.selectedCandidateId || '',
+                    });
+                }
                 if (directCardTraderBlueprintId) {
                     const directName = cleanCardTraderDirectName(currentTitle, currentUrl, directCardTraderBlueprintId);
                     const directRow = {
@@ -3409,6 +3674,53 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         scheduleSidePanelRefresh(tab, 'content-navigation')
             .then(() => sendResponse({ success: true }))
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to schedule refresh.' }));
+    } else if (request.action === 'marketplacePreviewReady' || request.action === 'vintedProductReady') {
+        Promise.resolve()
+            .then(async () => {
+                await ensureRuntimeStorageCurrent();
+                const senderTab = sender.tab;
+                if (!senderTab?.id) {
+                    return { success: false, error: 'No sender tab found.' };
+                }
+                const tab = chrome.tabs?.get ? await chrome.tabs.get(senderTab.id).catch(() => senderTab) : senderTab;
+                const currentTab = tab?.id ? tab : senderTab;
+                const currentUrl = request.url || currentTab.url || senderTab.url || '';
+                if (!isVintedUrl(currentUrl) || !sameUrlWithoutHash(currentUrl, currentTab.url || currentUrl)) {
+                    return { success: true, ignored: true, reason: 'stale-vinted-preview-url' };
+                }
+                const canonical = rememberVintedCanonicalPreview(vintedCanonicalFromRequest(request, {
+                    ...currentTab,
+                    id: senderTab.id,
+                    url: currentUrl,
+                }));
+                if (!canonical) {
+                    return { success: true, ignored: true, reason: 'missing-vinted-canonical-preview' };
+                }
+                const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+                const sidePanelUrl = sidePanelState?.pageInfo?.url || '';
+                if (
+                    sidePanelUrl &&
+                    !sameUrlWithoutHash(sidePanelUrl, currentUrl) &&
+                    isSupportedMarketplaceUrl(sidePanelUrl)
+                ) {
+                    return { success: true, ignored: true, reason: 'side-panel-owned-by-other-url' };
+                }
+                const owner = createSidePanelRequestOwner({
+                    ...currentTab,
+                    id: senderTab.id,
+                    url: currentUrl,
+                    title: request.title || currentTab.title || '',
+                }, 'vinted-preview-ready');
+                const result = await applyVintedCanonicalPreviewToSidePanel({
+                    ...currentTab,
+                    id: senderTab.id,
+                    url: currentUrl,
+                    title: request.title || currentTab.title || '',
+                }, canonical, owner, { reason: 'vinted-preview-ready' });
+                return { success: true, result };
+            })
+            .then((response) => sendResponse(response))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to apply Vinted preview.' }));
     }
     return true; // Keep channel open for async responses
 });

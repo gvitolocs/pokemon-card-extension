@@ -353,6 +353,14 @@ async function loadState() {
     renderState(sidePanelState);
 }
 
+async function warmPokoinAuthSession() {
+    try {
+        await chrome.runtime.sendMessage({ action: 'requestPokoinAuthToken' });
+    } catch (error) {
+        // Auth is opportunistic: the panel still works for public matching.
+    }
+}
+
 elements.refreshBtn.addEventListener('click', async () => {
     setStatus('Refreshing active tab match...');
     try {
@@ -383,6 +391,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
 loadState().catch((error) => {
     setStatus(error.message || 'Unable to load side panel state.', true);
 });
+
+warmPokoinAuthSession();
 
 loadExpansionLogos()
     .then(loadState)

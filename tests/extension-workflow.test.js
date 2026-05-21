@@ -477,7 +477,8 @@ test('Vinted falls back to background without error spam', async () => {
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], undefined);
     assert.equal(errors.length, 0, 'expected content fetch failures should not be logged as errors');
     assert.equal(warnings.length, 0, 'background-first Vinted search should not warn on content fetch');
-    assert.equal(chromeMessages.at(-1).action, 'searchCardForTitle');
+    assert.equal(chromeMessages.filter((message) => message.action === 'searchCardForTitle').length, 1);
+    assert.equal(chromeMessages.at(-1).action, 'marketplacePreviewReady');
     assert.equal(sandbox.window.VintedProcessor, Processor);
 });
 
@@ -877,6 +878,38 @@ test('Vinted Lapras bare collector number is atomic and keeps illustration visib
     assert.equal(lowerLabels.includes('194 appena'), false);
     assert.equal(keywords.find((keyword) => keyword.label === '194')?.category, 'collector');
     assert.equal(keywords.find((keyword) => keyword.label === 'illustration')?.selectedByDefault, false);
+});
+
+test('Vinted Rocket Zapdos keeps composite card name primary with collector', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/15-rocket-zapdos', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /zapdos/i.test(String(title || '')) ? 'Zapdos' : '',
+            }),
+        },
+    });
+    const processor = new Processor();
+    const title = 'Rocket Zapdos 15/132';
+
+    processor.currentTitle = title;
+    processor.prepareVintedKeywords(title, '');
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const selectedLabels = processor.selectedKeywordLabels();
+    const primaryClues = processor.selectedPrimaryClues(selectedLabels);
+    const payload = processor.buildVintedPayload(title, selectedLabels);
+
+    assert.ok(labels.includes('Rocket Zapdos'), 'composite card name chip should render');
+    assert.ok(labels.includes('Zapdos'), 'generic species chip can remain visible');
+    assert.ok(labels.includes('15/132'), 'collector chip should render');
+    assert.ok(selectedLabels.includes('Rocket Zapdos'), 'composite card name should be selected');
+    assert.equal(selectedLabels.includes('Zapdos'), false, 'generic species should be shadowed by composite name');
+    assert.deepEqual([...primaryClues], ['Rocket Zapdos']);
+    assert.equal(payload.name, 'Rocket Zapdos');
+    assert.equal(payload.collectorNumber, '15/132');
+    assert.equal(payload.numericCollectorNumber, '15');
+    assert.equal(payload.variation, '');
+    assert.deepEqual([...payload.primaryClues], ['Rocket Zapdos']);
 });
 
 test('Vinted illustration chip is always visible and only auto-selected from title hint', () => {
@@ -1676,10 +1709,11 @@ test('Vinted collector chip toggle changes signature and ignores stale results',
     resolveFirst({ success: true, results: [{ name_en: 'Pikachu', collector_number: '179/165', expansion_name_en: 'Pokemon 151', search_score: 99 }] });
     await firstSearch;
 
-    assert.equal(messages.length, 2, 'toggle should send one new background search');
-    assert.deepEqual([...messages[0].clues], ['Pikachu']);
-    assert.deepEqual([...messages[1].clues], ['Pikachu', '35/108']);
-    assert.match(messages[1].title, /35\/108/);
+    const searchMessages = messages.filter((message) => message.action === 'searchCardForTitle');
+    assert.equal(searchMessages.length, 2, 'toggle should send one new background search');
+    assert.deepEqual([...searchMessages[0].clues], ['Pikachu']);
+    assert.deepEqual([...searchMessages[1].clues], ['Pikachu', '35/108']);
+    assert.match(searchMessages[1].title, /35\/108/);
     assert.equal(processor.previewResults[0].collector_number, '35/108', 'stale earlier results should not replace toggled results');
 });
 
@@ -3176,6 +3210,47 @@ test('background ranks explicit V variation above ex rows', () => {
     assert.equal(sorted.at(-1).card_id, 'magnezone-ex');
 });
 
+test('background keeps Rocket Zapdos composite above generic and V variants', () => {
+    const sandbox = loadBackgroundHelpers([
+        'sortRowsForStructuredCard',
+        'rowMatchesStructuredName',
+        'rowMatchesStructuredVariation',
+    ]);
+    const structuredCard = {
+        name: 'Rocket Zapdos',
+        searchName: 'Rocket Zapdos',
+        collectorNumber: '15/132',
+        numericCollectorNumber: '15',
+        variation: '',
+        strictVariation: true,
+    };
+    const rows = [
+        { card_id: 'galarian-zapdos-v', name: 'Galarian Zapdos V', set_name: 'Chilling Reign', card_number: '080/198', search_rank: 999999 },
+        { card_id: 'zapdos-base', name: 'Zapdos', set_name: 'Base Set', card_number: '15/102', search_rank: 999998 },
+        { card_id: 'rocket-zapdos-15', name: 'Rocket Zapdos', set_name: 'Gym Challenge', card_number: '15/132', search_rank: 50 },
+    ];
+    const acceptedRows = rows
+        .filter((row) => sandbox.rowMatchesStructuredName(row, structuredCard))
+        .filter((row) => sandbox.rowMatchesStructuredVariation(row, structuredCard));
+    const sorted = sandbox.sortRowsForStructuredCard(acceptedRows, structuredCard);
+
+    assert.deepEqual(acceptedRows.map((row) => row.card_id), ['rocket-zapdos-15']);
+    assert.equal(sorted[0].card_id, 'rocket-zapdos-15');
+});
+
+test('background refuses shorter resolved species for Rocket Zapdos request', () => {
+    const sandbox = loadBackgroundHelpers(['shouldUseResolvedCardName']);
+
+    assert.equal(
+        sandbox.shouldUseResolvedCardName('Zapdos', { name: 'Rocket Zapdos', searchName: 'Rocket Zapdos', collectorNumber: '15/132' }),
+        false
+    );
+    assert.equal(
+        sandbox.shouldUseResolvedCardName('Rocket Zapdos', { name: 'Rocket Zapdos', searchName: 'Rocket Zapdos', collectorNumber: '15/132' }),
+        true
+    );
+});
+
 test('background ranks Magearna EX 110/114 Steam Siege above generic Magearna ex rows', () => {
     const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard']);
     const rows = [
@@ -3640,7 +3715,261 @@ test('Vinted side panel refresh keeps pinned overlay preview rows', async () => 
 
     assert.equal(response.success, true);
     assert.deepEqual(response.result.rows.map((row) => row.card_id), ['111', '222']);
-    assert.equal(fetchCalls, 0, 'refresh should not broaden a pinned Vinted preview state');
+    assert.ok(fetchCalls <= 2, 'refresh may only decorate pinned Vinted preview prices');
+});
+
+test('Vinted side panel Refresh reuses canonical overlay preview rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const storage = {};
+    const storageWrites = [];
+    const tab = {
+        id: 80,
+        title: 'Obstagoon di Galar 245/217 accesa eroica',
+        url: 'https://www.vinted.it/items/80-obstagoon-di-galar',
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new Error('Vinted refresh should use canonical preview rows');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('Vinted refresh should not run active-tab scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'marketplacePreviewReady',
+                source: 'vinted',
+                url: tab.url,
+                title: 'Obstagoon di Galar 245/217',
+                originalTitle: tab.title,
+                clues: ['Obstagoon', '245/217'],
+                primaryClues: ['Obstagoon'],
+                previewSource: 'vinted_overlay',
+                previewSignature: 'vinted|obstagoon245217',
+                vintedPayload: {
+                    source: 'vinted',
+                    listingKey: tab.url,
+                    originalTitle: tab.title,
+                    searchTitle: 'Obstagoon di Galar 245/217',
+                    name: 'Obstagoon',
+                    collectorNumber: '245/217',
+                    numericCollectorNumber: '245',
+                    selectedClues: ['Obstagoon', '245/217'],
+                    primaryClues: ['Obstagoon'],
+                    selectedChipCategories: ['name:Obstagoon', 'collector:245/217'],
+                },
+                previewRows: [
+                    { card_id: 'obstagoon-245', name: 'Galarian Obstagoon', set_name: 'Evolving Skies', card_number: '245/217' },
+                ],
+            },
+            { tab },
+            resolve
+        );
+    });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'resolveActiveTabForSidePanel', forceRefresh: true }, {}, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.deepEqual(response.result.rows.map((row) => row.card_id), ['obstagoon-245']);
+    assert.ok(fetchCalls <= 1, 'refresh may only decorate canonical Vinted preview prices');
+    assert.equal(storage.sidePanelState.pageInfo.vintedPayload.collectorNumber, '245/217');
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['obstagoon-245']);
+    assert.equal(storageWrites.at(-1).debug.vintedReadyDriven, true);
+});
+
+test('Vinted side panel Refresh waits when canonical overlay state is not ready', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    let scraped = false;
+    const storage = {};
+    const tab = {
+        id: 81,
+        title: 'Loading Vinted item',
+        url: 'https://www.vinted.it/items/81-loading',
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    scraped = true;
+                    return [];
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'resolveActiveTabForSidePanel', forceRefresh: true }, {}, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.result.loading, true);
+    assert.equal(storage.sidePanelState.loading, true);
+    assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+    assert.equal(fetchCalls, 0);
+    assert.equal(scraped, false);
+});
+
+test('Vinted stale old-page preview-ready message is ignored', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const oldTab = {
+        id: 82,
+        title: 'Old Vinted item',
+        url: 'https://www.vinted.it/items/82-old',
+    };
+    const newTab = {
+        id: 82,
+        title: 'Obstagoon di Galar 245/217 accesa eroica',
+        url: 'https://www.vinted.it/items/83-obstagoon',
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [newTab],
+                get: async () => newTab,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'marketplacePreviewReady',
+                source: 'vinted',
+                url: oldTab.url,
+                title: oldTab.title,
+                originalTitle: oldTab.title,
+                vintedPayload: {
+                    source: 'vinted',
+                    listingKey: oldTab.url,
+                    originalTitle: oldTab.title,
+                    searchTitle: oldTab.title,
+                    name: 'Pikachu',
+                    selectedClues: ['Pikachu'],
+                    primaryClues: ['Pikachu'],
+                },
+                previewRows: [{ card_id: 'old-card', name: 'Pikachu' }],
+            },
+            { tab: oldTab },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.ignored, true);
+    assert.equal(storage.sidePanelState, undefined);
 });
 
 test('Vinted price enrichment only decorates pinned preview rows', async () => {
@@ -7934,6 +8263,59 @@ test('side panel preserves API candidate order while rendering logos', () => {
     assert.equal(rendered[1].querySelector('img').src, 'https://cdn.example/logo.png');
 });
 
+test('side panel warms Pokoin auth session on load', async () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const sentMessages = [];
+    const elementsById = new Map();
+    const makeElement = (id) => {
+        const element = {
+            id,
+            hidden: false,
+            textContent: '',
+            classList: createClassListStub(),
+            addEventListener() {},
+            replaceChildren() {},
+            appendChild() {},
+            className: '',
+            src: '',
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        document: {
+            body: { classList: createClassListStub() },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: {
+                sendMessage: async (message) => {
+                    sentMessages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        fetch: async () => ({ ok: true, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.ok(sentMessages.some((message) => message.action === 'requestPokoinAuthToken'));
+});
+
 test('CardTrader injected button intercepts click and opens side panel workflow', async () => {
     const source = readRepoFile('content.js');
     const contentStart = source.indexOf('function pokoinIconUrl');
@@ -8449,6 +8831,55 @@ test('Pokoin auth bridge forwards only same-origin token messages', async () => 
     assert.equal(messages.length, 1);
     assert.equal(messages[0].action, 'pokoinAuthTokenReceived');
     assert.equal(messages[0].tokenMessage.token, 'firebase-token-from-pokoin-bridge');
+});
+
+test('Pokoin auth bridge accepts current Pokoin web token payload', async () => {
+    const source = readRepoFile('pokoin-auth-bridge.js');
+    const messages = [];
+    let messageListener = null;
+    const sandbox = {
+        window: {
+            location: {
+                origin: 'https://pokoin.com',
+                pathname: '/extension/auth-bridge',
+            },
+            addEventListener(type, listener) {
+                if (type === 'message') {
+                    messageListener = listener;
+                }
+            },
+            postMessage() {},
+        },
+        chrome: {
+            runtime: {
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+    };
+    sandbox.window.window = sandbox.window;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'pokoin-auth-bridge.js' });
+
+    await messageListener({
+        origin: 'https://pokoin.com',
+        source: sandbox.window,
+        data: {
+            type: 'pokoin-auth-token',
+            ok: true,
+            token: {
+                token: 'firebase-token-from-current-pokoin-web-message',
+                expiresAt: Date.now() + 600000,
+            },
+        },
+    });
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].action, 'pokoinAuthTokenReceived');
+    assert.equal(messages[0].tokenMessage.type, 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE');
+    assert.equal(messages[0].tokenMessage.token, 'firebase-token-from-current-pokoin-web-message');
 });
 
 test('Pokoin auth token validation stores session token only', async () => {

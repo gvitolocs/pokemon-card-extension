@@ -11,9 +11,28 @@
     function isTokenMessage(data) {
         return data &&
             typeof data === 'object' &&
-            data.type === RESPONSE_TYPE &&
-            typeof data.token === 'string' &&
-            data.token.length > 20;
+            (
+                (data.type === RESPONSE_TYPE && typeof data.token === 'string' && data.token.length > 20) ||
+                (data.type === 'pokoin-auth-token' && data.ok === true && typeof data.token?.token === 'string' && data.token.token.length > 20)
+            );
+    }
+
+    function normalizeTokenMessage(data) {
+        if (data.type === 'pokoin-auth-token') {
+            return {
+                type: RESPONSE_TYPE,
+                token: data.token.token,
+                expiresAt: data.token.expiresAt || data.token.expirationTime || null,
+                issuedAt: data.token.issuedAt || null,
+            };
+        }
+
+        return {
+            type: data.type,
+            token: data.token,
+            expiresAt: data.expiresAt || data.expirationTime || null,
+            issuedAt: data.issuedAt || null,
+        };
     }
 
     if (!isBridgePage()) {
@@ -27,12 +46,7 @@
 
         chrome.runtime.sendMessage({
             action: 'pokoinAuthTokenReceived',
-            tokenMessage: {
-                type: event.data.type,
-                token: event.data.token,
-                expiresAt: event.data.expiresAt || event.data.expirationTime || null,
-                issuedAt: event.data.issuedAt || null,
-            },
+            tokenMessage: normalizeTokenMessage(event.data),
         }).catch(() => {});
     });
 
