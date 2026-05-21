@@ -935,8 +935,9 @@ function buildStructuredFallbackQueries(structuredCard = {}, title = '') {
     const expansion = structuredCard.expansion || '';
     return [
         [name, collectorNumber].filter(Boolean).join(' '),
-        [name, numericCollectorNumber].filter(Boolean).join(' '),
+        [name, collectorNumber, expansion].filter(Boolean).join(' '),
         [name, expansion, collectorNumber].filter(Boolean).join(' '),
+        [name, numericCollectorNumber].filter(Boolean).join(' '),
         title,
         name,
     ]
@@ -1040,16 +1041,94 @@ function isAllowedBaseSetFamily(row) {
 }
 
 function expansionMatches(rowExpansion = '', requestedExpansion = '') {
-    const rowSet = compactSetValue(rowExpansion || '');
-    const requestedSet = compactSetValue(requestedExpansion || '');
-    if (!requestedSet) {
-        return true;
+    return expansionMatchRank(rowExpansion, requestedExpansion) < 99;
+}
+
+function expansionAliasCompacts(expansion = '') {
+    const cleanExpansion = String(expansion || '').replace(/\s+/g, ' ').trim();
+    if (!cleanExpansion) {
+        return [];
     }
-    if (requestedSet === 'baseset') {
-        return isAllowedBaseSetFamily({ set_name: rowExpansion });
+
+    const variants = new Set([cleanExpansion]);
+    const prefixedExpansion = cleanExpansion.match(/^([A-Z0-9]{2,6})\s+(.+)$/i);
+    if (prefixedExpansion) {
+        variants.add(prefixedExpansion[2]);
     }
-    return rowSet === requestedSet ||
-        Boolean(rowSet && requestedSet && (rowSet.includes(requestedSet) || requestedSet.includes(rowSet)));
+
+    for (const variant of [...variants]) {
+        variants.add(variant.replace(/\bpromos\b/gi, 'Promo'));
+        variants.add(variant.replace(/\bpromo\b/gi, 'Promos'));
+    }
+
+    return [...variants]
+        .map(compactSetValue)
+        .filter(Boolean);
+}
+
+function expansionMatchRank(rowExpansion = '', requestedExpansion = '') {
+    const requestedAliases = expansionAliasCompacts(requestedExpansion);
+    if (requestedAliases.length === 0) {
+        return 0;
+    }
+    const rowAliases = expansionAliasCompacts(rowExpansion);
+    if (rowAliases.length === 0) {
+        return 99;
+    }
+    if (requestedAliases.includes('baseset')) {
+        return isAllowedBaseSetFamily({ set_name: rowExpansion }) ? 0 : 99;
+    }
+    if (rowAliases.some((rowSet) => requestedAliases.includes(rowSet))) {
+        return 0;
+    }
+    if (rowAliases.some((rowSet) => requestedAliases.some((requestedSet) =>
+        rowSet.includes(requestedSet) || requestedSet.includes(rowSet)
+    ))) {
+        return 1;
+    }
+    return 99;
+}
+
+function collectorNumberParts(value = '') {
+    const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
+    const normalized = normalizeCollectorValue(cleanValue);
+    const prefix = cleanValue.match(/\b([A-Z0-9]*[A-Z][A-Z0-9]{0,5})\s*\d{1,4}[a-z]?\b/i)?.[1]?.toLowerCase() || '';
+    const primary = normalized.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+        normalized.match(/\d{1,4}[a-z]?/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+        '';
+    return {
+        normalized,
+        prefix,
+        primary,
+        hasSlash: normalized.includes('/'),
+    };
+}
+
+function collectorNumberMatchRank(rowNumber = '', requestedNumber = '') {
+    const row = collectorNumberParts(rowNumber);
+    const requested = collectorNumberParts(requestedNumber);
+    if (!row.normalized || !requested.normalized) {
+        return 99;
+    }
+
+    if (row.normalized === requested.normalized) {
+        return 0;
+    }
+
+    if (!row.primary || !requested.primary || row.primary !== requested.primary) {
+        return 99;
+    }
+
+    if (requested.prefix && row.prefix === requested.prefix) {
+        return 0;
+    }
+    if (requested.prefix && !row.prefix && !row.hasSlash) {
+        return 1;
+    }
+    if (!requested.prefix) {
+        return row.hasSlash ? 2 : 1;
+    }
+    return 4;
 }
 
 function normalizeCollectorValue(value = '') {
@@ -1061,22 +1140,7 @@ function normalizeCollectorValue(value = '') {
 }
 
 function collectorNumberMatches(rowNumber = '', requestedNumber = '') {
-    const rowCompact = normalizeCollectorValue(rowNumber);
-    const requestedCompact = normalizeCollectorValue(requestedNumber);
-    if (!rowCompact || !requestedCompact) {
-        return false;
-    }
-
-    const rowPrimary = rowCompact.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
-        rowCompact.match(/\d{1,4}[a-z]?/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
-        '';
-    const requestedPrimary = requestedCompact.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
-        requestedCompact.match(/\d{1,4}[a-z]?/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
-        '';
-    return rowCompact === requestedCompact ||
-        rowCompact.endsWith(requestedCompact) ||
-        requestedCompact.endsWith(rowCompact) ||
-        Boolean(rowPrimary && requestedPrimary && rowPrimary === requestedPrimary);
+    return collectorNumberMatchRank(rowNumber, requestedNumber) < 99;
 }
 
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
@@ -1089,28 +1153,26 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const hasEditionHint = Boolean(structuredCard.editionHint);
 
     return [...rows].sort((a, b) => {
-        const aExpansionMatch = expansionMatches(a.set_name || '', structuredCard.expansion || '');
-        const bExpansionMatch = expansionMatches(b.set_name || '', structuredCard.expansion || '');
-        const aExpansionPenalty = requestedExpansion && !aExpansionMatch ? 1 : 0;
-        const bExpansionPenalty = requestedExpansion && !bExpansionMatch ? 1 : 0;
-        if (aExpansionPenalty !== bExpansionPenalty) {
-            return aExpansionPenalty - bExpansionPenalty;
+        const aExpansionRank = requestedExpansion ? expansionMatchRank(rowExpansionName(a), structuredCard.expansion || '') : 0;
+        const bExpansionRank = requestedExpansion ? expansionMatchRank(rowExpansionName(b), structuredCard.expansion || '') : 0;
+        if (aExpansionRank !== bExpansionRank) {
+            return aExpansionRank - bExpansionRank;
         }
 
-        const aCollectorPenalty = requestedCollectorNumber && !collectorNumberMatches(a.card_number || '', requestedCollectorNumber) ? 1 : 0;
-        const bCollectorPenalty = requestedCollectorNumber && !collectorNumberMatches(b.card_number || '', requestedCollectorNumber) ? 1 : 0;
-        if (aCollectorPenalty !== bCollectorPenalty) {
-            return aCollectorPenalty - bCollectorPenalty;
+        const aCollectorRank = requestedCollectorNumber ? collectorNumberMatchRank(rowCollectorNumber(a), requestedCollectorNumber) : 0;
+        const bCollectorRank = requestedCollectorNumber ? collectorNumberMatchRank(rowCollectorNumber(b), requestedCollectorNumber) : 0;
+        if (aCollectorRank !== bCollectorRank) {
+            return aCollectorRank - bCollectorRank;
         }
 
         const aExactStructuredMatch = requestedExpansion &&
             requestedCollectorNumber &&
-            aExpansionPenalty === 0 &&
-            aCollectorPenalty === 0 ? 0 : 1;
+            aExpansionRank < 99 &&
+            aCollectorRank < 99 ? 0 : 1;
         const bExactStructuredMatch = requestedExpansion &&
             requestedCollectorNumber &&
-            bExpansionPenalty === 0 &&
-            bCollectorPenalty === 0 ? 0 : 1;
+            bExpansionRank < 99 &&
+            bCollectorRank < 99 ? 0 : 1;
         if (aExactStructuredMatch !== bExactStructuredMatch) {
             return aExactStructuredMatch - bExactStructuredMatch;
         }
@@ -1131,11 +1193,41 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
     });
 }
 
+function rowExpansionName(row = {}) {
+    return row.set_name ||
+        row.expansion_name_en ||
+        row.expansionName ||
+        row.expansion_name ||
+        '';
+}
+
+function rowCollectorNumber(row = {}) {
+    return row.card_number ||
+        row.collector_number ||
+        row.collectorNumber ||
+        '';
+}
+
 function hasExactStructuredIdentity(structuredCard = {}) {
     return Boolean(
         structuredCard?.expansion &&
         (structuredCard.collectorNumber || structuredCard.printedCollectorNumber || structuredCard.numericCollectorNumber)
     );
+}
+
+function hasExactNameVariation(structuredCard = {}) {
+    const name = String(structuredCard?.name || '').trim();
+    return Boolean(
+        name &&
+        structuredCard?.variation &&
+        // Possessive/trainer composite names rely on Cardvault's name table so
+        // they should still resolve before accepting Pokemon-only fallbacks.
+        !/[&'’]/.test(name)
+    );
+}
+
+function hasExactSearchFastPath(structuredCard = {}) {
+    return hasExactStructuredIdentity(structuredCard) || hasExactNameVariation(structuredCard);
 }
 
 function rowMatchesStructuredIdentity(row = {}, structuredCard = {}) {
@@ -1146,8 +1238,8 @@ function rowMatchesStructuredIdentity(row = {}, structuredCard = {}) {
         structuredCard.printedCollectorNumber ||
         structuredCard.numericCollectorNumber ||
         '';
-    return expansionMatches(row.set_name || '', structuredCard.expansion || '') &&
-        collectorNumberMatches(row.card_number || '', requestedCollectorNumber);
+    return expansionMatches(rowExpansionName(row), structuredCard.expansion || '') &&
+        collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber);
 }
 
 function mergeAndRankStructuredRows(primaryRows = [], fallbackRows = [], structuredCard = {}) {
@@ -1310,6 +1402,7 @@ function isLockedCardTraderDirectState(state = {}, url = '') {
 const sidePanelRefreshTimers = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
+const cardvaultNameResolutionCache = new Map();
 const pokoinPriceCache = new Map();
 const cardmarketObservationSignatures = new Set();
 const cardmarketObservationInFlight = new Map();
@@ -1478,6 +1571,12 @@ function buildCardmarketObservationPayload({ pageInfo = {}, best = null, rows = 
         match,
         promoteVerifiedLink: Boolean(promoteVerifiedLink && match?.cardId),
     };
+}
+
+function observeCardmarketScrapeSoon(result = {}, options = {}) {
+    void observeCardmarketScrape(result, options).catch((error) => {
+        console.warn('⚠️ [Background] Cardmarket observation failed:', error);
+    });
 }
 
 async function persistPendingCardmarketObservation(payload) {
@@ -1750,6 +1849,12 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 
 async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     const resolveStartedAt = Date.now();
+    const phaseTimings = {};
+    let phaseStartedAt = resolveStartedAt;
+    const markPhase = (name) => {
+        phaseTimings[name] = Date.now() - phaseStartedAt;
+        phaseStartedAt = Date.now();
+    };
     let pageInfo;
     let pageInfoError = '';
     try {
@@ -1763,6 +1868,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
             structuredCard: scrapeStructuredCardFields(tab?.title || ''),
         };
     }
+    markPhase('pageInfoMs');
     const requestClues = normalizeRequestClues(requestContext.clues);
     const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
     if (requestClues.length > 0) {
@@ -1789,6 +1895,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         rowCount: 0,
         bestId: '',
         error,
+        phaseTimings,
     };
 
     if (!pageInfo.unsupported && pageInfo.title) {
@@ -1817,7 +1924,8 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 debug.cardtraderBlueprintId = pageInfo.cardtraderBlueprintId;
             } else {
                 const exactIdentity = hasExactStructuredIdentity(pageInfo.structuredCard);
-                if (exactIdentity) {
+                const exactFastPath = hasExactSearchFastPath(pageInfo.structuredCard);
+                if (exactFastPath) {
                     try {
                         const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
                         rows = extensionSearchResult.rows;
@@ -1829,6 +1937,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                             error: extensionSearchError.message || 'Extension card search failed.',
                         };
                     }
+                    markPhase('extensionSearchMs');
                 }
 
                 if (!rows.some((row) => rowMatchesStructuredIdentity(row, pageInfo.structuredCard))) {
@@ -1858,8 +1967,9 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                             error: nameResolutionError.message || 'Card name resolution failed.',
                         };
                     }
+                    markPhase('nameResolutionMs');
 
-                    if (!exactIdentity || rows.length === 0) {
+                    if (!exactFastPath || rows.length === 0) {
                         try {
                             const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
                             rows = mergeAndRankStructuredRows(rows, extensionSearchResult.rows, pageInfo.structuredCard);
@@ -1870,6 +1980,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                                 error: extensionSearchError.message || 'Extension card search failed.',
                             };
                         }
+                        markPhase('extensionSearchAfterResolutionMs');
                     }
                 }
 
@@ -1879,6 +1990,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                         : await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
                     rows = mergeAndRankStructuredRows(rows, searchResult.rows, pageInfo.structuredCard);
                     debug.attemptedQueries = searchResult.debug.attemptedQueries;
+                    markPhase('autocompleteFallbackMs');
                 }
             }
         } catch (searchError) {
@@ -1892,6 +2004,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     const pokoinUrl = blueprintId ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${blueprintId}` : '';
     debug.rowCount = rows.length;
     debug.bestId = blueprintId;
+    debug.phaseTimings.totalMs = Date.now() - resolveStartedAt;
 
     if (requestContext.expectedUrl && !sameUrlWithoutHash(requestContext.expectedUrl, pageInfo.url || tab?.url || '')) {
         console.log('ℹ️ [Background] Ignored stale side panel refresh for changed tab URL');
@@ -1959,7 +2072,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         });
     });
 
-    await observeCardmarketScrape({ pageInfo, rows, best, blueprintId, pokoinUrl, error, debug }, {
+    observeCardmarketScrapeSoon({ pageInfo, rows, best, blueprintId, pokoinUrl, error, debug }, {
         promoteVerifiedLink: Boolean(requestContext.promoteVerifiedLink),
     });
 
@@ -2049,14 +2162,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         : null;
                     const structuredCard = scrapeStructuredCardFields(title, cardmarketContext);
                     const exactIdentity = hasExactStructuredIdentity(structuredCard);
+                    const exactFastPath = hasExactSearchFastPath(structuredCard);
                     let rows = [];
                     let searchResult = null;
-                    if (exactIdentity) {
+                    if (exactFastPath) {
                         searchResult = await searchExtensionCard(structuredCard);
                         rows = searchResult.rows;
                     }
 
-                    if (!rows.some((row) => rowMatchesStructuredIdentity(row, structuredCard))) {
+                    if (rows.length === 0 || (exactIdentity && !rows.some((row) => rowMatchesStructuredIdentity(row, structuredCard)))) {
                         const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
                         const nameResolution = await resolveNameFromCardvaultTitle(
                             titleForNameResolution(title, request.originalTitle || tab?.title || '', [...clues, ...primaryClues]),
@@ -2068,7 +2182,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                 structuredCard.searchName = searchNameWithVariation(nameResolution.name, structuredCard.variation);
                             }
                         }
-                        if (!exactIdentity || rows.length === 0) {
+                        if (!exactFastPath || rows.length === 0) {
                             searchResult = await searchExtensionCard(structuredCard);
                             rows = mergeAndRankStructuredRows(rows, searchResult.rows, structuredCard);
                         }
@@ -2084,7 +2198,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const legacyRows = rows.map(legacyResultFromRow);
                     void schedulePriceEnrichment(rows);
                     if (isCardmarketUrl(requestUrl) && legacyRows.length > 0) {
-                        await sendCardmarketObservation({
+                        void sendCardmarketObservation({
                             structuredCard,
                             cardmarketContext: {
                                 url: normalizeObservationUrl(requestUrl),
@@ -2096,6 +2210,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             },
                             match: matchFromRow(legacyRows[0]),
                             promoteVerifiedLink: false,
+                        }).catch((error) => {
+                            console.warn('⚠️ [Background] Cardmarket observation failed:', error);
                         });
                     }
                     return legacyRows;
@@ -2225,7 +2341,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             ...selectedResult,
                         },
                     });
-                    await observeCardmarketScrape(selectedResult, { promoteVerifiedLink: isCardmarketUrl(currentUrl) });
+                    observeCardmarketScrapeSoon(selectedResult, { promoteVerifiedLink: isCardmarketUrl(currentUrl) });
                     return selectedResult;
                 }
                 await chrome.storage.session.set({

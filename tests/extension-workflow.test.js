@@ -2391,6 +2391,48 @@ test('Cardmarket ranking prefers exact name, prefixed collector, and expansion',
     assert.equal(sorted.at(-1).card_id, 'generic-price');
 });
 
+test('Cardmarket ranks Piplup MEP 042 exact prefixed promo card first', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard']);
+    const rows = [
+        { card_id: 'generic-high-score', name: 'Piplup', set_name: 'Stellar Crown', card_number: '006/142', search_rank: 12000 },
+        { card_id: 'same-number-slash', name: 'Piplup', set_name: 'Ultra Prism', card_number: '42/156', search_rank: 11000 },
+        { card_id: 'bare-number-promo', name: 'Piplup', set_name: 'MEP Black Star Promos', card_number: '042', search_rank: 10000 },
+        { card_id: 'mep-042', name: 'Piplup', set_name: 'MEP Black Star Promos', card_number: 'MEP 042', search_rank: 10 },
+    ];
+
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Piplup',
+        collectorNumber: 'MEP 042',
+        printedCollectorNumber: 'MEP 042',
+        numericCollectorNumber: '042',
+        expansion: 'MEP Black Star Promos',
+    });
+
+    assert.equal(sorted[0].card_id, 'mep-042');
+    assert.equal(sorted[1].card_id, 'bare-number-promo');
+    assert.equal(sorted.at(-1).card_id, 'generic-high-score');
+});
+
+test('Cardmarket promo expansion aliases keep promo wording significant', () => {
+    const sandbox = loadBackgroundHelpers(['expansionMatches', 'sortRowsForStructuredCard']);
+
+    assert.equal(sandbox.expansionMatches('MEP Black Star Promo', 'MEP Black Star Promos'), true);
+    assert.equal(sandbox.expansionMatches('Black Star Promos', 'MEP Black Star Promos'), true);
+    assert.equal(sandbox.expansionMatches('MEP Black Star Promos', 'Black Star Promo'), true);
+
+    const rows = [
+        { card_id: 'wrong-set', name: 'Piplup', set_name: 'Mega Evolution', card_number: 'MEP 042', search_rank: 9999 },
+        { card_id: 'alias-set', name: 'Piplup', set_name: 'Black Star Promo', card_number: 'MEP 042', search_rank: 1 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Piplup',
+        collectorNumber: 'MEP 042',
+        expansion: 'MEP Black Star Promos',
+    });
+
+    assert.equal(sorted[0].card_id, 'alias-set');
+});
+
 test('Cardmarket background search payload uses structured card name first', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -2591,6 +2633,174 @@ test('Cardmarket Piplup prefixed number uses structured payload and exact rankin
     assert.equal(extensionPayload.expansion, 'MEP Black Star Promos');
 });
 
+test('exact name variation search skips autocomplete after extension match', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            const body = options.body ? JSON.parse(options.body) : {};
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                matches: [{
+                            cardId: 'tornadus-ex',
+                            name: 'Tornadus ex',
+                            expansionName: 'BW Black Star Promos',
+                            collectorNumber: 'BW96',
+                            score: 99,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                throw new Error('autocomplete should not run after exact variation match');
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Tornadus EX',
+                url: 'https://www.vinted.it/items/8965119476-carte-pokemon-tornadus-ex-bw96-stamp-legendary-treasure',
+            },
+            { tab: { id: 8, title: 'Tornadus EX', url: 'https://www.vinted.it/items/8965119476-carte-pokemon-tornadus-ex-bw96-stamp-legendary-treasure' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, 'tornadus-ex');
+    assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
+    assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
+    assert.equal(fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body.name, 'Tornadus ex');
+});
+
+test('background search response is not blocked by Cardmarket observation auth', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let bridgeOpened = false;
+    let responseReceived = false;
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: 'mep-042',
+                            name: 'Piplup',
+                            expansionName: 'MEP Black Star Promos',
+                            collectorNumber: 'MEP 042',
+                            score: 99,
+                        }],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                create: async () => {
+                    await new Promise((resolve) => setTimeout(resolve, 30));
+                    bridgeOpened = true;
+                    return { id: 99 };
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async () => {},
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Piplup (MEP 042)',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+            { tab: { id: 8, title: 'Piplup (MEP 042)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' } },
+            (payload) => {
+                responseReceived = true;
+                assert.equal(bridgeOpened, false);
+                resolve(payload);
+            }
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, 'mep-042');
+    assert.equal(responseReceived, true);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(bridgeOpened, true);
+});
+
 test('Cardmarket Piplup fallback ranks MEP 042 above generic rows', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -2680,6 +2890,99 @@ test('Cardmarket Piplup fallback ranks MEP 042 above generic rows', async () => 
     assert.equal(response.results[0].collector_number, 'MEP 042');
     assert.equal(response.results[0].expansion_name_en, 'MEP Black Star Promos');
     assert.ok(fetchBodies.some((entry) => entry.body.search_term === 'Piplup MEP 042'));
+});
+
+test('Cardmarket Piplup fallback queries include collector before promo expansion', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: 'wrong',
+                            name: 'Piplup',
+                            expansionName: 'Stellar Crown',
+                            collectorNumber: '006/142',
+                            score: 9999,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: body.search_term === 'Piplup MEP 042 MEP Black Star Promos'
+                            ? [{ card_id: 'mep-042', name: 'Piplup', canonical_name: 'Piplup', set_name: 'MEP Black Star Promos', card_number: 'MEP 042', search_rank: 1 }]
+                            : [],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Piplup (MEP 042)',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+            { tab: { id: 8, title: 'Piplup (MEP 042)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, 'mep-042');
+    const fallbackQueries = fetchBodies
+        .filter((entry) => entry.url.includes('/api/marketplace-autocomplete'))
+        .map((entry) => entry.body.search_term);
+    assert.ok(fallbackQueries.includes('Piplup MEP 042'));
+    assert.ok(fallbackQueries.includes('Piplup MEP 042 MEP Black Star Promos'));
+    assert.ok(
+        fallbackQueries.indexOf('Piplup MEP 042') <
+        fallbackQueries.indexOf('Piplup MEP 042 MEP Black Star Promos')
+    );
 });
 
 test('Cardmarket background search prefers trainer composite over shorter Pokemon match', async () => {
@@ -2898,7 +3201,8 @@ test('background marketplace search preserves trainer composite names across sit
 
         assert.equal(response.success, true, `${label} response should succeed`);
         assert.equal(response.results[0].name_en, 'Arven\'s Mabosstiff ex', `${label} should return composite card name`);
-        assert.equal(fetchBodies[0].body.search_term, 'Arven\'s Mabosstiff ex', `${label} should resolve composite name before Pokemon-only fallback`);
+        const firstAutocompleteBody = fetchBodies.find((entry) => entry.url.includes('/api/marketplace-autocomplete'))?.body || {};
+        assert.equal(firstAutocompleteBody.search_term, 'Arven\'s Mabosstiff ex', `${label} should resolve composite name before Pokemon-only fallback`);
         const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
         assert.equal(extensionPayload.name, 'Arven\'s Mabosstiff ex', `${label} extension search should use composite card name`);
     }
@@ -5172,8 +5476,9 @@ test('Cardmarket selected side-panel candidate promotes verified link', async ()
         );
     });
 
-    const observation = fetchCalls.find((call) => call.url.includes('/api/cardmarket-scrape-observation'));
     assert.equal(response.success, true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const observation = fetchCalls.find((call) => call.url.includes('/api/cardmarket-scrape-observation'));
     assert.ok(observation);
     assert.equal(observation.body.promoteVerifiedLink, true);
     assert.equal(observation.body.cardmarketContext.url, 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042');
