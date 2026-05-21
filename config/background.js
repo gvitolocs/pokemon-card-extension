@@ -463,15 +463,37 @@ function scrapeCardmarketContext(title = '') {
     };
 }
 
-function normalizeExpansionAlias(value = '') {
-    const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
-    const aliases = [
+function cardmarketExpansionAliases() {
+    return [
         { pattern: /^(?:DRS|Dragon\s+Selection)$/i, name: 'Dragon Selection' },
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
         { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
         { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
+        { pattern: /\bcaos\s+nascente\b/i, name: 'Chaos Rising' },
+        { pattern: /\bex\s+leggende\s+nascoste\b/i, name: 'EX Hidden Legends' },
+        { pattern: /\bex\s+hidden\s+legends\b/i, name: 'EX Hidden Legends' },
+        { pattern: /\bHL\s+EX\s+Hidden\s+Legends\b|\bEX\s+Hidden\s+Legends\b/i, name: 'HL EX Hidden Legends' },
+        { pattern: /\bselezione\s+drago\b|\bdragon\s+selection\b/i, name: 'Dragon Selection' },
         { pattern: /\bTR\s+Team\s+Rocket\b|\bTeam\s+Rocket\b/i, name: 'Team Rocket' },
     ];
+}
+
+function normalizeExpansionAlias(value = '') {
+    const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
+    const aliases = typeof cardmarketExpansionAliases === 'function'
+        ? cardmarketExpansionAliases()
+        : [
+            { pattern: /^(?:DRS|Dragon\s+Selection)$/i, name: 'Dragon Selection' },
+            { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
+            { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
+            { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
+            { pattern: /\bcaos\s+nascente\b/i, name: 'Chaos Rising' },
+            { pattern: /\bex\s+leggende\s+nascoste\b/i, name: 'EX Hidden Legends' },
+            { pattern: /\bex\s+hidden\s+legends\b/i, name: 'EX Hidden Legends' },
+            { pattern: /\bHL\s+EX\s+Hidden\s+Legends\b|\bEX\s+Hidden\s+Legends\b/i, name: 'HL EX Hidden Legends' },
+            { pattern: /\bselezione\s+drago\b|\bdragon\s+selection\b/i, name: 'Dragon Selection' },
+            { pattern: /\bTR\s+Team\s+Rocket\b|\bTeam\s+Rocket\b/i, name: 'Team Rocket' },
+        ];
     return aliases.find(({ pattern }) => pattern.test(cleanValue))?.name || cleanValue;
 }
 
@@ -490,6 +512,28 @@ function parseCardmarketCollectorCode(value = '') {
     return {
         collectorNumber: [prefix.toUpperCase(), printedNumber].filter(Boolean).join(' '),
         printedNumber,
+    };
+}
+
+function cardmarketContextFromRequest(request = {}, requestUrl = '') {
+    if (!isCardmarketUrl(requestUrl)) {
+        return null;
+    }
+    const requestClues = normalizeRequestClues(request.selectedClues || request.clues);
+    const urlExpansion = cardmarketExpansionFromUrl(requestUrl);
+    const expansionClue = requestClues.find((clue) => {
+        const normalized = normalizeExpansionAlias(clue);
+        return normalized && compactSetValue(normalized) !== compactSetValue(clue);
+    }) || '';
+    const numberClue = requestClues.find((clue) =>
+        Boolean(parseCardmarketCollectorCode(clue).collectorNumber)
+    ) || '';
+    return {
+        expansion: normalizeExpansionAlias(expansionClue || urlExpansion),
+        details: {
+            number: numberClue,
+            expansion: expansionClue || urlExpansion,
+        },
     };
 }
 
@@ -638,6 +682,8 @@ function scrapeStructuredCardFields(title = '', context = null) {
         'BW Black Star Promos',
         'Paldean Fates',
         'Pokemon 151',
+        'Steam Siege',
+        'Fates Collide',
         'Evolutions',
     ];
     const expansion = normalizeExpansionAlias(aliasedExpansion || expansionNoise.find((candidate) =>
@@ -712,6 +758,13 @@ function normalizeVintedPayload(payload = null) {
     if (!payload || typeof payload !== 'object' || payload.source !== 'vinted') {
         return null;
     }
+    return normalizeMarketplacePayload(payload);
+}
+
+function normalizeMarketplacePayload(payload = null) {
+    if (!payload || typeof payload !== 'object' || !['vinted', 'ebay'].includes(payload.source)) {
+        return null;
+    }
     const selectedClues = normalizeRequestClues(payload.selectedClues);
     const primaryClues = normalizeRequestClues(payload.primaryClues);
     const features = normalizeRequestClues(payload.features);
@@ -736,7 +789,7 @@ function normalizeVintedPayload(payload = null) {
     };
     return {
         ...payload,
-        source: 'vinted',
+        source: payload.source,
         selectedClues,
         primaryClues,
         features,
@@ -779,7 +832,7 @@ function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) 
             /\b(?:base\s+set|set\s+base|evolutions|evoluzioni|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(clue)
         );
         const collectorClues = normalizedClues.filter((clue) =>
-            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(clue) ||
+            /\b(?:BW|XY|SM|SWSH|SVP|PROMO)\s?\d{1,4}[a-z]?\b/i.test(clue) ||
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(clue) ||
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(clue)
         );
@@ -871,6 +924,9 @@ function titleForNameResolution(title = '', originalTitle = '', clues = []) {
 function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
     const requestedName = compactSearchValue(structuredCard?.name || '');
     if (!resolvedName) {
+        return false;
+    }
+    if (!rowMatchesStructuredVariation({ name: resolvedName }, structuredCard)) {
         return false;
     }
     if (!requestedName) {
@@ -1186,6 +1242,9 @@ function rowMatchesStructuredName(row, structuredCard) {
         return rowName.startsWith('nidoran');
     }
 
+    if (hasStructuredCollectorIdentity(structuredCard) && !normalizeVariationValue(structuredCard?.variation || '')) {
+        return rowName === requestedName;
+    }
     return rowName === requestedName ||
         rowName.includes(requestedName) ||
         requestedName.includes(rowName);
@@ -1204,16 +1263,23 @@ function expansionMatches(rowExpansion = '', requestedExpansion = '') {
 }
 
 function expansionAliasCompacts(expansion = '') {
-    const cleanExpansion = String(expansion || '').replace(/\s+/g, ' ').trim();
+    const cleanExpansion = normalizeExpansionAlias(String(expansion || '').replace(/\s+/g, ' ').trim());
     if (!cleanExpansion) {
         return [];
     }
 
     const variants = new Set([cleanExpansion]);
+    const normalizedAlias = normalizeExpansionAlias(cleanExpansion);
+    if (normalizedAlias && normalizedAlias !== cleanExpansion) {
+        variants.add(normalizedAlias);
+    }
     const compactExpansion = compactSetValue(cleanExpansion);
     const codeAliases = {
         drs: 'Dragon Selection',
         dragonselection: 'DRS',
+        hl: 'EX Hidden Legends',
+        exhiddenlegends: 'HL',
+        hlexhiddenlegends: 'EX Hidden Legends',
     };
     if (codeAliases[compactExpansion]) {
         variants.add(codeAliases[compactExpansion]);
@@ -1259,9 +1325,9 @@ function expansionMatchRank(rowExpansion = '', requestedExpansion = '') {
 function collectorNumberParts(value = '') {
     const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
     const normalized = normalizeCollectorValue(cleanValue);
-    const prefix = cleanValue.match(/\b([A-Z0-9]*[A-Z][A-Z0-9]{0,5})\s*\d{1,4}[a-z]?\b/i)?.[1]?.toLowerCase() || '';
+    const prefix = cleanValue.match(/\b(PROMO|[A-Z0-9]*[A-Z][A-Z0-9]{0,5})\s*\d{1,4}[a-z]?\b/i)?.[1]?.toLowerCase() || '';
     const primary = normalized.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0] ||
-        normalized.match(/\d{1,4}[a-z]?/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+        normalized.match(/\d{1,4}[a-z]?/i)?.[0] ||
         '';
     return {
         normalized,
@@ -1312,6 +1378,9 @@ function collectorNumberMatchRank(rowNumber = '', requestedNumber = '') {
     if (requested.prefix && !row.prefix && !row.hasSlash) {
         return 6;
     }
+    if (requested.prefix && row.hasSlash) {
+        return 7;
+    }
     if (!requested.prefix) {
         return row.hasSlash ? 7 : 6;
     }
@@ -1330,6 +1399,42 @@ function collectorNumberMatches(rowNumber = '', requestedNumber = '') {
     return collectorNumberMatchRank(rowNumber, requestedNumber) < 99;
 }
 
+function normalizeVariationValue(value = '') {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/\bvastro\b/g, 'vstar')
+        .replace(/[^a-z0-9]+/g, '');
+}
+
+function explicitVariationFromName(value = '') {
+    const match = String(value || '').match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i);
+    return match ? normalizeVariationValue(match[0]) : '';
+}
+
+function rowMatchesStructuredVariation(row = {}, structuredCard = {}) {
+    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
+    if (!requestedVariation) {
+        return true;
+    }
+    if (requestedVariation === 'v' && !hasExplicitVariationStructuredRows([row], structuredCard)) {
+        return false;
+    }
+    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
+    return !rowVariation || rowVariation === requestedVariation;
+}
+
+function variationMatchRank(row = {}, structuredCard = {}) {
+    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
+    if (!requestedVariation) {
+        return 0;
+    }
+    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
+    if (!rowVariation) {
+        return 1;
+    }
+    return rowVariation === requestedVariation ? 0 : 99;
+}
+
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const requestedExpansion = compactSetValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
@@ -1340,6 +1445,12 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const hasEditionHint = Boolean(structuredCard.editionHint);
 
     return [...rows].sort((a, b) => {
+        const aVariationRank = variationMatchRank(a, structuredCard);
+        const bVariationRank = variationMatchRank(b, structuredCard);
+        if (aVariationRank !== bVariationRank) {
+            return aVariationRank - bVariationRank;
+        }
+
         const aExpansionRank = requestedExpansion ? expansionMatchRank(rowExpansionName(a), structuredCard.expansion || '') : 0;
         const bExpansionRank = requestedExpansion ? expansionMatchRank(rowExpansionName(b), structuredCard.expansion || '') : 0;
         if (aExpansionRank !== bExpansionRank) {
@@ -1448,7 +1559,8 @@ function rowMatchesStructuredIdentity(row = {}, structuredCard = {}) {
         structuredCard.printedCollectorNumber ||
         structuredCard.numericCollectorNumber ||
         '';
-    return expansionMatches(rowExpansionName(row), structuredCard.expansion || '') &&
+    return rowMatchesExactStructuredName(row, structuredCard) &&
+        expansionMatches(rowExpansionName(row), structuredCard.expansion || '') &&
         collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber);
 }
 
@@ -1460,7 +1572,8 @@ function rowMatchesStructuredCollectorIdentity(row = {}, structuredCard = {}) {
         structuredCard.printedCollectorNumber ||
         structuredCard.numericCollectorNumber ||
         '';
-    return collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber) &&
+    return rowMatchesExactStructuredName(row, structuredCard) &&
+        collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber) &&
         (!structuredCard.expansion || expansionMatches(rowExpansionName(row), structuredCard.expansion || ''));
 }
 
@@ -1473,7 +1586,9 @@ function rowMatchesExactStructuredName(row = {}, structuredCard = {}) {
     if (requestedName === 'nidoran') {
         return rowName.startsWith('nidoran');
     }
-    return rowName === requestedName;
+    const requestedSearchName = compactSearchValue(structuredCard?.searchName || searchNameWithVariation(structuredCard?.name || '', structuredCard?.variation || ''));
+    return rowName === requestedName ||
+        (requestedSearchName && rowName === requestedSearchName);
 }
 
 function rowMatchesGoodEnoughExact(row = {}, structuredCard = {}) {
@@ -1485,9 +1600,51 @@ function hasGoodEnoughExactRows(rows = [], structuredCard = {}) {
     return rows.some((row) => rowMatchesGoodEnoughExact(row, structuredCard));
 }
 
+function hasExplicitVariationStructuredRows(rows = [], structuredCard = {}) {
+    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
+    return Boolean(requestedVariation) && rows.some((row) => explicitVariationFromName(row?.name || row?.canonical_name || '') === requestedVariation);
+}
+
+function filterStrongExactRows(rows = [], structuredCard = {}) {
+    if (
+        hasStructuredCollectorIdentity(structuredCard) &&
+        !normalizeVariationValue(structuredCard?.variation || '') &&
+        compactSearchValue(structuredCard?.collectorNumber || structuredCard?.printedCollectorNumber || '') !==
+            compactSearchValue(structuredCard?.numericCollectorNumber || '')
+    ) {
+        const requestedCollectorNumber = structuredCard.collectorNumber ||
+            structuredCard.printedCollectorNumber ||
+            structuredCard.numericCollectorNumber ||
+            '';
+        const exactRows = rows.filter((row) =>
+            rowMatchesExactStructuredName(row, structuredCard) &&
+            collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber) &&
+            (!structuredCard.expansion || expansionMatches(rowExpansionName(row), structuredCard.expansion || ''))
+        );
+        const requestedParts = collectorNumberParts(requestedCollectorNumber);
+        const hasPrefixedRow = exactRows.some((row) =>
+            collectorNumberParts(rowCollectorNumber(row)).prefix
+        );
+        const exactRowsHaveAllRequestedPrimary = exactRows.every((row) => {
+            const rowParts = collectorNumberParts(rowCollectorNumber(row));
+            return rowParts.primary === requestedParts.primary ||
+                (!requestedParts.primary.startsWith('0') && rowParts.numericPrimary === requestedParts.numericPrimary);
+        });
+        const hasNameMismatch = rows.some((row) => !rowMatchesExactStructuredName(row, structuredCard));
+        if ((requestedParts.prefix && !hasPrefixedRow && !hasNameMismatch) || !exactRowsHaveAllRequestedPrimary) {
+            return rows;
+        }
+        return exactRows.length > 0 ? exactRows : rows;
+    }
+    return rows;
+}
+
 function shouldRunAutocompleteFallback(rows = [], structuredCard = {}) {
     if (rows.length === 0) {
         return true;
+    }
+    if (hasExplicitVariationStructuredRows(rows, structuredCard)) {
+        return false;
     }
     if (hasStructuredCollectorIdentity(structuredCard)) {
         return !hasGoodEnoughExactRows(rows, structuredCard);
@@ -1499,7 +1656,10 @@ function shouldRunAutocompleteFallback(rows = [], structuredCard = {}) {
 }
 
 function mergeAndRankStructuredRows(primaryRows = [], fallbackRows = [], structuredCard = {}) {
-    return sortRowsForStructuredCard(uniqueRowsById([...primaryRows, ...fallbackRows]), structuredCard);
+    return filterStrongExactRows(
+        sortRowsForStructuredCard(uniqueRowsById([...primaryRows, ...fallbackRows]), structuredCard),
+        structuredCard
+    );
 }
 
 function uniqueRowsById(rows = []) {
@@ -1573,10 +1733,11 @@ async function searchExtensionCard(structuredCard) {
         .map(rowFromExtensionMatch)
         .filter(Boolean)
         .filter((row) => rowMatchesStructuredName(row, structuredCard))
+        .filter((row) => rowMatchesStructuredVariation(row, structuredCard))
         .filter((row) => compactSetValue(structuredCard.expansion || '') !== 'baseset' || isAllowedBaseSetFamily(row)));
 
     return {
-        rows: sortRowsForStructuredCard(rows, structuredCard),
+        rows: filterStrongExactRows(sortRowsForStructuredCard(rows, structuredCard), structuredCard),
         debug: {
             endpoint: '/api/extension-card-search',
             payload,
@@ -2450,35 +2611,58 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     await ensureRuntimeStorageCurrent();
     const resolveStartedAt = Date.now();
     const owner = requestContext.owner || null;
+    const { sidePanelState: existingSidePanelState } = await chrome.storage.session.get('sidePanelState');
+    if (
+        !requestContext.forceRefresh &&
+        samePinnedVintedPreviewState(existingSidePanelState, tab?.url || '') &&
+        (!owner || ['activated', 'tab-complete', 'tab-url', 'content-navigation', 'action-click', 'refresh'].includes(owner.reason || ''))
+    ) {
+        return existingSidePanelState;
+    }
     const phaseTimings = {};
     let phaseStartedAt = resolveStartedAt;
     const markPhase = (name) => {
         phaseTimings[name] = Date.now() - phaseStartedAt;
         phaseStartedAt = Date.now();
     };
+    const requestClues = normalizeRequestClues(requestContext.clues);
+    const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
+    const vintedPayload = normalizeVintedPayload(requestContext.vintedPayload);
+    const effectiveRequestClues = vintedPayload?.selectedClues || requestClues;
+    const effectivePrimaryClues = vintedPayload?.primaryClues || requestPrimaryClues;
     let pageInfo;
     let pageInfoError = '';
-    try {
-        pageInfo = await getActivePageInfo(tab);
-    } catch (error) {
-        pageInfoError = error.message || 'Unable to read marketplace page.';
+    if (vintedPayload) {
+        const originalTitle = requestContext.originalTitle || vintedPayload.originalTitle || tab?.title || '';
         pageInfo = {
-            title: tab?.title || '',
-            url: tab?.url || '',
+            title: vintedPayload.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues),
+            url: tab?.url || vintedPayload.listingKey || '',
             hostname: tab?.url ? new URL(tab.url).hostname : '',
-            structuredCard: scrapeStructuredCardFields(tab?.title || ''),
+            originalTitle,
+            clues: effectiveRequestClues,
+            primaryClues: effectivePrimaryClues,
+            selectedClues: effectiveRequestClues,
+            structuredCard: vintedPayload.structuredCard,
+            vintedPayload,
         };
+    } else {
+        try {
+            pageInfo = await getActivePageInfo(tab);
+        } catch (error) {
+            pageInfoError = error.message || 'Unable to read marketplace page.';
+            pageInfo = {
+                title: tab?.title || '',
+                url: tab?.url || '',
+                hostname: tab?.url ? new URL(tab.url).hostname : '',
+                structuredCard: scrapeStructuredCardFields(tab?.title || ''),
+            };
+        }
     }
     markPhase('pageInfoMs');
     if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
         markStaleSidePanelOwner(owner, 'page info behind current side panel owner');
         return { pageInfo, rows: [], best: null, blueprintId: '', pokoinUrl: '', error: pageInfoError, debug: sidePanelOwnerDebug(owner), stale: true };
     }
-    const requestClues = normalizeRequestClues(requestContext.clues);
-    const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
-    const vintedPayload = normalizeVintedPayload(requestContext.vintedPayload);
-    const effectiveRequestClues = vintedPayload?.selectedClues || requestClues;
-    const effectivePrimaryClues = vintedPayload?.primaryClues || requestPrimaryClues;
     if (effectiveRequestClues.length > 0) {
         const originalTitle = requestContext.originalTitle || pageInfo.title || tab?.title || '';
         pageInfo.originalTitle = originalTitle;
@@ -2486,7 +2670,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         pageInfo.primaryClues = effectivePrimaryClues;
         pageInfo.selectedClues = effectiveRequestClues;
         pageInfo.title = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues);
-        pageInfo.structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(pageInfo.title);
+        pageInfo.structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(pageInfo.title, cardmarketContextFromRequest({ clues: effectiveRequestClues }, pageInfo.url || tab?.url || ''));
         pageInfo.vintedPayload = vintedPayload;
     }
     let rows = [];
@@ -2760,10 +2944,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     throw new Error('No active tab found.');
                 }
                 const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
-                if (samePinnedVintedPreviewState(sidePanelState, tab.url || '')) {
+                if (!request.forceRefresh && samePinnedVintedPreviewState(sidePanelState, tab.url || '')) {
                     return sidePanelState;
                 }
-                return resolveActiveTabForSidePanel(tab);
+                return resolveActiveTabForSidePanel(tab, {
+                    forceRefresh: Boolean(request.forceRefresh),
+                    clues: request.clues,
+                    primaryClues: request.primaryClues,
+                    vintedPayload: request.vintedPayload,
+                });
             })
             .then((result) => sendResponse({ success: true, result }))
             .catch((error) => {
@@ -2774,7 +2963,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(() => {
                 const tab = sender.tab;
                 const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
-                const vintedPayload = normalizeVintedPayload(request.vintedPayload);
+                const vintedPayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
                 const clues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
                 const primaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
                 const title = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
@@ -2805,9 +2994,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (!title) {
                         return [];
                     }
-                    const cardmarketContext = isCardmarketUrl(requestUrl)
-                        ? { expansion: cardmarketExpansionFromUrl(requestUrl) }
-                        : null;
+                    const cardmarketContext = cardmarketContextFromRequest(request, requestUrl);
                     const structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(title, cardmarketContext);
                     const exactIdentity = hasExactStructuredIdentity(structuredCard);
                     const exactFastPath = hasExactSearchFastPath(structuredCard);
@@ -2902,7 +3089,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 await ensureRuntimeStorageCurrent();
                 const tab = await chrome.tabs.get(senderTab.id);
                 const currentUrl = request.url || tab.url || senderTab.url || '';
-                const currentTitle = request.title || tab.title || senderTab.title || '';
+                const currentTitle = tab.title || senderTab.title || request.title || '';
                 openUrl = currentUrl;
                 openTitle = currentTitle;
                 const directCardTraderBlueprintId = request.cardtraderBlueprintId || cardtraderBlueprintIdFromUrl(currentUrl);
@@ -2915,11 +3102,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }, 'open');
                 openOwner = owner;
                 await openSidePanelPromise;
-                const vintedPayload = normalizeVintedPayload(request.vintedPayload);
+                const vintedPayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
                 const requestClues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
                 const requestPrimaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
                 const requestTitle = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
-                const requestStructuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || currentTitle);
+                const requestStructuredCard = vintedPayload?.structuredCard ||
+                    scrapeStructuredCardFields(requestTitle || currentTitle, cardmarketContextFromRequest(request, currentUrl));
                 const selectedCandidateRow = selectedCandidateRowFromRequest(request);
                 const previewRows = previewRowsFromRequest(request);
                 if (directCardTraderBlueprintId) {

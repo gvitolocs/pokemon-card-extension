@@ -88,6 +88,45 @@ class VintedProcessor {
         return this.normalizeClueValue(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
     }
 
+    targetedVintedNameAliases() {
+        return {
+            magaerna: 'Magearna',
+            magaeran: 'Magearna',
+        };
+    }
+
+    normalizeTargetedVintedNameAlias(value = '') {
+        return this.targetedVintedNameAliases()[this.compactClueValue(value)] || '';
+    }
+
+    normalizeTargetedVintedNameAliasFromPhrase(value = '') {
+        const exactAlias = this.normalizeTargetedVintedNameAlias(value);
+        if (exactAlias) {
+            return exactAlias;
+        }
+        const withoutVariation = this.normalizeClueValue(value)
+            .replace(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const aliasWithoutVariation = this.normalizeTargetedVintedNameAlias(withoutVariation);
+        if (aliasWithoutVariation) {
+            return aliasWithoutVariation;
+        }
+        const compactWithoutVariation = this.compactClueValue(withoutVariation);
+        return Object.values(this.targetedVintedNameAliases()).find((canonicalName) =>
+            this.compactClueValue(canonicalName) === compactWithoutVariation
+        ) || '';
+    }
+
+    normalizeTargetedVintedNameAliasPhrase(value = '') {
+        let normalized = this.normalizeClueValue(value);
+        for (const [aliasCompact, canonicalName] of Object.entries(this.targetedVintedNameAliases())) {
+            const pattern = new RegExp(`\\b${aliasCompact.split('').join('\\s*')}\\b`, 'i');
+            normalized = normalized.replace(pattern, canonicalName);
+        }
+        return normalized !== this.normalizeClueValue(value) ? normalized : '';
+    }
+
     removeVintedMarketplaceNoise(value = '') {
         return this.normalizeClueValue(value)
             .replace(/\b(?:pok[eé]mon|pokemon|pkkmn|pkn|pokn)\b/gi, ' ')
@@ -152,6 +191,9 @@ class VintedProcessor {
         try {
             const titleInfo = window.extractTitleInfo(label) || {};
             const resolvedName = titleInfo.pokemonName || titleInfo.name || '';
+            if (this.normalizeTargetedVintedNameAliasFromPhrase(label)) {
+                return true;
+            }
             return Boolean(resolvedName && this.compactClueValue(resolvedName) === compact);
         } catch (error) {
             console.warn('⚠️ [VINT] Unable to validate clue as Pokemon name:', error);
@@ -173,11 +215,27 @@ class VintedProcessor {
         }
 
         try {
-            const titleInfo = window.extractTitleInfo(this.normalizeClueValue(value)) || {};
-            return titleInfo.pokemonName || titleInfo.name || '';
+            const normalized = this.normalizeClueValue(value);
+            const titleInfo = window.extractTitleInfo(normalized) || {};
+            const resolvedName = titleInfo.pokemonName || titleInfo.name || '';
+            if (resolvedName) {
+                return resolvedName;
+            }
+            const withoutVariation = normalized
+                .replace(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            if (withoutVariation && withoutVariation !== normalized) {
+                const fallbackTitleInfo = window.extractTitleInfo(withoutVariation) || {};
+                const fallbackName = fallbackTitleInfo.pokemonName || fallbackTitleInfo.name || '';
+                if (fallbackName) {
+                    return fallbackName;
+                }
+            }
+            return this.normalizeTargetedVintedNameAliasFromPhrase(value) || '';
         } catch (error) {
             console.warn('⚠️ [VINT] Unable to resolve clue Pokemon name:', error);
-            return '';
+            return this.normalizeTargetedVintedNameAliasFromPhrase(value) || '';
         }
     }
 
@@ -188,7 +246,12 @@ class VintedProcessor {
             return false;
         }
 
-        return this.vintedVariationCompacts().some((variation) => sourceCompact.includes(`${nameCompact}${variation}`));
+        const aliasCompacts = Object.entries(this.targetedVintedNameAliases())
+            .filter(([, canonicalName]) => this.compactClueValue(canonicalName) === nameCompact)
+            .map(([alias]) => alias);
+        return [nameCompact, ...aliasCompacts].some((compact) =>
+            this.vintedVariationCompacts().some((variation) => sourceCompact.includes(`${compact}${variation}`))
+        );
     }
 
     isAttachedNamePhraseClue(value = '') {
@@ -204,12 +267,17 @@ class VintedProcessor {
 
         const labelCompact = this.compactClueValue(label);
         const nameCompact = this.compactClueValue(resolvedName);
+        const aliasCompacts = Object.entries(this.targetedVintedNameAliases())
+            .filter(([, canonicalName]) => this.compactClueValue(canonicalName) === nameCompact)
+            .map(([alias]) => alias);
         return Boolean(
             labelCompact &&
             nameCompact &&
             labelCompact !== nameCompact &&
-            this.vintedVariationCompacts().some((variation) =>
-                labelCompact.endsWith(`${nameCompact}${variation}`)
+            [nameCompact, ...aliasCompacts].some((compact) =>
+                this.vintedVariationCompacts().some((variation) =>
+                    labelCompact.endsWith(`${compact}${variation}`)
+                )
             )
         );
     }
@@ -245,19 +313,21 @@ class VintedProcessor {
     isCollectorNumberClue(value = '') {
         const label = this.normalizeClueValue(value);
         return /^\d{1,4}[a-z]?$/i.test(label) ||
+            /\bPROMO\s+\d{1,4}[a-z]?\b/i.test(label) ||
             /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/.test(label) ||
             /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/.test(label) ||
             /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(label) ||
-            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label) ||
+            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/.test(label) ||
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label);
     }
 
     vintedCollectorNumberPatterns() {
         return [
+            /\bPROMO\s+\d{1,4}[a-z]?\b/gi,
             /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/g,
             /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/g,
             /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
-            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
+            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/g,
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
         ];
     }
@@ -298,7 +368,8 @@ class VintedProcessor {
             for (const match of String(text || '').matchAll(/\b\d{1,4}[a-z]?\b/gi)) {
                 const start = match.index;
                 const end = start + match[0].length;
-                if (protectedBareNumberSpans.some(([spanStart, spanEnd]) => start >= spanStart && end <= spanEnd)) {
+                const protectedSpan = protectedBareNumberSpans.find(([spanStart, spanEnd]) => start >= spanStart && end <= spanEnd);
+                if (protectedSpan && !String(text || '').slice(protectedSpan[0], protectedSpan[1]).includes('/')) {
                     continue;
                 }
                 const label = match[0].trim();
@@ -383,21 +454,26 @@ class VintedProcessor {
     prepareVintedKeywordCandidates(candidates = [], sourceText = '') {
         const prepared = candidates
             .map((candidate, index) => {
-                const nameLike = this.isPokemonNameLikeClue(candidate);
-                const variation = this.isVariationClue(candidate.label || candidate.value);
-                const baseSet = this.isBaseSetClue(candidate.label || candidate.value);
-                const collectorNumber = this.isCollectorNumberClue(candidate.label || candidate.value);
-                const expansion = this.isExpansionClue(candidate.label || candidate.value);
-                const illustration = this.isIllustrationClue(candidate.label || candidate.value);
-                const attachedNamePhrase = this.isAttachedNamePhraseClue(candidate);
-                const selectedNameLike = nameLike && !this.hasAttachedVariationForName(candidate.label || candidate.value, sourceText);
+                const aliasPhraseLabel = this.normalizeTargetedVintedNameAliasPhrase(candidate.label || candidate.value);
+                const normalizedCandidate = aliasPhraseLabel
+                    ? { ...candidate, label: aliasPhraseLabel, value: aliasPhraseLabel, compact: this.compactClueValue(aliasPhraseLabel) }
+                    : candidate;
+                const nameLike = this.isPokemonNameLikeClue(normalizedCandidate);
+                const variation = this.isVariationClue(normalizedCandidate.label || normalizedCandidate.value);
+                const baseSet = this.isBaseSetClue(normalizedCandidate.label || normalizedCandidate.value);
+                const collectorNumber = this.isCollectorNumberClue(normalizedCandidate.label || normalizedCandidate.value);
+                const expansion = this.isExpansionClue(normalizedCandidate.label || normalizedCandidate.value);
+                const illustration = this.isIllustrationClue(normalizedCandidate.label || normalizedCandidate.value);
+                const attachedNamePhrase = this.isAttachedNamePhraseClue(normalizedCandidate);
+                const selectedNameLike = nameLike && !this.hasAttachedVariationForName(normalizedCandidate.label || normalizedCandidate.value, sourceText);
                 const selectedHighConfidenceContext =
                     (collectorNumber || expansion) &&
                     /^(?:title|title-pattern|title-expansion)$/.test(candidate.source || '') &&
                     this.sourceContainsClue(candidate.label || candidate.value, sourceText);
-                const selectedIllustrationContext = illustration && candidate.source === 'title-illustration';
+                const selectedIllustrationContext = illustration &&
+                    (candidate.source === 'title-illustration' || /\bpromo\b/i.test(sourceText));
                 return {
-                    ...candidate,
+                    ...normalizedCandidate,
                     nameLike,
                     variation,
                     baseSet,
@@ -626,10 +702,15 @@ class VintedProcessor {
     }
 
     normalizeVintedCollectorNumber(value = '') {
-        return this.normalizeClueValue(value)
+        const normalized = this.normalizeClueValue(value)
+            .replace(/\bpromo\s+(\d{1,4}[a-z]?)\b/gi, 'PROMO $1')
             .replace(/\s*\/\s*/g, '/')
             .replace(/\s+/g, ' ')
             .trim();
+        return normalized.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s+/g, '') ||
+            normalized.match(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s*\/\s*/g, '/') ||
+            normalized.match(/\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/)?.[0] ||
+            normalized;
     }
 
     numericVintedCollectorNumber(value = '') {
@@ -641,11 +722,15 @@ class VintedProcessor {
         const primaryClues = this.selectedPrimaryClues(selectedClues);
         const selectedKeywords = this.selectedVintedKeywords();
         const keywordFor = (category) => selectedKeywords.find((keyword) => keyword.category === category);
+        const nameKeyword = selectedKeywords.find((keyword) => keyword.nameLike) ||
+            selectedKeywords.find((keyword) => keyword.attachedNamePhrase);
         const collectorKeyword = keywordFor('collector');
         const expansionKeyword = keywordFor('expansion');
         const featureKeywords = selectedKeywords.filter((keyword) => keyword.category === 'feature');
         const variationKeywords = selectedKeywords.filter((keyword) => keyword.category === 'variation');
-        const name = primaryClues.find((clue) => !this.isVariationClue(clue)) || primaryClues[0] || '';
+        const name = nameKeyword
+            ? (this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            : (primaryClues.find((clue) => !this.isVariationClue(clue)) || primaryClues[0] || '');
         const collectorNumber = collectorKeyword ? this.normalizeVintedCollectorNumber(collectorKeyword.value) : '';
         return {
             source: 'vinted',

@@ -356,7 +356,14 @@ async function loadState() {
 elements.refreshBtn.addEventListener('click', async () => {
     setStatus('Refreshing active tab match...');
     try {
-        const response = await chrome.runtime.sendMessage({ action: 'resolveActiveTabForSidePanel' });
+        const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+        const response = await chrome.runtime.sendMessage({
+            action: 'resolveActiveTabForSidePanel',
+            forceRefresh: true,
+            clues: sidePanelState?.pageInfo?.selectedClues || sidePanelState?.pageInfo?.clues || [],
+            primaryClues: sidePanelState?.pageInfo?.primaryClues || [],
+            vintedPayload: sidePanelState?.pageInfo?.vintedPayload || null,
+        });
         if (!response?.success) {
             throw new Error(response?.error || 'Refresh failed.');
         }

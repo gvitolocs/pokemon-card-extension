@@ -1024,6 +1024,186 @@ test('Vinted Regice Ex defaults only name phrase and attached variation', async 
     assert.doesNotMatch(messages[0].title, /vintage|Set Ex/i);
 });
 
+test('Vinted normalizes Magaerna ex typo to Magearna structured payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/75-magaerna-ex', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^magearna$/i.test(String(title || '').trim()) ? 'Magearna' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Magaerna ex offensive vapeur 75/114';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    assert.ok(labels.includes('Magearna ex'), 'typo name phrase should be normalized in chips');
+    assert.ok(labels.includes('ex'));
+    assert.ok(labels.includes('75/114'));
+    assert.equal(processor.currentKeywords.find((keyword) => keyword.label === 'Magearna ex')?.selectedByDefault, true);
+    assert.equal(messages[0].vintedPayload.name, 'Magearna');
+    assert.equal(messages[0].vintedPayload.variation, 'ex');
+    assert.equal(messages[0].vintedPayload.collectorNumber, '75/114');
+    assert.equal(messages[0].vintedPayload.numericCollectorNumber, '75');
+    assert.equal(messages[0].title, 'Magearna ex 75/114');
+    assert.deepEqual(Array.from(messages[0].primaryClues), ['Magearna ex', 'ex']);
+});
+
+test('Vinted normalizes Magaeran ex typo variant to Magearna', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/76-magaeran-ex', hostname: 'www.vinted.it' },
+            extractTitleInfo: () => ({ pokemonName: null }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Magaeran ex offensive vapeur 75/114';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.label === 'Magearna ex' && keyword.selectedByDefault));
+    assert.equal(messages[0].vintedPayload.name, 'Magearna');
+    assert.equal(messages[0].vintedPayload.variation, 'ex');
+    assert.equal(messages[0].vintedPayload.collectorNumber, '75/114');
+    assert.equal(messages[0].title, 'Magearna ex 75/114');
+});
+
+test('Vinted Magnezone V keeps V variation distinct from ex', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/56-magnezone-v', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /magnezone/i.test(String(title || '')) ? 'Magnezone' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return {
+                        success: true,
+                        results: [
+                            { blueprint_id: 'magnezone-v', name_en: 'Magnezone V', expansion_name_en: 'Lost Origin', collector_number: '056/196', search_score: 95 },
+                        ],
+                    };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Magnezone V 056/196';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+    processor.currentButton = createButtonStub();
+    processor.renderCandidatePreview = () => {};
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+    await processor.openPokoinSidePanel();
+
+    const searchMessage = messages[0];
+    assert.deepEqual(Array.from(searchMessage.primaryClues), ['Magnezone V', 'V']);
+    assert.equal(searchMessage.vintedPayload.name, 'Magnezone');
+    assert.equal(searchMessage.vintedPayload.variation, 'V');
+    assert.equal(searchMessage.vintedPayload.collectorNumber, '056/196');
+    assert.equal(searchMessage.vintedPayload.numericCollectorNumber, '056');
+    assert.equal(searchMessage.title, 'Magnezone V 056/196');
+    assert.doesNotMatch(searchMessage.title, /\bex\b/i);
+    assert.equal(messages.at(-1).vintedPayload.variation, 'V');
+    assert.deepEqual(messages.at(-1).previewRows.map((row) => row.card_id), ['magnezone-v']);
+});
+
+test('Vinted Magneton PROMO 159 keeps promo collector and preview rows in side panel payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/159-magneton-promo', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /magneton/i.test(String(title || '')) ? 'Magneton' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return {
+                        success: true,
+                        results: [
+                            { blueprint_id: 'magneton-pc-159', name_en: 'Magneton', expansion_name_en: 'Pokemon Center', collector_number: '159', search_score: 99 },
+                            { blueprint_id: 'magneton-svp-159', name_en: 'Magneton', expansion_name_en: 'SV Black Star Promos', collector_number: 'SVP 159', search_score: 95 },
+                        ],
+                    };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Magneton PROMO 159 Ita';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+    await processor.openPokoinSidePanel();
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const searchMessage = messages[0];
+    const openMessage = messages.at(-1);
+    assert.ok(selectedLabels.includes('Magneton'));
+    assert.ok(selectedLabels.includes('PROMO 159'));
+    assert.ok(selectedLabels.includes('illustration'));
+    assert.equal(searchMessage.vintedPayload.collectorNumber, 'PROMO 159');
+    assert.equal(searchMessage.vintedPayload.numericCollectorNumber, '159');
+    assert.match(searchMessage.title, /PROMO 159/);
+    assert.equal(openMessage.action, 'openSidePanelForCurrentTab');
+    assert.equal(openMessage.vintedPayload.collectorNumber, 'PROMO 159');
+    assert.deepEqual(openMessage.previewRows.map((row) => row.card_id), ['magneton-pc-159', 'magneton-svp-159']);
+    assert.deepEqual(openMessage.previewRows.map((row) => row.card_number), ['159', 'SVP 159']);
+});
+
 test('Vinted preserves trainer composite clue in background payload', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -2086,7 +2266,7 @@ test('Vinted processing waits when only top skeleton title exists', () => {
 
 test('Vinted background candidates use active blue styling and render preview', async () => {
     const appended = [];
-    const button = createButtonStub();
+    const button = createDomElement('button');
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         document: {
             querySelectorAll: () => [],
@@ -2369,6 +2549,118 @@ test('Vinted main Pokoin button opens side panel from shadow overlay', async () 
     assert.equal(messages.length, 2, 'idempotent listener attachment should not duplicate one click');
 });
 
+test('eBay Pokoin button stays compact blue and never uses old green matched state', () => {
+    const icon = { style: {}, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
+    const button = createButtonStub();
+    button.querySelector = (selector) => selector === 'img' ? icon : null;
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor');
+    const processor = new Processor();
+
+    processor.setPokoinButtonLabel(button, 3);
+    processor.applyPokoinButtonStyles(button);
+
+    assert.equal(button.style.background, '#0ea5e9');
+    assert.equal(button.style.borderRadius, '999px');
+    assert.equal(button.style.width, 'auto');
+    assert.equal(button.style.maxWidth, 'max-content');
+    assert.equal(button.style.flex, '0 0 auto');
+    assert.notEqual(button.style.background, '#28a745');
+    assert.doesNotMatch(button.innerHTML, /#28a745|#218838|#6c757d/);
+    assert.equal(icon.style.width, '20px');
+    assert.equal(icon.style.height, '20px');
+    assert.equal(icon.style.maxWidth, '20px');
+    assert.equal(icon.style.flex, '0 0 20px');
+    assert.equal(icon.attributes['data-pokoin-button-icon'], 'true');
+});
+
+test('eBay Magearna EX title builds Vinted-like structured payload and clues', () => {
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.com/itm/12345?hash=abc',
+                hostname: 'www.ebay.com',
+                pathname: '/itm/12345',
+            },
+            extractTitleInfo: () => ({
+                pokemonName: 'Magearna',
+                collectorNumber: '110/114',
+                isEXCard: true,
+                expansion: 'Steam Siege',
+            }),
+        },
+    });
+    const processor = new Processor();
+
+    const payload = processor.buildEbayPayload('Magearna EX - 110/114 - Pokemon Steam...', processor.extractTitleInfo('Magearna EX - 110/114 - Pokemon Steam...'));
+
+    assert.equal(payload.source, 'ebay');
+    assert.equal(payload.name, 'Magearna');
+    assert.equal(payload.variation, 'ex');
+    assert.equal(payload.collectorNumber, '110/114');
+    assert.equal(payload.numericCollectorNumber, '110');
+    assert.equal(payload.expansion, 'Steam Siege');
+    assert.equal(payload.searchTitle, 'Magearna ex Steam Siege 110/114');
+    assert.deepEqual(Array.from(payload.primaryClues), ['Magearna ex', 'ex']);
+    assert.ok(payload.selectedClues.includes('110/114'));
+    assert.ok(payload.selectedClues.includes('Steam Siege'));
+    assert.match(processor.buildEbaySearchSignature(payload), /magearnaexsteamsiege110114/);
+});
+
+test('eBay button sends same structured payload and preview rows to side panel', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.com/itm/12345?hash=abc',
+                hostname: 'www.ebay.com',
+                pathname: '/itm/12345',
+            },
+            extractTitleInfo: () => ({
+                pokemonName: 'Magearna',
+                collectorNumber: '110/114',
+                isEXCard: true,
+                expansion: 'Steam Siege',
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    const title = 'Magearna EX - 110/114 - Pokemon Steam...';
+    const payload = processor.buildEbayPayload(title, processor.extractTitleInfo(title));
+    processor.storeMatchedResults('https://www.ebay.com/itm/12345', title, [
+        { blueprint_id: 'steam-110', name_en: 'Magearna EX', expansion_name_en: 'Steam Siege', collector_number: '110/114', search_score: 90 },
+        { blueprint_id: 'generic', name_en: 'Magearna ex', expansion_name_en: 'Mega Evolution', collector_number: '001', search_score: 100 },
+    ]);
+    const button = createDomElement('button');
+    processor.attachSidePanelClick(button, title, 'https://www.ebay.com/itm/12345?hash=abc', payload);
+
+    await button.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+
+    const message = messages.at(-1);
+    assert.equal(message.action, 'openSidePanelForCurrentTab');
+    assert.equal(message.previewSource, 'ebay_button_preview');
+    assert.equal(message.title, 'Magearna ex Steam Siege 110/114');
+    assert.deepEqual(Array.from(message.previewRows.map((row) => row.card_id)), ['steam-110', 'generic']);
+    assert.deepEqual(Array.from(message.previewRows.map((row) => row.set_name)), ['Steam Siege', 'Mega Evolution']);
+    assert.equal(message.ebayPayload.name, 'Magearna');
+    assert.equal(message.ebayPayload.variation, 'ex');
+    assert.equal(message.ebayPayload.collectorNumber, '110/114');
+    assert.equal(message.ebayPayload.expansion, 'Steam Siege');
+    assert.deepEqual(message.marketplacePayload, message.ebayPayload);
+});
+
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
     const icon = { style: {}, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
     const button = createButtonStub();
@@ -2391,7 +2683,7 @@ test('Cardmarket green button keeps compact icon dimensions after relabel', () =
 
 test('shared marketplace Pokoin button icons are size-contained', () => {
     [
-        ['processors/EBAYE.js', 'EbayProcessor', '22px'],
+        ['processors/EBAYE.js', 'EbayProcessor', '20px'],
         ['processors/CME.js', 'CardmarketProcessor', '20px'],
     ].forEach(([relativePath, className, expectedSize]) => {
         const { Processor } = loadProcessor(relativePath, className);
@@ -2862,6 +3154,74 @@ test('background ranks exact collector and expansion above generic high-score ro
     assert.equal(sorted.at(-1).card_id, '151-179');
 });
 
+test('background ranks explicit V variation above ex rows', () => {
+    const sandbox = loadBackgroundHelpers([
+        'sortRowsForStructuredCard',
+        'rowMatchesStructuredVariation',
+    ]);
+    const rows = [
+        { card_id: 'magnezone-ex', name: 'Magnezone ex', set_name: 'Scarlet Violet', card_number: '065/198', search_rank: 9999 },
+        { card_id: 'magnezone-v', name: 'Magnezone V', set_name: 'Lost Origin', card_number: '056/196', search_rank: 20 },
+    ];
+    const structuredCard = {
+        name: 'Magnezone',
+        variation: 'v',
+        collectorNumber: '056/196',
+    };
+    const sorted = sandbox.sortRowsForStructuredCard(rows, structuredCard);
+
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[0], structuredCard), false);
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[1], structuredCard), true);
+    assert.equal(sorted[0].card_id, 'magnezone-v');
+    assert.equal(sorted.at(-1).card_id, 'magnezone-ex');
+});
+
+test('background ranks Magearna EX 110/114 Steam Siege above generic Magearna ex rows', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard']);
+    const rows = [
+        { card_id: 'generic-mega', name: 'Magearna ex', set_name: 'Mega Evolution', card_number: '001/132', search_rank: 12000 },
+        { card_id: 'steam-110', name: 'Magearna EX', set_name: 'Steam Siege', card_number: '110/114', search_rank: 10 },
+        { card_id: 'steam-other', name: 'Magearna EX', set_name: 'Steam Siege', card_number: '111/114', search_rank: 1000 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Magearna',
+        searchName: 'Magearna ex',
+        variation: 'ex',
+        collectorNumber: '110/114',
+        numericCollectorNumber: '110',
+        expansion: 'Steam Siege',
+    });
+
+    assert.equal(sorted[0].card_id, 'steam-110');
+    assert.equal(sorted.at(-1).card_id, 'generic-mega');
+});
+
+test('background normalizes eBay payload for exact Magearna search', () => {
+    const sandbox = loadBackgroundHelpers(['normalizeMarketplacePayload']);
+
+    const payload = sandbox.normalizeMarketplacePayload({
+        source: 'ebay',
+        originalTitle: 'Magearna EX - 110/114 - Pokemon Steam...',
+        searchTitle: 'Magearna ex Steam Siege 110/114',
+        selectedClues: ['Magearna ex', 'ex', '110/114', 'Steam Siege'],
+        primaryClues: ['Magearna ex', 'ex'],
+        name: 'Magearna',
+        variation: 'ex',
+        collectorNumber: '110/114',
+        numericCollectorNumber: '110',
+        expansion: 'Steam Siege',
+        features: [],
+    });
+
+    assert.equal(payload.source, 'ebay');
+    assert.equal(payload.structuredCard.name, 'Magearna');
+    assert.equal(payload.structuredCard.variation, 'ex');
+    assert.equal(payload.structuredCard.collectorNumber, '110/114');
+    assert.equal(payload.structuredCard.numericCollectorNumber, '110');
+    assert.equal(payload.structuredCard.expansion, 'Steam Siege');
+    assert.equal(payload.structuredCard.searchName, 'Magearna ex');
+});
+
 test('Cardmarket ranking prefers exact name, prefixed collector, and expansion', () => {
     const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard']);
     const rows = [
@@ -2953,6 +3313,38 @@ test('Cardmarket ranks Latias DRS 009 Dragon Selection above other Latias varian
     assert.equal(sorted[0].card_id, 'latias-drs-009');
     assert.equal(sorted[1].card_id, 'latias-drs-unpadded');
     assert.equal(sorted.at(-1).card_id, 'alto-mare-011');
+});
+
+test('Cardmarket ranks Machamp HL 9 above VMAX name-only results', () => {
+    const sandbox = loadBackgroundHelpers([
+        'scrapeStructuredCardFields',
+        'sortRowsForStructuredCard',
+        'filterStrongExactRows',
+        'collectorNumberMatchRank',
+        'expansionMatches',
+    ]);
+    const structured = sandbox.scrapeStructuredCardFields(
+        'Machamp (HL 9)',
+        { expansion: 'EX Leggende Nascoste', details: { number: '9' } }
+    );
+    const rows = [
+        { card_id: 'machamp-vmax', name: 'Machamp VMAX', set_name: 'Astral Radiance', card_number: '073/189', search_rank: 999999 },
+        { card_id: 'machamp-hl-9', name: 'Machamp', set_name: 'EX Hidden Legends', card_number: '9/101', search_rank: 10 },
+        { card_id: 'machamp-base', name: 'Machamp', set_name: 'Base Set', card_number: '8/102', search_rank: 9000 },
+    ];
+
+    assert.equal(structured.name, 'Machamp');
+    assert.equal(structured.collectorNumber, 'HL 9');
+    assert.equal(structured.printedCollectorNumber, 'HL 9');
+    assert.equal(structured.numericCollectorNumber, '9');
+    assert.equal(structured.expansion, 'EX Hidden Legends');
+    assert.equal(sandbox.expansionMatches('EX Hidden Legends', 'EX Leggende Nascoste'), true);
+    assert.equal(sandbox.collectorNumberMatchRank('9/101', 'HL 9') < 99, true);
+
+    const sorted = sandbox.sortRowsForStructuredCard(rows, structured);
+    const exactRows = sandbox.filterStrongExactRows(sorted, structured);
+    assert.equal(sorted[0].card_id, 'machamp-hl-9');
+    assert.deepEqual(Array.from(exactRows.map((row) => row.card_id)), ['machamp-hl-9']);
 });
 
 test('Cardmarket ranks Team Rocket TR 62 above Perfect Order Meowth ex', () => {
@@ -3467,6 +3859,116 @@ test('Cardmarket Piplup prefixed number uses structured payload and exact rankin
     assert.equal(extensionPayload.name, 'Piplup');
     assert.equal(extensionPayload.collectorNumber, 'MEP 042');
     assert.equal(extensionPayload.expansion, 'MEP Black Star Promos');
+});
+
+test('Vinted background payload preserves Magnezone V and rejects ex results', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            {
+                                cardId: 'magnezone-ex',
+                                name: 'Magnezone ex',
+                                expansionName: 'Scarlet Violet',
+                                collectorNumber: '065/198',
+                                score: 9999,
+                            },
+                            {
+                                cardId: 'magnezone-v',
+                                name: 'Magnezone V',
+                                expansionName: 'Lost Origin',
+                                collectorNumber: '056/196',
+                                score: 20,
+                            },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Magnezone V 056/196',
+                originalTitle: 'Magnezone V 056/196',
+                url: 'https://www.vinted.it/items/56-magnezone-v',
+                clues: ['Magnezone V', 'V', '056/196'],
+                primaryClues: ['Magnezone V', 'V'],
+                selectedClues: ['Magnezone V', 'V', '056/196'],
+                vintedPayload: {
+                    source: 'vinted',
+                    listingKey: 'https://www.vinted.it/items/56-magnezone-v',
+                    originalTitle: 'Magnezone V 056/196',
+                    searchTitle: 'Magnezone V 056/196',
+                    primaryClues: ['Magnezone V', 'V'],
+                    selectedClues: ['Magnezone V', 'V', '056/196'],
+                    name: 'Magnezone',
+                    variation: 'v',
+                    collectorNumber: '056/196',
+                    numericCollectorNumber: '056',
+                    expansion: '',
+                    features: [],
+                    rarity: '',
+                },
+            },
+            { tab: { id: 56, title: 'Magnezone V 056/196', url: 'https://www.vinted.it/items/56-magnezone-v' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.success, true, response.error || 'expected successful response');
+    assert.deepEqual(Array.from(response.results.map((row) => row.blueprint_id)), ['magnezone-v']);
+    const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
+    assert.equal(extensionPayload.name, 'Magnezone v');
+    assert.equal(extensionPayload.variation, 'v');
+    assert.equal(extensionPayload.collectorNumber, '056/196');
 });
 
 test('Cardmarket Meowth POR 062 uses Perfect Order numeric exact payload and skips fallback', async () => {
@@ -5711,7 +6213,7 @@ test('stale broad refresh cannot overwrite Vinted pinned preview rows', async ()
     const broadOwner = sandbox.createSidePanelRequestOwner({ id: 9, title: 'Tornadus EX Full Art', url: vintedUrl }, 'tab-complete');
     const broadResult = await sandbox.resolveActiveTabForSidePanel({ id: 9, title: 'Tornadus EX Full Art', url: vintedUrl }, { expectedUrl: vintedUrl, owner: broadOwner });
 
-    assert.equal(broadResult.blueprintId, 'broad');
+    assert.equal(broadResult.blueprintId, '96');
     assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['96', '90']);
     assert.equal(storage.sidePanelState.debug.pinnedPreviewRows, true);
     assert.equal(storage.sidePanelState.debug.previewSource, 'vinted_overlay');
@@ -7451,10 +7953,12 @@ test('eBay side-panel open passes button preview rows', async () => {
 
     const openMessage = messages.at(-1);
     assert.equal(openMessage.action, 'openSidePanelForCurrentTab');
-    assert.equal(openMessage.title, 'Tornadus EX Full Art Pokemon');
+    assert.equal(openMessage.title, 'Tornadus ex illustration');
     assert.deepEqual(openMessage.previewRows.map((row) => row.card_id), ['96', '90']);
     assert.deepEqual(openMessage.previewRows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
-    assert.match(openMessage.previewSignature, /^ebay\|https:\/\/www\.ebay\.com\/itm\/555-tornadus-ex$/);
+    assert.match(openMessage.previewSignature, /^ebay\|https:\/\/www\.ebay\.com\/itm\/555-tornadus-ex\|tornadusexillustration/);
+    assert.equal(openMessage.previewSource, 'ebay_button_preview');
+    assert.equal(openMessage.ebayPayload.source, 'ebay');
 });
 
 test('Cardmarket side-panel open passes button preview rows', async () => {
