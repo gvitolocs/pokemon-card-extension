@@ -13,13 +13,13 @@ class CardmarketProcessor {
         return chrome.runtime.getURL('assets/pokoin-512.png');
     }
 
-    setPokoinButtonLabel(button, matchCount = null, styles = {}) {
+    setPokoinButtonLabel(button, matchCount = null) {
         const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
             <span>Pokoin.com${suffix}</span>
         `;
-        this.applyPokoinButtonStyles(button, styles);
+        this.applyPokoinButtonStyles(button);
     }
 
     isHighConfidenceMatch(result = {}) {
@@ -99,26 +99,6 @@ class CardmarketProcessor {
         }
     }
 
-    pokoinButtonStateStyles(state) {
-        if (state === 'matched') {
-            return {
-                background: '#0ea5e9',
-                border: '1px solid #38bdf8',
-                boxShadow: '0 0 0 2px rgba(14, 165, 233, 0.22), 0 2px 8px rgba(14, 165, 233, 0.28)',
-            };
-        }
-
-        return {
-            background: '#6c757d',
-            border: '1px solid transparent',
-            boxShadow: 'none',
-        };
-    }
-
-    applyPokoinButtonState(button, state, matchCount = null) {
-        this.setPokoinButtonLabel(button, matchCount, this.pokoinButtonStateStyles(state));
-    }
-
     /**
      * Initialize Cardmarket processor
      */
@@ -188,14 +168,14 @@ class CardmarketProcessor {
             // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
-            this.applyPokoinButtonState(button, 'loading');
+            this.setPokoinButtonLabel(button);
             button.style.cssText = `
                 margin: 0;
                 padding: 6px 12px;
                 font-size: 15px;
                 min-width: 100px;
             `;
-            this.applyPokoinButtonState(button, 'loading');
+            this.applyPokoinButtonStyles(button, { background: '#6c757d' });
             this.attachSidePanelClick(button);
             
             // Look for "Contact Support" link and replace with Pokoin button
@@ -230,19 +210,22 @@ class CardmarketProcessor {
             console.log('🔍 [CME] Starting database lookup for:', titleInfo.pokemonName || title);
             this.searchCardInDatabase(titleInfo, title).then(results => {
                 if (results && results.length > 0) {
-                    this.applyPokoinButtonState(targetButton, 'matched', this.countHighConfidenceMatches(results));
-                    console.log(`✅ [CME] Link found, button marked as matched`);
+                    // Turn button green when link is found
+                    targetButton.style.background = '#28a745';
+                    this.setPokoinButtonLabel(targetButton, this.countHighConfidenceMatches(results));
+                    console.log(`✅ [CME] Link found, button turned green`);
                     
-                    // Enhanced hover effects (matched)
+                    // Enhanced hover effects (green)
                     targetButton.addEventListener('mouseenter', () => {
-                        targetButton.style.background = '#0284c7';
+                        targetButton.style.background = '#218838';
                         targetButton.style.transform = 'scale(1.02)';
-                        targetButton.style.boxShadow = '0 0 0 2px rgba(14, 165, 233, 0.3), 0 3px 12px rgba(14, 165, 233, 0.35)';
+                        targetButton.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
                     });
                     
                     targetButton.addEventListener('mouseleave', () => {
-                        Object.assign(targetButton.style, this.pokoinButtonStateStyles('matched'));
+                        targetButton.style.background = '#28a745';
                         targetButton.style.transform = 'scale(1)';
+                        targetButton.style.boxShadow = 'none';
                     });
                     
                 } else {
@@ -350,7 +333,7 @@ class CardmarketProcessor {
             // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
-            this.applyPokoinButtonState(button, 'loading');
+            this.setPokoinButtonLabel(button);
             button.style.cssText = `
                 margin-top: 8px;
                 margin-left: 8px;
@@ -358,7 +341,7 @@ class CardmarketProcessor {
                 font-size: 17px;
                 min-width: 100px;
             `;
-            this.applyPokoinButtonState(button, 'loading');
+            this.applyPokoinButtonStyles(button, { background: '#6c757d' });
             this.attachSidePanelClick(button);
             
             // Insert button
@@ -369,7 +352,8 @@ class CardmarketProcessor {
                 // Search database
                 const results = await this.searchCardInDatabase(titleInfo, title);
                 if (results && results.length > 0) {
-                    this.applyPokoinButtonState(button, 'matched', this.countHighConfidenceMatches(results));
+                    button.style.background = '#28a745';
+                    this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
                 }
             }
             

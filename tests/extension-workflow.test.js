@@ -1683,6 +1683,21 @@ test('Cardmarket green button keeps compact icon dimensions after relabel', () =
     assert.equal(icon.style.height, '20px');
 });
 
+test('Cardmarket matched button remains visually distinct after relabel', () => {
+    const button = createButtonStub();
+    const { Processor } = loadProcessor('processors/CME.js', 'CardmarketProcessor');
+    const processor = new Processor();
+
+    processor.applyPokoinButtonState(button, 'loading');
+    const loadingBackground = button.style.background;
+    processor.applyPokoinButtonState(button, 'matched', 2);
+
+    assert.equal(loadingBackground, '#6c757d');
+    assert.equal(button.style.background, '#0ea5e9');
+    assert.equal(button.style.border, '1px solid #38bdf8');
+    assert.match(button.style.boxShadow, /14, 165, 233/);
+});
+
 test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
@@ -1704,6 +1719,22 @@ test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     assert.equal(structured.collectorNumber, '028');
     assert.equal(structured.expansion, 'Ascended Heroes');
     assert.deepEqual([...sandbox.buildCardvaultQueries(structured.name)], ['Camerupt']);
+});
+
+test('Cardmarket structured parser keeps trainer composite card names', () => {
+    const source = readRepoFile('config/background.js');
+    const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
+    const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
+
+    const structured = sandbox.scrapeStructuredCardFields('Arven\'s Mabosstiff ex (mC 484)');
+
+    assert.equal(structured.name, 'Arven\'s Mabosstiff ex');
+    assert.equal(structured.searchName, 'Arven\'s Mabosstiff ex');
+    assert.equal(structured.collectorNumber, '484');
 });
 
 test('background parser maps fullart to illustration rarity', () => {
@@ -1862,6 +1893,107 @@ test('Cardmarket background search payload uses structured card name first', asy
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Camerupt');
     assert.equal(extensionPayload.collectorNumber, '028');
+});
+
+test('Cardmarket background search prefers trainer composite over shorter Pokemon match', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return {
+                    ok: true,
+                    json: async () => ({ products: [] }),
+                };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: body.search_term === 'Arven\'s Mabosstiff ex'
+                            ? [{ card_id: '484', name: 'Arven\'s Mabosstiff ex', canonical_name: 'Arven\'s Mabosstiff ex', search_rank: 100 }]
+                            : body.search_term === 'Mabosstiff'
+                                ? [{ card_id: '999', name: 'Mabosstiff', canonical_name: 'Mabosstiff', search_rank: 100 }]
+                                : [],
+                    }),
+                };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: body.name === 'Arven\'s Mabosstiff ex'
+                            ? [{
+                                cardId: '484',
+                                name: 'Arven\'s Mabosstiff ex',
+                                expansionName: 'Mega Evolution',
+                                collectorNumber: '484',
+                                score: 95,
+                            }]
+                            : [{
+                                cardId: '999',
+                                name: 'Mabosstiff',
+                                expansionName: 'Mega Evolution',
+                                collectorNumber: '123',
+                                score: 95,
+                            }],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Arven\'s Mabosstiff ex (mC 484)',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Mega-Evolution/Arvens-Mabosstiff-ex-mC484',
+            },
+            { tab: { id: 8, title: 'Arven\'s Mabosstiff ex (mC 484)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Mega-Evolution/Arvens-Mabosstiff-ex-mC484' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].name_en, 'Arven\'s Mabosstiff ex');
+    assert.equal(fetchBodies[0].body.search_term, 'Arven\'s Mabosstiff ex');
+    const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
+    assert.equal(extensionPayload.name, 'Arven\'s Mabosstiff ex');
+    assert.equal(extensionPayload.collectorNumber, '484');
 });
 
 test('background search de-dupes repeated identical title requests', async () => {
