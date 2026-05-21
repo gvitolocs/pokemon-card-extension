@@ -1993,6 +1993,34 @@ test('Vinted unmatched button stays muted Pokoin blue', async () => {
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], 'true');
 });
 
+test('Vinted Pokoin button icon stays compact inside overlay reset', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor');
+    const processor = new Processor();
+    const button = createButtonStub();
+    const icon = {
+        style: {},
+        attributes: {},
+        setAttribute(name, value) {
+            this.attributes[name] = value;
+        },
+    };
+    button.querySelector = (selector) => (selector === 'img' ? icon : null);
+
+    processor.applyPokoinButtonStyles(button);
+    const resetStyles = processor.vintedPanelResetStyles();
+
+    assert.equal(icon.attributes['data-pokoin-button-icon'], 'true');
+    assert.equal(icon.style.width, '20px');
+    assert.equal(icon.style.height, '20px');
+    assert.equal(icon.style.minWidth, '20px');
+    assert.equal(icon.style.maxWidth, '20px');
+    assert.equal(icon.style.flex, '0 0 20px');
+    assert.equal(icon.style.objectFit, 'cover');
+    assert.match(resetStyles, /\[data-pokoin-button-icon\]/);
+    assert.match(resetStyles, /max-width:\s*20px\s*!important/);
+    assert.doesNotMatch(resetStyles, /img\s*\{[^}]*max-width:\s*none/s);
+});
+
 test('Vinted candidate preview is scrollable, compact, and clickable', async () => {
     const messages = [];
     const panel = createDomElement('div', { 'data-pokoin-vinted-panel': 'true' });
@@ -2179,7 +2207,7 @@ test('Vinted main Pokoin button opens side panel from shadow overlay', async () 
 });
 
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
-    const icon = { style: {} };
+    const icon = { style: {}, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
     const button = createButtonStub();
     button.querySelector = (selector) => selector === 'img' ? icon : null;
     const { Processor } = loadProcessor('processors/CME.js', 'CardmarketProcessor');
@@ -2193,6 +2221,38 @@ test('Cardmarket green button keeps compact icon dimensions after relabel', () =
     assert.equal(button.style.flex, '0 0 auto');
     assert.equal(icon.style.width, '20px');
     assert.equal(icon.style.height, '20px');
+    assert.equal(icon.style.maxWidth, '20px');
+    assert.equal(icon.style.flex, '0 0 20px');
+    assert.equal(icon.attributes['data-pokoin-button-icon'], 'true');
+});
+
+test('shared marketplace Pokoin button icons are size-contained', () => {
+    [
+        ['processors/EBAYE.js', 'EbayProcessor', '22px'],
+        ['processors/CME.js', 'CardmarketProcessor', '20px'],
+    ].forEach(([relativePath, className, expectedSize]) => {
+        const { Processor } = loadProcessor(relativePath, className);
+        const processor = new Processor();
+        const button = createButtonStub();
+        const icon = {
+            style: {},
+            attributes: {},
+            setAttribute(name, value) {
+                this.attributes[name] = value;
+            },
+        };
+        button.querySelector = (selector) => (selector === 'img' ? icon : null);
+
+        processor.applyPokoinButtonStyles(button);
+
+        assert.equal(icon.attributes['data-pokoin-button-icon'], 'true', `${relativePath} should mark Pokoin icon`);
+        assert.equal(icon.style.width, expectedSize);
+        assert.equal(icon.style.height, expectedSize);
+        assert.equal(icon.style.minWidth, expectedSize);
+        assert.equal(icon.style.maxWidth, expectedSize);
+        assert.equal(icon.style.flex, `0 0 ${expectedSize}`);
+        assert.equal(icon.style.objectFit, 'cover');
+    });
 });
 
 test('Cardmarket matched button remains visually distinct after relabel', () => {
@@ -6735,10 +6795,94 @@ test('Cardmarket observation queues and opens auth bridge when token is missing'
 
     assert.equal(result.queued, true);
     assert.equal(result.reason, 'missing_token');
+    await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(createdTabs.length, 1);
     assert.equal(createdTabs[0].url, 'https://pokoin.com/extension/auth-bridge');
     assert.equal(createdTabs[0].active, false);
     assert.equal(sessionState.pendingCardmarketObservations.length, 1);
+});
+
+test('valid Pokoin session token skips auth bridge request', async () => {
+    const sandbox = loadBackgroundHelpers(['requestPokoinAuthToken']);
+    let tabQueryCount = 0;
+    let tabCreateCount = 0;
+    sandbox.chrome.storage.session.get = async (key) => {
+        if (key === 'pokoinAuthSession') {
+            return {
+                pokoinAuthSession: {
+                    token: 'valid-firebase-id-token-from-session',
+                    expiresAt: Date.now() + 600000,
+                },
+            };
+        }
+        return {};
+    };
+    sandbox.chrome.tabs.query = async () => {
+        tabQueryCount += 1;
+        return [];
+    };
+    sandbox.chrome.tabs.create = async () => {
+        tabCreateCount += 1;
+        return { id: 99 };
+    };
+
+    const result = await sandbox.requestPokoinAuthToken();
+
+    assert.equal(result.token, 'valid-firebase-id-token-from-session');
+    assert.equal(result.openedBridge, false);
+    assert.equal(result.reusedSession, true);
+    assert.equal(tabQueryCount, 0);
+    assert.equal(tabCreateCount, 0);
+});
+
+test('concurrent Cardmarket observations share one auth bridge request', async () => {
+    const sessionState = {};
+    const createdTabs = [];
+    const sandbox = loadBackgroundHelpers(['sendCardmarketObservation']);
+    sandbox.fetch = async () => {
+        throw new Error('request should wait for auth token');
+    };
+    sandbox.chrome.storage.session.get = async (key) => {
+        if (key === 'pokoinAuthSession') {
+            return { pokoinAuthSession: sessionState.pokoinAuthSession };
+        }
+        if (key === 'pendingCardmarketObservations') {
+            return { pendingCardmarketObservations: sessionState.pendingCardmarketObservations || [] };
+        }
+        return {};
+    };
+    sandbox.chrome.storage.session.set = async (payload) => {
+        Object.assign(sessionState, payload);
+    };
+    sandbox.chrome.tabs.query = async () => [];
+    sandbox.chrome.tabs.create = async (payload) => {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        createdTabs.push(payload);
+        return { id: 99, ...payload };
+    };
+
+    const basePayload = {
+        cardmarketContext: { url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Skyridge/Golem-SK148' },
+        promoteVerifiedLink: false,
+    };
+    const [first, second] = await Promise.all([
+        sandbox.sendCardmarketObservation({
+            ...basePayload,
+            structuredCard: { name: 'Golem', collectorNumber: 'SK 148', expansion: 'Skyridge' },
+            match: { cardId: 'sk-148', name: 'Golem' },
+        }),
+        sandbox.sendCardmarketObservation({
+            ...basePayload,
+            structuredCard: { name: 'Golem', collectorNumber: 'SK 148 Holo', expansion: 'Skyridge' },
+            match: { cardId: 'sk-148-holo', name: 'Golem' },
+        }),
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    assert.equal(first.queued, true);
+    assert.equal(second.queued, true);
+    assert.equal(createdTabs.length, 1);
+    assert.equal(sessionState.pendingCardmarketObservations.length, 2);
 });
 
 test('Cardmarket observation POST uses bearer auth payload and de-dupes signature', async () => {
@@ -6783,6 +6927,106 @@ test('Cardmarket observation POST uses bearer auth payload and de-dupes signatur
     assert.equal(fetchCalls[0].body.cardmarketContext.url, payload.cardmarketContext.url);
     assert.equal(fetchCalls[0].body.match.cardId, 'mep-042');
     assert.equal(fetchCalls[0].body.promoteVerifiedLink, false);
+});
+
+test('Cardmarket observation with missing token queues without blocking matching state', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    let bridgeOpened = false;
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: 'sk-148',
+                            name: 'Golem',
+                            expansionName: 'Skyridge',
+                            collectorNumber: 'SK 148',
+                            score: 100,
+                        }],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch before auth: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                create: async () => {
+                    await new Promise((resolve) => setTimeout(resolve, 20));
+                    bridgeOpened = true;
+                    return { id: 99 };
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Golem (SK 148)',
+                        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Skyridge/Golem-SK148',
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: {
+                            rawTitle: 'Golem (SK 148)',
+                            name: 'Golem',
+                            searchName: 'Golem',
+                            collectorNumber: 'SK 148',
+                            numericCollectorNumber: '148',
+                            expansion: 'Skyridge',
+                        },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 8,
+        title: 'Golem (SK 148)',
+        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Skyridge/Golem-SK148',
+    });
+
+    assert.equal(result.blueprintId, 'sk-148');
+    assert.equal(storage.sidePanelState.blueprintId, 'sk-148');
+    assert.equal(storage.sidePanelState.loading, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(storage.pendingCardmarketObservations.length, 1);
+    assert.equal(bridgeOpened, false);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(bridgeOpened, true);
 });
 
 test('Cardmarket selected side-panel candidate promotes verified link', async () => {
@@ -6968,6 +7212,30 @@ test('content Cardmarket legacy fallback is disabled and cannot send title-only 
 
     assert.match(fallback, /Legacy Cardmarket product-page fallback is disabled/);
     assert.doesNotMatch(fallback, /searchCardInDatabase\(|searchCardForTitle/);
+});
+
+test('manifest and UI icon asset references exist and are size-constrained', () => {
+    const manifest = JSON.parse(readRepoFile('manifest.json'));
+    const manifestIconPaths = [
+        ...Object.values(manifest.icons || {}),
+        ...Object.values(manifest.action?.default_icon || {}),
+    ];
+    const webAssets = (manifest.web_accessible_resources || [])
+        .flatMap((entry) => entry.resources || []);
+    [...manifestIconPaths, ...webAssets].forEach((relativePath) => {
+        assert.equal(fs.existsSync(path.join(REPO_ROOT, relativePath)), true, `${relativePath} should exist`);
+    });
+
+    const sidePanelCss = readRepoFile('ui-pages/sidepanel.css');
+    assert.match(sidePanelCss, /\.brand-icon\s*\{[^}]*width:\s*34px[^}]*height:\s*34px[^}]*object-fit:\s*contain/s);
+    assert.match(sidePanelCss, /\.candidate-logo\s*\{[^}]*max-width:\s*42px[^}]*max-height:\s*42px[^}]*object-fit:\s*contain/s);
+
+    ['content.js', 'processors/VINT.js', 'processors/EBAYE.js', 'processors/CME.js'].forEach((relativePath) => {
+        const source = readRepoFile(relativePath);
+        assert.match(source, /assets\/pokoin-512\.png/, `${relativePath} should use the packaged Pokoin asset`);
+        assert.match(source, /objectFit:\s*'cover'/, `${relativePath} should constrain Pokoin button object fit`);
+        assert.match(source, /maxWidth:\s*'2[02]px'/, `${relativePath} should cap Pokoin button icon width`);
+    });
 });
 
 test('dist zip includes current runtime files without stale backups', () => {

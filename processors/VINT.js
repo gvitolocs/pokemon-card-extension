@@ -989,7 +989,20 @@ class VintedProcessor {
                 font: inherit;
             }
             img {
-                max-width: none;
+                max-width: 100%;
+                height: auto;
+            }
+            [data-pokoin-button-icon] {
+                width: 20px !important;
+                height: 20px !important;
+                min-width: 20px !important;
+                min-height: 20px !important;
+                max-width: 20px !important;
+                max-height: 20px !important;
+                flex: 0 0 20px !important;
+                border-radius: 50% !important;
+                object-fit: cover !important;
+                display: block !important;
             }
         `;
     }
@@ -1354,9 +1367,15 @@ class VintedProcessor {
         });
         const icon = button.querySelector('img');
         if (icon) {
+            icon.setAttribute?.('data-pokoin-button-icon', 'true');
             Object.assign(icon.style, {
                 width: '20px',
                 height: '20px',
+                minWidth: '20px',
+                minHeight: '20px',
+                maxWidth: '20px',
+                maxHeight: '20px',
+                flex: '0 0 20px',
                 borderRadius: '50%',
                 objectFit: 'cover',
                 display: 'block',

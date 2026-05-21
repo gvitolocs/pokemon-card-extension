@@ -386,9 +386,15 @@ function applyPokoinButtonStyles(button, styles = {}) {
 
     const icon = button.querySelector('img');
     if (icon) {
+        icon.setAttribute?.('data-pokoin-button-icon', 'true');
         Object.assign(icon.style, {
             width: '22px',
             height: '22px',
+            minWidth: '22px',
+            minHeight: '22px',
+            maxWidth: '22px',
+            maxHeight: '22px',
+            flex: '0 0 22px',
             borderRadius: '50%',
             objectFit: 'cover',
             display: 'block',

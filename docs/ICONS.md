@@ -13,8 +13,12 @@ Required sizes:
 
 ## Source and Output
 
-- Keep source assets under `icons/` (SVG or high-resolution PNG).
+- Approved source: `/Users/giuseppe/pokoinpos/src/logo/assets/pokoin.svg`
+  (the 32x32 monster coin mark).
+- Do not restore the older Pikachu-like artwork.
 - Export final PNG files used by the manifest into `icons/`.
+- Keep the web-accessible shared assets in `assets/pokoin.svg` and
+  `assets/pokoin-512.png`.
 
 Current manifest references:
 
@@ -22,6 +26,11 @@ Current manifest references:
 - `icons/icon-32.png`
 - `icons/icon-48.png`
 - `icons/icon-128.png`
+
+Legacy/debug variants such as `icons/icon-default*.png`, `icons/icon-green.png`,
+`icons/icon-red.png`, and `icons/icon-512.png` should be regenerated from the
+same source asset when the brand mark changes, even if they are not currently
+referenced by `manifest.json`.
 
 If you add per-size icons, update the manifest mapping accordingly.
 

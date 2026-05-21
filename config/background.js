@@ -1728,7 +1728,9 @@ const cardvaultNameResolutionCache = new Map();
 const pokoinPriceCache = new Map();
 const cardmarketObservationSignatures = new Set();
 const cardmarketObservationInFlight = new Map();
+let pendingCardmarketObservationWrite = Promise.resolve();
 let pokoinAuthBridgeInFlight = null;
+let pokoinAuthTokenRequestInFlight = null;
 
 function runtimeDebugMetadata(extra = {}) {
     return {
@@ -1874,12 +1876,30 @@ async function openPokoinAuthBridge() {
 }
 
 async function requestPokoinAuthToken() {
-    const storedToken = await getStoredPokoinAuthToken();
-    if (storedToken) {
-        return { token: storedToken, openedBridge: false };
+    if (pokoinAuthTokenRequestInFlight) {
+        return pokoinAuthTokenRequestInFlight;
     }
-    await openPokoinAuthBridge();
-    return { token: '', openedBridge: true };
+
+    pokoinAuthTokenRequestInFlight = Promise.resolve()
+        .then(async () => {
+            const storedToken = await getStoredPokoinAuthToken();
+            if (storedToken) {
+                return { token: storedToken, openedBridge: false, reusedSession: true };
+            }
+            const startedAt = Date.now();
+            await openPokoinAuthBridge();
+            return {
+                token: '',
+                openedBridge: true,
+                reusedSession: false,
+                bridgeRequestMs: Date.now() - startedAt,
+            };
+        })
+        .finally(() => {
+            pokoinAuthTokenRequestInFlight = null;
+        });
+
+    return pokoinAuthTokenRequestInFlight;
 }
 
 function normalizeObservationUrl(url = '') {
@@ -1960,20 +1980,25 @@ function observeCardmarketScrapeSoon(result = {}, options = {}) {
 }
 
 async function persistPendingCardmarketObservation(payload) {
-    const storage = await chrome.storage.session.get('pendingCardmarketObservations');
-    const pending = Array.isArray(storage.pendingCardmarketObservations)
-        ? storage.pendingCardmarketObservations
-        : [];
-    const signature = buildCardmarketObservationSignature(payload);
-    const nextPending = [
-        ...pending.filter((entry) => entry?.signature !== signature),
-        {
-            signature,
-            payload,
-            queuedAt: Date.now(),
-        },
-    ].slice(-MAX_PENDING_CARDMARKET_OBSERVATIONS);
-    await chrome.storage.session.set({ pendingCardmarketObservations: nextPending });
+    pendingCardmarketObservationWrite = pendingCardmarketObservationWrite
+        .catch(() => null)
+        .then(async () => {
+            const storage = await chrome.storage.session.get('pendingCardmarketObservations');
+            const pending = Array.isArray(storage.pendingCardmarketObservations)
+                ? storage.pendingCardmarketObservations
+                : [];
+            const signature = buildCardmarketObservationSignature(payload);
+            const nextPending = [
+                ...pending.filter((entry) => entry?.signature !== signature),
+                {
+                    signature,
+                    payload,
+                    queuedAt: Date.now(),
+                },
+            ].slice(-MAX_PENDING_CARDMARKET_OBSERVATIONS);
+            await chrome.storage.session.set({ pendingCardmarketObservations: nextPending });
+        });
+    return pendingCardmarketObservationWrite;
 }
 
 async function sendCardmarketObservation(payload = {}) {
@@ -1985,7 +2010,9 @@ async function sendCardmarketObservation(payload = {}) {
     const token = await getStoredPokoinAuthToken();
     if (!token) {
         await persistPendingCardmarketObservation(payload);
-        await requestPokoinAuthToken();
+        void requestPokoinAuthToken().catch((error) => {
+            console.warn('⚠️ [Background] Unable to request Pokoin auth token for queued Cardmarket observation:', error);
+        });
         return { success: false, queued: true, reason: 'missing_token' };
     }
 
@@ -2001,7 +2028,9 @@ async function sendCardmarketObservation(payload = {}) {
             if (response.status === 401 || response.status === 403) {
                 await chrome.storage.session.set({ [POKOIN_AUTH_STORAGE_KEY]: null });
                 await persistPendingCardmarketObservation(payload);
-                await requestPokoinAuthToken();
+                void requestPokoinAuthToken().catch((error) => {
+                    console.warn('⚠️ [Background] Unable to refresh Pokoin auth token for queued Cardmarket observation:', error);
+                });
                 return { success: false, queued: true, status: response.status };
             }
             if (!response.ok) {
@@ -2230,6 +2259,23 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
             console.log(`✅ [Background] Side panel refreshed after ${reason} #${owner.requestId}`);
         } catch (error) {
             console.warn(`⚠️ [Background] Side panel refresh failed after ${reason}:`, error);
+            await setSidePanelState({
+                updatedAt: Date.now(),
+                pageInfo: {
+                    title: tab?.title || '',
+                    url: scheduledUrl || tab?.url || '',
+                    hostname: safeUrlHostname(scheduledUrl || tab?.url),
+                },
+                rows: [],
+                best: null,
+                blueprintId: '',
+                pokoinUrl: '',
+                error: error.message || 'Unable to refresh active tab match.',
+                debug: {
+                    error: true,
+                    refreshFailureReason: reason,
+                },
+            }, owner);
         }
     }, 700));
 }
@@ -2655,12 +2701,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const openSidePanelPromise = chrome.sidePanel?.open
             ? chrome.sidePanel.open({ tabId: senderTab.id })
             : Promise.resolve();
+        let openOwner = null;
+        let openUrl = senderTab.url || '';
+        let openTitle = senderTab.title || '';
         Promise.resolve()
             .then(async () => {
                 await ensureRuntimeStorageCurrent();
                 const tab = await chrome.tabs.get(senderTab.id);
                 const currentUrl = request.url || tab.url || senderTab.url || '';
                 const currentTitle = request.title || tab.title || senderTab.title || '';
+                openUrl = currentUrl;
+                openTitle = currentTitle;
                 const directCardTraderBlueprintId = request.cardtraderBlueprintId || cardtraderBlueprintIdFromUrl(currentUrl);
                 clearTimeout(sidePanelRefreshTimers.get(tab.id));
                 const owner = createSidePanelRequestOwner({
@@ -2669,6 +2720,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     url: currentUrl || tab.url || senderTab.url || '',
                     title: currentTitle || tab.title || senderTab.title || '',
                 }, 'open');
+                openOwner = owner;
                 await openSidePanelPromise;
                 const requestClues = normalizeRequestClues(request.clues);
                 const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
@@ -2881,7 +2933,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 });
             })
             .then((result) => sendResponse({ success: true, result }))
-            .catch((error) => {
+            .catch(async (error) => {
+                if (openOwner) {
+                    await setSidePanelState({
+                        updatedAt: Date.now(),
+                        pageInfo: {
+                            title: openTitle || '',
+                            url: openUrl || '',
+                            hostname: safeUrlHostname(openUrl),
+                        },
+                        rows: [],
+                        best: null,
+                        blueprintId: '',
+                        pokoinUrl: '',
+                        error: error.message || 'Unable to open side panel.',
+                        debug: {
+                            error: true,
+                            refreshFailureReason: 'open',
+                        },
+                    }, openOwner).catch(() => null);
+                }
                 sendResponse({ success: false, error: error.message || 'Unable to open side panel.' });
             });
     } else if (request.action === 'marketplaceNavigationChanged') {

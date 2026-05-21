@@ -147,9 +147,15 @@ class CardmarketProcessor {
 
         const icon = button.querySelector('img');
         if (icon) {
+            icon.setAttribute?.('data-pokoin-button-icon', 'true');
             Object.assign(icon.style, {
                 width: '20px',
                 height: '20px',
+                minWidth: '20px',
+                minHeight: '20px',
+                maxWidth: '20px',
+                maxHeight: '20px',
+                flex: '0 0 20px',
                 borderRadius: '50%',
                 objectFit: 'cover',
                 display: 'block',
