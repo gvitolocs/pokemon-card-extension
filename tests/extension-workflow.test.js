@@ -4679,6 +4679,322 @@ test('background search response is not blocked by Cardmarket observation auth',
     assert.equal(bridgeOpened, true);
 });
 
+test('Pokoin auth token response closes tracked auth bridge tab after storage and flush', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storageState = {
+        pendingCardmarketObservations: [{
+            signature: 'piplup|mep-042',
+            payload: {
+                structuredCard: { name: 'Piplup', collectorNumber: 'MEP 042' },
+                cardmarketContext: { url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' },
+                match: { cardId: 'mep-042' },
+            },
+        }],
+    };
+    const removedTabs = [];
+    const fetchCalls = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            fetchCalls.push({ url, options });
+            return { ok: true, status: 200, json: async () => ({}) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                create: async () => ({ id: 99, windowId: 4, url: 'https://pokoin.com/extension/auth-bridge' }),
+                get: async (tabId) => ({ id: tabId, windowId: 4, url: 'https://pokoin.com/extension/auth-bridge' }),
+                remove: async (tabId) => {
+                    removedTabs.push(tabId);
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (keys) => {
+                        if (Array.isArray(keys)) {
+                            return Object.fromEntries(keys.map((key) => [key, storageState[key]]));
+                        }
+                        if (typeof keys === 'string') {
+                            return { [keys]: storageState[keys] };
+                        }
+                        return { ...storageState };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storageState, payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const requestResponse = await new Promise((resolve) => {
+        messageListener({ action: 'requestPokoinAuthToken' }, {}, resolve);
+    });
+    assert.equal(requestResponse.success, true);
+    assert.equal(requestResponse.openedBridge, true);
+
+    const tokenResponse = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'pokoinAuthTokenReceived',
+                tokenMessage: {
+                    type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+                    token: 'valid-firebase-id-token-value',
+                    expiresAt: Date.now() + 600000,
+                },
+            },
+            { tab: { id: 99, url: 'https://pokoin.com/extension/auth-bridge' } },
+            resolve
+        );
+    });
+
+    assert.equal(tokenResponse.success, true);
+    assert.equal(storageState.pokoinAuthSession.token, 'valid-firebase-id-token-value');
+    assert.equal(storageState.pendingCardmarketObservations.length, 0);
+    assert.equal(fetchCalls.length, 1);
+    assert.deepEqual(removedTabs, [99]);
+});
+
+test('Pokoin auth token response does not close tracked non-bridge Pokoin tab', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storageState = {};
+    const removedTabs = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [{ id: 42, windowId: 5, url: 'https://pokoin.com/extension/auth-bridge' }],
+                update: async () => ({ id: 42, windowId: 5, url: 'https://pokoin.com/extension/auth-bridge' }),
+                get: async () => ({ id: 42, windowId: 5, url: 'https://pokoin.com/cards/mep-042' }),
+                remove: async (tabId) => {
+                    removedTabs.push(tabId);
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (keys) => (typeof keys === 'string' ? { [keys]: storageState[keys] } : { ...storageState }),
+                    set: async (payload) => {
+                        Object.assign(storageState, payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener({ action: 'requestPokoinAuthToken' }, {}, resolve);
+    });
+    const tokenResponse = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'pokoinAuthTokenReceived',
+                tokenMessage: {
+                    type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+                    token: 'valid-firebase-id-token-value',
+                    expiresAt: Date.now() + 600000,
+                },
+            },
+            { tab: { id: 42, url: 'https://pokoin.com/extension/auth-bridge' } },
+            resolve
+        );
+    });
+
+    assert.equal(tokenResponse.success, true);
+    assert.deepEqual(removedTabs, []);
+});
+
+test('concurrent Pokoin auth token requests close auth bridge tab once after token', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storageState = {};
+    let createCount = 0;
+    const removedTabs = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                create: async () => {
+                    createCount += 1;
+                    await new Promise((resolve) => setTimeout(resolve, 5));
+                    return { id: 77, windowId: 3, url: 'https://pokoin.com/extension/auth-bridge' };
+                },
+                get: async () => ({ id: 77, windowId: 3, url: 'https://pokoin.com/extension/auth-bridge' }),
+                remove: async (tabId) => {
+                    removedTabs.push(tabId);
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (keys) => (typeof keys === 'string' ? { [keys]: storageState[keys] } : { ...storageState }),
+                    set: async (payload) => {
+                        Object.assign(storageState, payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const [firstResponse, secondResponse] = await Promise.all([
+        new Promise((resolve) => messageListener({ action: 'requestPokoinAuthToken' }, {}, resolve)),
+        new Promise((resolve) => messageListener({ action: 'requestPokoinAuthToken' }, {}, resolve)),
+    ]);
+    assert.equal(firstResponse.success, true);
+    assert.equal(secondResponse.success, true);
+    assert.equal(createCount, 1);
+
+    const tokenMessage = {
+        action: 'pokoinAuthTokenReceived',
+        tokenMessage: {
+            type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+            token: 'valid-firebase-id-token-value',
+            expiresAt: Date.now() + 600000,
+        },
+    };
+    const [firstTokenResponse, secondTokenResponse] = await Promise.all([
+        new Promise((resolve) => messageListener(tokenMessage, { tab: { id: 77, url: 'https://pokoin.com/extension/auth-bridge' } }, resolve)),
+        new Promise((resolve) => messageListener(tokenMessage, { tab: { id: 77, url: 'https://pokoin.com/extension/auth-bridge' } }, resolve)),
+    ]);
+
+    assert.equal(firstTokenResponse.success, true);
+    assert.equal(secondTokenResponse.success, true);
+    assert.deepEqual(removedTabs, [77]);
+});
+
+test('invalid Pokoin auth token messages do not close auth bridge tab', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storageState = {};
+    const removedTabs = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                create: async () => ({ id: 66, windowId: 2, url: 'https://pokoin.com/extension/auth-bridge' }),
+                get: async () => ({ id: 66, windowId: 2, url: 'https://pokoin.com/extension/auth-bridge' }),
+                remove: async (tabId) => {
+                    removedTabs.push(tabId);
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (keys) => (typeof keys === 'string' ? { [keys]: storageState[keys] } : { ...storageState }),
+                    set: async (payload) => {
+                        Object.assign(storageState, payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener({ action: 'requestPokoinAuthToken' }, {}, resolve);
+    });
+    const invalidResponse = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'pokoinAuthTokenReceived',
+                tokenMessage: {
+                    type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+                    token: 'short',
+                    expiresAt: Date.now() + 600000,
+                },
+            },
+            { tab: { id: 66, url: 'https://pokoin.com/extension/auth-bridge' } },
+            resolve
+        );
+    });
+
+    assert.equal(invalidResponse.success, false);
+    assert.deepEqual(removedTabs, []);
+});
+
 test('Cardmarket Piplup fallback ranks MEP 042 above generic rows', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;

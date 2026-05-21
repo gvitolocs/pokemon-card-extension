@@ -4,7 +4,8 @@ const EXTENSION_BUILD_MARKER = `${EXTENSION_VERSION}-runtime-divergence-guard`;
 const EXTENSION_RUNTIME_STORAGE_KEY = 'pokoinExtensionRuntime';
 const CARDVAULT_API_BASE_URL = 'https://pokoin.com';
 const POKOIN_AUTH_ORIGIN = 'https://pokoin.com';
-const POKOIN_AUTH_BRIDGE_URL = `${POKOIN_AUTH_ORIGIN}/extension/auth-bridge`;
+const POKOIN_AUTH_BRIDGE_PATH = '/extension/auth-bridge';
+const POKOIN_AUTH_BRIDGE_URL = `${POKOIN_AUTH_ORIGIN}${POKOIN_AUTH_BRIDGE_PATH}`;
 const POKOIN_AUTH_STORAGE_KEY = 'pokoinAuthSession';
 const POKOIN_AUTH_TOKEN_RESPONSE_TYPE = 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE';
 const POKOIN_TOKEN_REFRESH_SKEW_MS = 60 * 1000;
@@ -2056,6 +2057,7 @@ const cardmarketObservationInFlight = new Map();
 let pendingCardmarketObservationWrite = Promise.resolve();
 let pokoinAuthBridgeInFlight = null;
 let pokoinAuthTokenRequestInFlight = null;
+let pokoinAuthBridgeTab = null;
 
 function runtimeDebugMetadata(extra = {}) {
     return {
@@ -2173,6 +2175,52 @@ async function getStoredPokoinAuthToken() {
     return session.token;
 }
 
+function isPokoinAuthBridgeUrl(url = '') {
+    try {
+        const parsed = new URL(url);
+        return parsed.origin === POKOIN_AUTH_ORIGIN && parsed.pathname === POKOIN_AUTH_BRIDGE_PATH;
+    } catch (error) {
+        return false;
+    }
+}
+
+function trackPokoinAuthBridgeTab(tab = null, options = {}) {
+    if (!tab?.id) {
+        return null;
+    }
+    pokoinAuthBridgeTab = {
+        tabId: tab.id,
+        windowId: tab.windowId || null,
+        url: tab.url || POKOIN_AUTH_BRIDGE_URL,
+        openedByExtension: Boolean(options.openedByExtension || pokoinAuthBridgeTab?.tabId === tab.id && pokoinAuthBridgeTab.openedByExtension),
+    };
+    return pokoinAuthBridgeTab;
+}
+
+async function closeTrackedPokoinAuthBridgeTab() {
+    const trackedTab = pokoinAuthBridgeTab;
+    if (!trackedTab?.tabId || !chrome.tabs?.remove) {
+        return false;
+    }
+
+    pokoinAuthBridgeTab = null;
+
+    try {
+        const currentTab = chrome.tabs?.get
+            ? await chrome.tabs.get(trackedTab.tabId).catch(() => null)
+            : null;
+        const currentUrl = currentTab?.url || trackedTab.url || '';
+        if (!trackedTab.openedByExtension && !isPokoinAuthBridgeUrl(currentUrl)) {
+            return false;
+        }
+        await chrome.tabs.remove(trackedTab.tabId);
+        return true;
+    } catch (error) {
+        console.warn('⚠️ [Background] Unable to close Pokoin auth bridge tab:', error?.message || error);
+        return false;
+    }
+}
+
 async function openPokoinAuthBridge() {
     if (pokoinAuthBridgeInFlight) {
         return pokoinAuthBridgeInFlight;
@@ -2185,11 +2233,12 @@ async function openPokoinAuthBridge() {
                 : [];
             const existingTab = existingTabs.find((tab) => tab?.id);
             if (existingTab?.id && chrome.tabs?.update) {
-                await chrome.tabs.update(existingTab.id, { active: false }).catch(() => {});
-                return existingTab;
+                const updatedTab = await chrome.tabs.update(existingTab.id, { active: false }).catch(() => existingTab);
+                return trackPokoinAuthBridgeTab(updatedTab || existingTab, { openedByExtension: false });
             }
             if (chrome.tabs?.create) {
-                return chrome.tabs.create({ url: POKOIN_AUTH_BRIDGE_URL, active: false });
+                const createdTab = await chrome.tabs.create({ url: POKOIN_AUTH_BRIDGE_URL, active: false });
+                return trackPokoinAuthBridgeTab(createdTab, { openedByExtension: true });
             }
             return null;
         })
@@ -2931,6 +2980,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(async (result) => {
                 if (result.valid) {
                     await flushPendingCardmarketObservations();
+                    await closeTrackedPokoinAuthBridgeTab();
                     sendResponse({ success: true });
                     return;
                 }
