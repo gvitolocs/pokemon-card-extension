@@ -466,6 +466,7 @@ function scrapeCardmarketContext(title = '') {
 function normalizeExpansionAlias(value = '') {
     const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
     const aliases = [
+        { pattern: /^(?:DRS|Dragon\s+Selection)$/i, name: 'Dragon Selection' },
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
         { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
         { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
@@ -1209,6 +1210,14 @@ function expansionAliasCompacts(expansion = '') {
     }
 
     const variants = new Set([cleanExpansion]);
+    const compactExpansion = compactSetValue(cleanExpansion);
+    const codeAliases = {
+        drs: 'Dragon Selection',
+        dragonselection: 'DRS',
+    };
+    if (codeAliases[compactExpansion]) {
+        variants.add(codeAliases[compactExpansion]);
+    }
     const prefixedExpansion = cleanExpansion.match(/^([A-Z0-9]{2,6})\s+(.+)$/i);
     if (prefixedExpansion) {
         variants.add(prefixedExpansion[2]);
@@ -1251,13 +1260,14 @@ function collectorNumberParts(value = '') {
     const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
     const normalized = normalizeCollectorValue(cleanValue);
     const prefix = cleanValue.match(/\b([A-Z0-9]*[A-Z][A-Z0-9]{0,5})\s*\d{1,4}[a-z]?\b/i)?.[1]?.toLowerCase() || '';
-    const primary = normalized.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+    const primary = normalized.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0] ||
         normalized.match(/\d{1,4}[a-z]?/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
         '';
     return {
         normalized,
         prefix,
         primary,
+        numericPrimary: primary.replace(/^0+(\d)/, '$1'),
         hasSlash: normalized.includes('/'),
     };
 }
@@ -1273,20 +1283,39 @@ function collectorNumberMatchRank(rowNumber = '', requestedNumber = '') {
         return 0;
     }
 
-    if (!row.primary || !requested.primary || row.primary !== requested.primary) {
+    if (!row.primary || !requested.primary) {
         return 99;
     }
 
+    if (row.primary === requested.primary) {
+        if (requested.prefix && row.prefix === requested.prefix) {
+            return 0;
+        }
+        if (requested.prefix && !row.prefix && !row.hasSlash) {
+            return 1;
+        }
+        if (!requested.prefix) {
+            return row.hasSlash ? 2 : 1;
+        }
+        return 4;
+    }
+
+    if (!row.numericPrimary || !requested.numericPrimary || row.numericPrimary !== requested.numericPrimary) {
+        return 99;
+    }
+
+    // Numeric equivalence is useful for unpadded marketplace data, but it must
+    // not outrank an exact padded collector match such as DRS 009 -> 009/020.
     if (requested.prefix && row.prefix === requested.prefix) {
-        return 0;
+        return 5;
     }
     if (requested.prefix && !row.prefix && !row.hasSlash) {
-        return 1;
+        return 6;
     }
     if (!requested.prefix) {
-        return row.hasSlash ? 2 : 1;
+        return row.hasSlash ? 7 : 6;
     }
-    return 4;
+    return 8;
 }
 
 function normalizeCollectorValue(value = '') {
@@ -1294,7 +1323,7 @@ function normalizeCollectorValue(value = '') {
         .toLowerCase()
         .replace(/\b(?:no|number|num|card)\b/g, ' ')
         .replace(/[^a-z0-9/]+/g, '')
-        .replace(/^0+(\d)/, '$1');
+        .trim();
 }
 
 function collectorNumberMatches(rowNumber = '', requestedNumber = '') {

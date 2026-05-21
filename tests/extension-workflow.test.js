@@ -2904,6 +2904,57 @@ test('Cardmarket ranks Piplup MEP 042 exact prefixed promo card first', () => {
     assert.equal(sorted.at(-1).card_id, 'generic-high-score');
 });
 
+test('Cardmarket structured parser preserves Latias DRS 009 leading zeros', () => {
+    const sandbox = loadBackgroundHelpers([
+        'scrapeStructuredCardFields',
+        'buildStructuredFallbackQueries',
+        'collectorNumberMatchRank',
+        'expansionMatches',
+    ]);
+
+    const structured = sandbox.scrapeStructuredCardFields(
+        'Latias (DRS 009)',
+        { expansion: 'DRS', details: { number: '009' } }
+    );
+
+    assert.equal(structured.name, 'Latias');
+    assert.equal(structured.collectorNumber, 'DRS 009');
+    assert.equal(structured.printedCollectorNumber, 'DRS 009');
+    assert.equal(structured.numericCollectorNumber, '009');
+    assert.equal(structured.expansion, 'Dragon Selection');
+    assert.equal(sandbox.expansionMatches('Dragon Selection', 'DRS'), true);
+    assert.ok(
+        sandbox.collectorNumberMatchRank('9/020', 'DRS 009') > sandbox.collectorNumberMatchRank('009/020', 'DRS 009'),
+        'numeric equivalence should not outrank exact padded collector comparison'
+    );
+    assert.ok(
+        sandbox.buildStructuredFallbackQueries(structured, 'Latias (DRS 009)').includes('Latias DRS 009'),
+        'fallback queries should preserve the padded DRS collector payload'
+    );
+});
+
+test('Cardmarket ranks Latias DRS 009 Dragon Selection above other Latias variants', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard']);
+    const rows = [
+        { card_id: 'alto-mare-011', name: "Alto Mare's Latias", set_name: 'Theater VS Pack', card_number: '011/018', search_rank: 999999 },
+        { card_id: 'latias-dragon-vault', name: 'Latias', set_name: 'Dragon Vault', card_number: '009/020', search_rank: 50000 },
+        { card_id: 'latias-drs-009', name: 'Latias', set_name: 'Dragon Selection', card_number: '009/020', search_rank: 10 },
+        { card_id: 'latias-drs-unpadded', name: 'Latias', set_name: 'Dragon Selection', card_number: '9/020', search_rank: 20000 },
+    ];
+
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Latias',
+        collectorNumber: 'DRS 009',
+        printedCollectorNumber: 'DRS 009',
+        numericCollectorNumber: '009',
+        expansion: 'Dragon Selection',
+    });
+
+    assert.equal(sorted[0].card_id, 'latias-drs-009');
+    assert.equal(sorted[1].card_id, 'latias-drs-unpadded');
+    assert.equal(sorted.at(-1).card_id, 'alto-mare-011');
+});
+
 test('Cardmarket ranks Team Rocket TR 62 above Perfect Order Meowth ex', () => {
     const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard', 'expansionMatches']);
     const rows = [

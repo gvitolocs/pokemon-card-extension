@@ -182,3 +182,12 @@ test('17. Gastly Base Set family has three vintage candidates before Expedition'
         ['Base Set', 'Base Set 2', 'Base Set Shadowless']
     );
 });
+
+test('18. padded Dragon Selection query ranks Latias DRS 009', async () => {
+    const row = topRow(await autocomplete('Latias DRS 009'), 'Latias DRS 009');
+
+    assert.equal(String(row.card_id), '314714');
+    assert.match(row.name || '', /^Latias$/i);
+    assert.match(row.set_name || '', /^Dragon Selection$/i);
+    assert.match(row.card_number || '', /009\/020/);
+});
