@@ -1575,6 +1575,31 @@ function isExactCardmarketState(state = {}) {
     );
 }
 
+function isVintedUrl(url = '') {
+    try {
+        return new URL(url).hostname.includes('vinted');
+    } catch (error) {
+        return false;
+    }
+}
+
+function isPinnedVintedPreviewState(state = {}) {
+    return Boolean(
+        state?.debug?.pinnedVintedPreview &&
+        state?.debug?.pinnedPreviewRows &&
+        isVintedUrl(state?.pageInfo?.url || '') &&
+        Array.isArray(state?.rows) &&
+        state.rows.length > 0
+    );
+}
+
+function samePinnedVintedPreviewState(state = {}, url = '') {
+    return Boolean(
+        isPinnedVintedPreviewState(state) &&
+        sameUrlWithoutHash(state.pageInfo?.url || '', url || '')
+    );
+}
+
 function shouldKeepExistingExactCardmarketState(existingState = {}, nextState = {}) {
     if (!isExactCardmarketState(existingState)) {
         return false;
@@ -1585,6 +1610,18 @@ function shouldKeepExistingExactCardmarketState(existingState = {}, nextState = 
         return false;
     }
     return !isExactCardmarketState(nextState);
+}
+
+function shouldKeepExistingPinnedVintedState(existingState = {}, nextState = {}) {
+    if (!isPinnedVintedPreviewState(existingState)) {
+        return false;
+    }
+    const existingUrl = existingState.pageInfo?.url || '';
+    const nextUrl = nextState.pageInfo?.url || '';
+    if (!existingUrl || !nextUrl || !sameUrlWithoutHash(existingUrl, nextUrl)) {
+        return false;
+    }
+    return !nextState.debug?.pinnedVintedPreview;
 }
 
 function safeUrlHostname(url = '') {
@@ -1686,6 +1723,10 @@ async function setSidePanelState(nextState = {}, owner = null) {
     }
     if (shouldKeepExistingExactCardmarketState(currentState, state)) {
         console.log('ℹ️ [Background] Kept exact Cardmarket state over weaker same-URL update');
+        return currentState;
+    }
+    if (shouldKeepExistingPinnedVintedState(currentState, state)) {
+        console.log('ℹ️ [Background] Kept Vinted preview rows over broader same-URL update');
         return currentState;
     }
     if (
@@ -2215,6 +2256,11 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
         sidePanelRefreshTimers.delete(tab.id);
         return;
     }
+    if (samePinnedVintedPreviewState(sidePanelState, tab.url)) {
+        clearTimeout(sidePanelRefreshTimers.get(tab.id));
+        sidePanelRefreshTimers.delete(tab.id);
+        return;
+    }
     if (currentStateUrl && sameUrlWithoutHash(currentStateUrl, tab.url)) {
         return;
     }
@@ -2233,6 +2279,9 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 
             const { sidePanelState: latestSidePanelState } = await chrome.storage.session.get('sidePanelState');
             if (isLockedCardTraderDirectState(latestSidePanelState, refreshTab.url || scheduledUrl)) {
+                return;
+            }
+            if (samePinnedVintedPreviewState(latestSidePanelState, refreshTab.url || scheduledUrl)) {
                 return;
             }
 
@@ -2574,9 +2623,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to request Pokoin auth token.' }));
     } else if (request.action === 'resolveActiveTabForSidePanel') {
         getActiveTab()
-            .then((tab) => {
+            .then(async (tab) => {
                 if (!tab) {
                     throw new Error('No active tab found.');
+                }
+                const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+                if (samePinnedVintedPreviewState(sidePanelState, tab.url || '')) {
+                    return sidePanelState;
                 }
                 return resolveActiveTabForSidePanel(tab);
             })
@@ -2819,13 +2872,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return selectedResult;
                 }
                 if (previewRows.length > 0) {
-                    const bestPreviewRow = selectedCandidateRow || previewRows[0];
-                    const orderedPreviewRows = selectedCandidateRow
-                        ? [
-                            selectedCandidateRow,
-                            ...previewRows.filter((row) => String(row.card_id) !== String(selectedCandidateRow.card_id)),
-                        ]
-                        : previewRows;
+                    const selectedPreviewRow = selectedCandidateRow
+                        ? previewRows.find((row) => String(row.card_id) === String(selectedCandidateRow.card_id)) || selectedCandidateRow
+                        : null;
+                    const bestPreviewRow = selectedPreviewRow || previewRows[0];
+                    const orderedPreviewRows = previewRows;
                     const previewResult = {
                         pageInfo: {
                             title: requestTitle || currentTitle,
@@ -2836,7 +2887,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             primaryClues: requestPrimaryClues,
                             structuredCard: scrapeStructuredCardFields(requestTitle || currentTitle),
                             previewSignature: request.previewSignature || '',
-                            selectedCandidateId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+                            selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
                         },
                         rows: orderedPreviewRows,
                         best: bestPreviewRow,
@@ -2856,9 +2907,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             searched: false,
                             rowCount: orderedPreviewRows.length,
                             bestId: String(bestPreviewRow.card_id),
-                            selectedCandidateId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+                            selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
                             pinnedPreviewRows: true,
-                            pinnedVintedPreview: /^vinted\|/.test(request.previewSignature || ''),
+                            pinnedVintedPreview: request.previewSource === 'vinted_overlay' || /^vinted\|/.test(request.previewSignature || ''),
                             previewSignature: request.previewSignature || '',
                             previewSource: request.previewSource || '',
                             error: '',
@@ -2993,6 +3044,11 @@ chrome.action.onClicked.addListener(async (tab) => {
 
         if (chrome.sidePanel?.open) {
             await chrome.sidePanel.open({ tabId: tab.id });
+        }
+
+        const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+        if (samePinnedVintedPreviewState(sidePanelState, tab?.url || '')) {
+            return;
         }
 
         await setSidePanelState({

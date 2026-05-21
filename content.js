@@ -128,11 +128,9 @@ class PokemonCardTraderLinker {
                     console.log('✅ [CardTrader] VintedProcessor initialized successfully');
                 } catch (error) {
                     console.error('❌ [CardTrader] Error nell\'initialization VintedProcessor:', error);
-                    this.patchVintedProductPage();
                 }
             } else {
-                console.log('⚠️ [CardTrader] VintedProcessor not available, using original logic');
-                this.patchVintedProductPage();
+                console.warn('⚠️ [Pokoin] VintedProcessor unavailable; legacy Vinted fallback is disabled.');
             }
         } else if (hostname.includes('ebay')) {
             if (window.EbayProcessor) {
@@ -166,7 +164,7 @@ class PokemonCardTraderLinker {
                 console.log('🚫 [CardTrader] VintedProcessor active, skipping fallback logic for Vinted');
                 return;
             }
-            this.patchVintedProductPage();
+            console.warn('⚠️ [Pokoin] Legacy Vinted fallback is disabled; waiting for VintedProcessor.');
         } else if (hostname.includes('ebay')) {
             // If EbayProcessor is active, do not use fallback logic
             if (window.ebayProcessor) {
@@ -651,8 +649,7 @@ async function initializeExtension() {
                     window.vintedProcessor = window.vintedProcessor || new window.VintedProcessor();
                     window.vintedProcessor.init();
                 } else {
-                    console.log('⚠️ [CardTrader] VintedProcessor not available, using original logic');
-                    patchVintedProductPage();
+                    console.warn('⚠️ [Pokoin] VintedProcessor unavailable; legacy Vinted fallback is disabled.');
                 }
             } else if (hostname.includes('ebay')) {
                 if (window.EbayProcessor) {
@@ -686,7 +683,7 @@ async function initializeExtension() {
                     console.log('🚫 [CardTrader] VintedProcessor active, skipping fallback logic for Vinted');
                     return;
                 }
-                patchVintedProductPage();
+                console.warn('⚠️ [Pokoin] Legacy Vinted fallback is disabled; waiting for VintedProcessor.');
             } else if (hostname.includes('ebay')) {
                 // If EbayProcessor is active, do not use fallback logic
                 if (window.ebayProcessor) {
@@ -1681,6 +1678,8 @@ function patchEbayProductPage() {
 // Patch for Vinted product pages
 function patchVintedProductPage() {
     if (!window.location.hostname.includes('vinted')) return;
+    console.warn('⚠️ [Pokoin] Legacy Vinted product-page fallback is disabled; VintedProcessor owns Vinted matching.');
+    return;
     
     try {
         // Search for i product title

@@ -1486,6 +1486,48 @@ test('Vinted side panel payload includes selected clues and preview rows', async
     assert.match(sidePanelMessage.previewSignature, /tornadusex/);
 });
 
+test('Vinted collapsed and reopened overlay preserves canonical preview rows', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/91-tornadus-ex', hostname: 'www.vinted.it' },
+            extractTitleInfo: () => ({ pokemonName: 'Tornadus' }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return {
+                        success: true,
+                        results: [
+                            { blueprint_id: '96', name_en: 'Tornadus EX', expansion_name_en: 'BW Black Star Promos', collector_number: '96', search_score: 99 },
+                            { blueprint_id: '90', name_en: 'Tornadus EX', expansion_name_en: 'Dark Explorers', collector_number: '90', search_score: 95 },
+                        ],
+                    };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Tornadus EX Full Art';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Carta Tornadus EX Full Art');
+    processor.selectedKeywordValues = new Set(processor.currentKeywords.filter((keyword) => keyword.selectedByDefault).map((keyword) => keyword.compact));
+    processor.currentButton = createButtonStub();
+    processor.renderCandidatePreview = () => {};
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+    processor.setVintedOverlayCollapsed(true);
+    await processor.openPokoinSidePanel();
+    processor.setVintedOverlayCollapsed(false);
+    await processor.openPokoinSidePanel();
+
+    const openMessages = messages.filter((message) => message.action === 'openSidePanelForCurrentTab');
+    assert.equal(openMessages.length, 2);
+    assert.deepEqual(openMessages[0].previewRows.map((row) => row.card_id), ['96', '90']);
+    assert.deepEqual(openMessages[1].previewRows.map((row) => row.card_id), ['96', '90']);
+});
+
 test('Vinted placement uses transparent overlay outside product details', () => {
     const bodyAppends = [];
     const body = documentStubBody(bodyAppends);
@@ -2106,6 +2148,8 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.equal(messages.at(-1).selectedCandidateId, '9000');
     assert.equal(messages.at(-1).selectedCandidate.card_id, '9000');
     assert.equal(messages.at(-1).selectedCandidate.name, 'Regigigas VSTAR');
+    assert.equal(messages.at(-1).previewRows.length, 8);
+    assert.deepEqual(messages.at(-1).previewRows.map((row) => row.card_id), ['9000', '9001', '9002', '9003', '9004', '9005', '9006', '9007']);
     assert.ok(messages.at(-1).clues.some((clue) => /^regigigas vstar$/i.test(clue)));
     assert.ok(messages.at(-1).clues.some((clue) => /^vstar$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^regigigas vstar$/i.test(clue)));
@@ -2875,6 +2919,280 @@ test('Cardmarket background search payload uses structured card name first', asy
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Camerupt');
     assert.equal(extensionPayload.collectorNumber, 'ASC 028');
+});
+
+test('Vinted side panel opens from overlay preview rows without reordering selected candidate', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, json: async () => ({ products: [] }) }),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                get: async () => ({ id: 77, title: 'Dragonite V', url: 'https://www.vinted.it/items/77-dragonite-v' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.vinted.it/items/77-dragonite-v',
+                title: 'Dragonite V',
+                originalTitle: 'Carta Pokemon Dragonite V',
+                clues: ['Dragonite V', 'V'],
+                primaryClues: ['Dragonite V', 'V'],
+                previewSource: 'vinted_overlay',
+                previewSignature: 'vinted|dragonitev',
+                selectedCandidateId: '222',
+                selectedCandidate: { card_id: '222', name: 'Dragonite V', set_name: 'Promo', card_number: 'SWSH222' },
+                previewRows: [
+                    { card_id: '111', name: 'Dragonite V', set_name: 'Evolving Skies', card_number: '192/203' },
+                    { card_id: '222', name: 'Dragonite V', set_name: 'Promo', card_number: 'SWSH222' },
+                ],
+            },
+            { tab: { id: 77, title: 'Dragonite V', url: 'https://www.vinted.it/items/77-dragonite-v' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.deepEqual(response.result.rows.map((row) => row.card_id), ['111', '222']);
+    assert.equal(response.result.best.card_id, '222');
+    assert.equal(storage.sidePanelState.debug.pinnedVintedPreview, true);
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['111', '222']);
+    assert.equal(storageWrites.at(-1).sidePanelState.debug.previewSource, 'vinted_overlay');
+});
+
+test('Vinted side panel refresh keeps pinned overlay preview rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const pinnedState = {
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: 'Dragonite V',
+            url: 'https://www.vinted.it/items/78-dragonite-v',
+            hostname: 'www.vinted.it',
+            clues: ['Dragonite V', 'V'],
+            primaryClues: ['Dragonite V', 'V'],
+            previewSignature: 'vinted|dragonitev',
+        },
+        rows: [
+            { card_id: '111', name: 'Dragonite V', set_name: 'Evolving Skies', card_number: '192/203' },
+            { card_id: '222', name: 'Dragonite V', set_name: 'Promo', card_number: 'SWSH222' },
+        ],
+        best: { card_id: '111', name: 'Dragonite V' },
+        blueprintId: '111',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/111',
+        error: '',
+        debug: {
+            pinnedPreviewRows: true,
+            pinnedVintedPreview: true,
+            previewSource: 'vinted_overlay',
+            previewSignature: 'vinted|dragonitev',
+        },
+    };
+    const storage = { sidePanelState: pinnedState };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            return { ok: true, json: async () => ({}) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [{ id: 78, title: 'Dragonite V', url: 'https://www.vinted.it/items/78-dragonite-v' }],
+                get: async () => ({ id: 78, title: 'Dragonite V', url: 'https://www.vinted.it/items/78-dragonite-v' }),
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'resolveActiveTabForSidePanel' }, {}, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.deepEqual(response.result.rows.map((row) => row.card_id), ['111', '222']);
+    assert.equal(fetchCalls, 0, 'refresh should not broaden a pinned Vinted preview state');
+});
+
+test('Vinted price enrichment only decorates pinned preview rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url) => {
+            const id = new URL(url).searchParams.get('id');
+            return {
+                ok: true,
+                json: async () => ({
+                    products: [{
+                        price: { non_layered_price_formatted: id === '111' ? '$1.11' : '$2.22' },
+                    }],
+                }),
+            };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                get: async () => ({ id: 79, title: 'Dragonite V', url: 'https://www.vinted.it/items/79-dragonite-v' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.vinted.it/items/79-dragonite-v',
+                title: 'Dragonite V',
+                originalTitle: 'Carta Pokemon Dragonite V',
+                clues: ['Dragonite V'],
+                primaryClues: ['Dragonite V'],
+                previewSource: 'vinted_overlay',
+                previewSignature: 'vinted|dragonitev',
+                previewRows: [
+                    { card_id: '111', name: 'Dragonite V', set_name: 'Evolving Skies', card_number: '192/203' },
+                    { card_id: '222', name: 'Dragonite V', set_name: 'Promo', card_number: 'SWSH222' },
+                ],
+            },
+            { tab: { id: 79, title: 'Dragonite V', url: 'https://www.vinted.it/items/79-dragonite-v' } },
+            resolve
+        );
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['111', '222']);
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.pokoin_price), ['$1.11', '$2.22']);
+    assert.equal(storage.sidePanelState.debug.priceEnriched, true);
+});
+
+test('legacy Vinted fallback is inert when VintedProcessor owns matching', () => {
+    const source = readRepoFile('content.js');
+    const functionSource = extractFunctionSource(source, 'patchVintedProductPage');
+    let searched = false;
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        window: {
+            location: { hostname: 'www.vinted.it' },
+            vintedProcessor: {},
+        },
+        document: {
+            querySelector: () => {
+                throw new Error('legacy fallback should not inspect Vinted DOM');
+            },
+            createElement: () => createDomElement('div'),
+        },
+        extractTitleInfo: () => ({ pokemonName: 'Dragonite' }),
+        searchCardInDatabase: async () => {
+            searched = true;
+            return [];
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${functionSource}\npatchVintedProductPage();`, sandbox, { filename: 'content.js' });
+
+    assert.equal(searched, false);
 });
 
 test('Cardmarket Piplup prefixed number uses structured payload and exact ranking', async () => {
