@@ -423,6 +423,7 @@ function normalizeExpansionAlias(value = '') {
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
         { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
         { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
+        { pattern: /\bTR\s+Team\s+Rocket\b|\bTeam\s+Rocket\b/i, name: 'Team Rocket' },
     ];
     return aliases.find(({ pattern }) => pattern.test(cleanValue))?.name || cleanValue;
 }
@@ -1288,6 +1289,17 @@ function hasExactStructuredIdentity(structuredCard = {}) {
     );
 }
 
+function hasStructuredCollectorIdentity(structuredCard = {}) {
+    const name = String(structuredCard?.name || '').trim();
+    return Boolean(
+        name &&
+        // Possessive/trainer composite names rely on Cardvault's name table so
+        // they should still resolve before accepting Pokemon-only fallbacks.
+        !/[&'’]/.test(name) &&
+        (structuredCard.collectorNumber || structuredCard.printedCollectorNumber || structuredCard.numericCollectorNumber)
+    );
+}
+
 function hasExactNameVariation(structuredCard = {}) {
     const name = String(structuredCard?.name || '').trim();
     return Boolean(
@@ -1300,7 +1312,7 @@ function hasExactNameVariation(structuredCard = {}) {
 }
 
 function hasExactSearchFastPath(structuredCard = {}) {
-    return hasExactStructuredIdentity(structuredCard) || hasExactNameVariation(structuredCard);
+    return hasStructuredCollectorIdentity(structuredCard) || hasExactNameVariation(structuredCard);
 }
 
 function collectorNumberForExtensionPayload(structuredCard = {}) {
@@ -1325,6 +1337,52 @@ function rowMatchesStructuredIdentity(row = {}, structuredCard = {}) {
         '';
     return expansionMatches(rowExpansionName(row), structuredCard.expansion || '') &&
         collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber);
+}
+
+function rowMatchesStructuredCollectorIdentity(row = {}, structuredCard = {}) {
+    if (!hasStructuredCollectorIdentity(structuredCard)) {
+        return false;
+    }
+    const requestedCollectorNumber = structuredCard.collectorNumber ||
+        structuredCard.printedCollectorNumber ||
+        structuredCard.numericCollectorNumber ||
+        '';
+    return collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber) &&
+        (!structuredCard.expansion || expansionMatches(rowExpansionName(row), structuredCard.expansion || ''));
+}
+
+function rowMatchesExactStructuredName(row = {}, structuredCard = {}) {
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    if (!requestedName) {
+        return false;
+    }
+    const rowName = compactSearchValue(row?.name || '');
+    if (requestedName === 'nidoran') {
+        return rowName.startsWith('nidoran');
+    }
+    return rowName === requestedName;
+}
+
+function rowMatchesGoodEnoughExact(row = {}, structuredCard = {}) {
+    return rowMatchesExactStructuredName(row, structuredCard) &&
+        rowMatchesStructuredCollectorIdentity(row, structuredCard);
+}
+
+function hasGoodEnoughExactRows(rows = [], structuredCard = {}) {
+    return rows.some((row) => rowMatchesGoodEnoughExact(row, structuredCard));
+}
+
+function shouldRunAutocompleteFallback(rows = [], structuredCard = {}) {
+    if (rows.length === 0) {
+        return true;
+    }
+    if (hasStructuredCollectorIdentity(structuredCard)) {
+        return !hasGoodEnoughExactRows(rows, structuredCard);
+    }
+    if (hasExactNameVariation(structuredCard)) {
+        return false;
+    }
+    return rows.length < 8;
 }
 
 function mergeAndRankStructuredRows(primaryRows = [], fallbackRows = [], structuredCard = {}) {
@@ -2276,7 +2334,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     markPhase('extensionSearchMs');
                 }
 
-                if (!rows.some((row) => rowMatchesStructuredIdentity(row, pageInfo.structuredCard))) {
+                if (!hasGoodEnoughExactRows(rows, pageInfo.structuredCard)) {
                     try {
                         const nameResolutionTitle = titleForNameResolution(
                             pageInfo.title,
@@ -2320,7 +2378,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     }
                 }
 
-                if (rows.length === 0 || (exactIdentity && !rows.some((row) => rowMatchesStructuredIdentity(row, pageInfo.structuredCard)))) {
+                if (shouldRunAutocompleteFallback(rows, pageInfo.structuredCard)) {
                     const searchResult = exactIdentity
                         ? await searchCardvaultForStructuredCard(pageInfo.title, pageInfo.structuredCard)
                         : await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
@@ -2528,7 +2586,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         rows = searchResult.rows;
                     }
 
-                    if (rows.length === 0 || (exactIdentity && !rows.some((row) => rowMatchesStructuredIdentity(row, structuredCard)))) {
+                    if (rows.length === 0 || (exactIdentity && !hasGoodEnoughExactRows(rows, structuredCard))) {
                         const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
                         const nameResolution = await resolveNameFromCardvaultTitle(
                             titleForNameResolution(title, request.originalTitle || tab?.title || '', [...clues, ...primaryClues]),
@@ -2546,7 +2604,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         }
                     }
 
-                    if (rows.length === 0 || (exactIdentity && !rows.some((row) => rowMatchesStructuredIdentity(row, structuredCard)))) {
+                    if (shouldRunAutocompleteFallback(rows, structuredCard)) {
                         const fallbackSearch = exactIdentity
                             ? await searchCardvaultForStructuredCard(title, structuredCard)
                             : await searchCardvault(title, structuredCard?.name || '');

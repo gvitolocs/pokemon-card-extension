@@ -2681,6 +2681,26 @@ test('Cardmarket ranks Piplup MEP 042 exact prefixed promo card first', () => {
     assert.equal(sorted.at(-1).card_id, 'generic-high-score');
 });
 
+test('Cardmarket ranks Team Rocket TR 62 above Perfect Order Meowth ex', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard', 'expansionMatches']);
+    const rows = [
+        { card_id: 'meowth-po-062', name: 'Meowth ex', set_name: 'Perfect Order', card_number: '062', search_rank: 9999 },
+        { card_id: 'meowth-tr-62', name: 'Meowth', set_name: 'Team Rocket', card_number: '62/82', search_rank: 10 },
+    ];
+
+    assert.equal(sandbox.expansionMatches('Team Rocket', 'TR Team Rocket'), true);
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Meowth',
+        collectorNumber: 'TR 62',
+        printedCollectorNumber: 'TR 62',
+        numericCollectorNumber: '62',
+        expansion: 'TR Team Rocket',
+    });
+
+    assert.equal(sorted[0].card_id, 'meowth-tr-62');
+    assert.equal(sorted.at(-1).card_id, 'meowth-po-062');
+});
+
 test('Cardmarket promo expansion aliases keep promo wording significant', () => {
     const sandbox = loadBackgroundHelpers(['expansionMatches', 'sortRowsForStructuredCard']);
 
@@ -2987,6 +3007,199 @@ test('Cardmarket Meowth POR 062 uses Perfect Order numeric exact payload and ski
     assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
 });
 
+test('Cardmarket Jirachi CP5 026 low exact candidates skip broad fill fallback', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.name, 'Jirachi');
+                assert.equal(body.collectorNumber, 'CP5 026');
+                assert.equal(body.numericCollectorNumber, '026');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'jirachi-cp5-026-a', name: 'Jirachi', expansionName: 'Mythical & Legendary Dream Shine Collection', collectorNumber: '026/036', score: 100 },
+                            { cardId: 'jirachi-cp5-026-b', name: 'Jirachi', expansionName: 'Mythical & Legendary Dream Shine Collection', collectorNumber: 'CP5 026', score: 90 },
+                            { cardId: 'jirachi-cp5-026-c', name: 'Jirachi', expansionName: 'Mythical & Legendary Dream Shine Collection', collectorNumber: '026', score: 80 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                throw new Error('autocomplete should not run to fill low exact Jirachi candidates');
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Jirachi (CP5 026)',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Mythical-Legendary-Dream-Shine-Collection/Jirachi-CP5026',
+            },
+            { tab: { id: 8, title: 'Jirachi (CP5 026)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Mythical-Legendary-Dream-Shine-Collection/Jirachi-CP5026' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results.length, 3);
+    assert.equal(response.results[0].blueprint_id, 'jirachi-cp5-026-b');
+    assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
+    assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
+});
+
+test('Cardmarket Meowth TR 62 exact Team Rocket match ends after exact phase', async () => {
+    const source = readRepoFile('config/background.js');
+    const fetchBodies = [];
+    const storage = {};
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.name, 'Meowth');
+                assert.equal(body.collectorNumber, 'TR 62');
+                assert.equal(body.expansion, 'Team Rocket');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            {
+                                cardId: 'meowth-po-062',
+                                name: 'Meowth ex',
+                                expansionName: 'Perfect Order',
+                                collectorNumber: '062',
+                                score: 9999,
+                            },
+                            {
+                                cardId: 'meowth-tr-62',
+                                name: 'Meowth',
+                                expansionName: 'Team Rocket',
+                                collectorNumber: '62/82',
+                                score: 10,
+                            },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                throw new Error('autocomplete should not run after strong Team Rocket exact match');
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Meowth (TR 62)',
+                        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Team-Rocket/Meowth-TR62',
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: {
+                            rawTitle: 'Meowth (TR 62)',
+                            name: 'Meowth',
+                            searchName: 'Meowth',
+                            collectorNumber: 'TR 62',
+                            collectorNumberPrefix: 'TR',
+                            printedCollectorNumber: 'TR 62',
+                            numericCollectorNumber: '62',
+                            expansion: 'Team Rocket',
+                        },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async () => storage,
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 8,
+        title: 'Meowth (TR 62)',
+        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Team-Rocket/Meowth-TR62',
+    });
+
+    assert.equal(result.blueprintId, 'meowth-tr-62');
+    assert.equal(result.rows[0].card_id, 'meowth-tr-62');
+    assert.equal(result.rows[0].name, 'Meowth');
+    assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
+    assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
+    assert.ok(result.debug.phaseTimings.extensionSearchMs >= 0);
+    assert.equal(result.debug.phaseTimings.nameResolutionMs, undefined);
+    assert.equal(result.debug.phaseTimings.extensionSearchAfterResolutionMs, undefined);
+    assert.equal(result.debug.phaseTimings.autocompleteFallbackMs, undefined);
+    assert.equal(storageWrites.at(-1).blueprintId, 'meowth-tr-62');
+});
+
 test('exact name variation search skips autocomplete after extension match', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -3065,6 +3278,90 @@ test('exact name variation search skips autocomplete after extension match', asy
     assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
     assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
     assert.equal(fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body.name, 'Tornadus ex');
+});
+
+test('name-only low candidate extension rows still use autocomplete fallback', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            const body = options.body ? JSON.parse(options.body) : {};
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'pikachu-name-1', name: 'Pikachu', expansionName: 'Scarlet & Violet', collectorNumber: '025', score: 50 },
+                            { cardId: 'pikachu-name-2', name: 'Pikachu', expansionName: 'Base Set', collectorNumber: '58/102', score: 40 },
+                            { cardId: 'pikachu-name-3', name: 'Pikachu', expansionName: 'Pokemon 151', collectorNumber: '025/165', score: 30 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: body.search_term === 'Pikachu'
+                            ? [{ card_id: 'pikachu-fallback', name: 'Pikachu', canonical_name: 'Pikachu', set_name: 'Pokemon 151', card_number: '025/165', search_rank: 999 }]
+                            : [],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Pikachu',
+                url: 'https://www.vinted.it/items/1-pikachu-card',
+            },
+            { tab: { id: 8, title: 'Pikachu', url: 'https://www.vinted.it/items/1-pikachu-card' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, 'pikachu-fallback');
+    assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
+    assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), true);
 });
 
 test('background search response is not blocked by Cardmarket observation auth', async () => {
@@ -3656,7 +3953,7 @@ test('background search de-dupes repeated identical title requests', async () =>
     assert.equal(responses[1].success, true);
     assert.equal(responses[0].results[0].name_en, 'Reshiram');
     assert.equal(responses[1].results[0].name_en, 'Reshiram');
-    assert.equal(fetchCalls, 3, 'name resolution, structured search, and async price enrichment should run once for duplicate requests');
+    assert.equal(fetchCalls, 4, 'name resolution, structured search, fallback autocomplete, and async price enrichment should run once for duplicate requests');
 });
 
 test('background side panel open honors selected Vinted candidate without reordering search', async () => {
