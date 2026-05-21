@@ -124,24 +124,6 @@ function expansionLogoUrl(row) {
     return slug ? `https://cdn.pokoin.com/expansions/symbols/${slug}.png` : '';
 }
 
-function hasKnownExpansionLogo(row) {
-    const directLogo = row.expansion_symbol_url || row.expansionSymbolUrl || row.symbolImageUrl || '';
-    if (directLogo) {
-        return true;
-    }
-
-    const setName = row.set_name || row.expansion_name || '';
-    return expansionLogoCache.has(normalizeExpansionName(setName));
-}
-
-function sortCandidates(rows = []) {
-    return [...rows].sort((a, b) => {
-        const aHasLogo = hasKnownExpansionLogo(a) ? 1 : 0;
-        const bHasLogo = hasKnownExpansionLogo(b) ? 1 : 0;
-        return bHasLogo - aHasLogo;
-    });
-}
-
 function firstCollectorNumber(value = '') {
     const cleanValue = String(value || '');
     const slashNumber = cleanValue.match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)\s*\/\s*\d{1,4}[a-z]?\b/i);
@@ -292,7 +274,7 @@ function renderState(state) {
     }
 
     const rows = state.rows?.length ? state.rows : [best];
-    const candidates = sortCandidates(rows).slice(0, 8);
+    const candidates = rows.slice(0, 8);
     if (candidates.length > 0) {
         elements.candidatesSection.hidden = false;
         candidates.forEach((row) => {

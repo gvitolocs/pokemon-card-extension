@@ -465,7 +465,7 @@ class VintedProcessor {
                 event.preventDefault();
                 event.stopPropagation();
                 event.stopImmediatePropagation?.();
-                this.openPokoinSidePanel();
+                this.openPokoinSidePanel(result);
             }, true);
             preview.appendChild(row);
         });
@@ -477,7 +477,31 @@ class VintedProcessor {
         }
     }
 
-    openPokoinSidePanel() {
+    candidateCardId(result = {}) {
+        return result.card_id || result.blueprint_id || result.cardId || result.blueprintId || '';
+    }
+
+    buildSidePanelCandidatePayload(result = {}) {
+        const cardId = this.candidateCardId(result);
+        if (!cardId) {
+            return {};
+        }
+
+        return {
+            selectedCandidateId: String(cardId),
+            selectedCandidate: {
+                card_id: cardId,
+                name: result.name || result.name_en || result.pokemon_name || '',
+                set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
+                card_number: result.card_number || result.collector_number || result.collectorNumber || '',
+                expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                source: result.source || 'vinted_overlay',
+                search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
+            },
+        };
+    }
+
+    openPokoinSidePanel(candidate = null) {
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
         return chrome.runtime.sendMessage({
@@ -487,6 +511,7 @@ class VintedProcessor {
             originalTitle: this.currentTitle || document.title,
             clues,
             primaryClues,
+            ...this.buildSidePanelCandidatePayload(candidate || {}),
         }).catch((error) => {
             console.warn('⚠️ [VINT] Unable to open side panel:', error);
         });

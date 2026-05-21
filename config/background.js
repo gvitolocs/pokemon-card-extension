@@ -832,6 +832,24 @@ function legacyResultFromRow(row) {
     };
 }
 
+function selectedCandidateRowFromRequest(request = {}) {
+    const selected = request.selectedCandidate || {};
+    const cardId = request.selectedCandidateId || selected.card_id || selected.blueprint_id || selected.cardId || selected.blueprintId || '';
+    if (!cardId) {
+        return null;
+    }
+
+    return {
+        card_id: String(cardId),
+        name: selected.name || selected.name_en || selected.pokemon_name || request.title || `Blueprint ${cardId}`,
+        set_name: selected.set_name || selected.expansion_name_en || selected.expansionName || selected.expansion_name || '',
+        card_number: selected.card_number || selected.collector_number || selected.collectorNumber || '',
+        expansion_symbol_url: selected.expansion_symbol_url || selected.expansionSymbolUrl || selected.symbolImageUrl || '',
+        source: selected.source || 'selected_candidate',
+        search_rank: selected.search_rank || selected.searchScore || selected.search_score || selected.relevanceScore || selected.score || 999999,
+    };
+}
+
 async function getActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     return tab || null;
@@ -1160,6 +1178,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const requestClues = normalizeRequestClues(request.clues);
                 const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
                 const requestTitle = buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
+                const selectedCandidateRow = selectedCandidateRowFromRequest(request);
                 if (directCardTraderBlueprintId) {
                     const directName = cleanCardTraderDirectName(currentTitle, currentUrl, directCardTraderBlueprintId);
                     const directRow = {
@@ -1211,6 +1230,48 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         },
                     });
                     return directResult;
+                }
+                if (selectedCandidateRow) {
+                    const selectedResult = {
+                        pageInfo: {
+                            title: requestTitle || currentTitle,
+                            url: currentUrl,
+                            hostname: currentUrl ? new URL(currentUrl).hostname : '',
+                            originalTitle: request.originalTitle || currentTitle,
+                            clues: requestClues,
+                            primaryClues: requestPrimaryClues,
+                            structuredCard: scrapeStructuredCardFields(requestTitle || currentTitle),
+                            selectedCandidateId: String(selectedCandidateRow.card_id),
+                        },
+                        rows: [selectedCandidateRow],
+                        best: selectedCandidateRow,
+                        blueprintId: String(selectedCandidateRow.card_id),
+                        pokoinUrl: `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${selectedCandidateRow.card_id}`,
+                        error: '',
+                        debug: {
+                            version: 2,
+                            tab: {
+                                id: tab?.id || null,
+                                title: tab?.title || '',
+                                url: tab?.url || '',
+                            },
+                            query: requestTitle || currentTitle,
+                            apiBaseUrl: CARDVAULT_API_BASE_URL,
+                            attemptedQueries: [],
+                            searched: false,
+                            rowCount: 1,
+                            bestId: String(selectedCandidateRow.card_id),
+                            selectedCandidateId: String(selectedCandidateRow.card_id),
+                            error: '',
+                        },
+                    };
+                    await chrome.storage.session.set({
+                        sidePanelState: {
+                            updatedAt: Date.now(),
+                            ...selectedResult,
+                        },
+                    });
+                    return selectedResult;
                 }
                 await chrome.storage.session.set({
                     sidePanelState: {

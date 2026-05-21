@@ -138,6 +138,9 @@ function createDomElement(tagName = 'div', attributes = {}) {
             this.updateSiblings();
             return child;
         },
+        append(...children) {
+            children.forEach((child) => this.appendChild(child));
+        },
         remove() {
             if (this.parentNode?.children) {
                 this.parentNode.children = this.parentNode.children.filter((child) => child !== this);
@@ -1385,6 +1388,11 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     button.contains = (target) => target === button;
     panel.appendChild(button);
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: (title) => ({
+                pokemonName: /^regigigas$/i.test(String(title || '').trim()) ? 'Regigigas' : null,
+            }),
+        },
         chrome: {
             runtime: {
                 getURL: (asset) => `chrome-extension://test/${asset}`,
@@ -1417,8 +1425,18 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     processor.currentPanel = panel;
     processor.currentButton = button;
     processor.currentTitle = 'Regigigas VSTAR';
+    processor.currentKeywords = processor.extractVintedKeywords(
+        processor.currentTitle,
+        'Regigigas Vastro Astral Radiance 114/189'
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => ['regigigas', 'vstar'].includes(keyword.compact))
+            .map((keyword) => keyword.compact)
+    );
 
     processor.renderCandidatePreview(Array.from({ length: 12 }, (_, index) => ({
+        blueprint_id: String(9000 + index),
         name_en: 'Regigigas VSTAR',
         collector_number: `${114 + index}/189`,
         expansion_name_en: 'Astral Radiance',
@@ -1440,6 +1458,77 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     });
 
     assert.equal(messages.at(-1).action, 'openSidePanelForCurrentTab');
+    assert.equal(messages.at(-1).selectedCandidateId, '9000');
+    assert.equal(messages.at(-1).selectedCandidate.card_id, '9000');
+    assert.equal(messages.at(-1).selectedCandidate.name, 'Regigigas VSTAR');
+    assert.ok(messages.at(-1).clues.some((clue) => /^regigigas$/i.test(clue)));
+    assert.ok(messages.at(-1).clues.some((clue) => /^vstar$/i.test(clue)));
+    assert.ok(messages.at(-1).primaryClues.some((clue) => /^regigigas$/i.test(clue)));
+    assert.ok(messages.at(-1).primaryClues.some((clue) => /^vstar$/i.test(clue)));
+});
+
+test('Vinted main Pokoin button opens side panel from shadow overlay', async () => {
+    const messages = [];
+    const details = createDomElement('section');
+    const listeners = {};
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/40-dragonite',
+                hostname: 'www.vinted.it',
+                pathname: '/items/40-dragonite',
+            },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^dragonite$/i.test(String(title || '').trim()) ? 'Dragonite' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: details,
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokemon Dragonite V';
+    processor.currentKeywords = processor.extractVintedKeywords(
+        processor.currentTitle,
+        'Dragonite V Evolving Skies'
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    processor.createVintedPanelButton();
+    processor.currentButton.addEventListener = (type, listener, options) => {
+        listeners[type] = { listener, options };
+    };
+    processor.attachVintedSidePanelClick(processor.currentButton);
+    await listeners.click.listener({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+
+    assert.equal(listeners.click.options, true);
+    assert.equal(processor.currentPanelHost.shadowRoot.contains(processor.currentButton), true);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
+    assert.equal(messages[0].url, 'https://www.vinted.it/items/40-dragonite');
+    assert.ok(messages[0].primaryClues.some((clue) => /^dragonite$/i.test(clue)));
+    assert.ok(messages[0].primaryClues.some((clue) => /\bv\b/i.test(clue)));
 });
 
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
@@ -1657,6 +1746,93 @@ test('background search de-dupes repeated identical title requests', async () =>
     assert.equal(responses[0].results[0].name_en, 'Reshiram');
     assert.equal(responses[1].results[0].name_en, 'Reshiram');
     assert.equal(fetchCalls, 2, 'name resolution and structured search should run once each for duplicate requests');
+});
+
+test('background side panel open honors selected Vinted candidate without reordering search', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const storageWrites = [];
+    const openedPanels = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new Error('selected candidate path should not search');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 8, title: 'Carta Pokemon Regigigas Vastro', url: 'https://www.vinted.it/items/70-regigigas' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('selected candidate path should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async (payload) => openedPanels.push(payload),
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.vinted.it/items/70-regigigas',
+                title: 'Regigigas vstar',
+                originalTitle: 'Carta Pokemon Regigigas Vastro',
+                clues: ['Regigigas', 'vstar'],
+                primaryClues: ['Regigigas', 'vstar'],
+                selectedCandidateId: '9876',
+                selectedCandidate: {
+                    card_id: '9876',
+                    name: 'Regigigas VSTAR',
+                    set_name: 'Astral Radiance',
+                    card_number: '114/189',
+                },
+            },
+            { tab: { id: 8, title: 'Carta Pokemon Regigigas Vastro', url: 'https://www.vinted.it/items/70-regigigas' } },
+            resolve
+        );
+    });
+
+    const finalState = storageWrites.at(-1).sidePanelState;
+    assert.equal(response.success, true);
+    assert.deepEqual(openedPanels.map((panel) => panel.tabId), [8]);
+    assert.equal(fetchCalls, 0);
+    assert.equal(finalState.blueprintId, '9876');
+    assert.equal(finalState.best.name, 'Regigigas VSTAR');
+    assert.deepEqual(finalState.pageInfo.clues, ['Regigigas', 'vstar']);
+    assert.equal(finalState.debug.selectedCandidateId, '9876');
 });
 
 test('Cardmarket side panel refresh clears loading after search failure', async () => {
@@ -2053,6 +2229,74 @@ test('side panel renders direct CardTrader card as full panel with clean header'
     assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
     assert.equal(bodyClassList.contains('direct-card-view'), true);
     assert.equal(elementsById.get('candidatesSection').hidden, true);
+});
+
+test('side panel preserves API candidate order while rendering logos', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const classList = createClassListStub();
+        const element = {
+            id,
+            textContent: '',
+            hidden: false,
+            src: '',
+            classList,
+            replaceChildren() {
+                this.children = [];
+            },
+            appendChild(child) {
+                this.children = [...(this.children || []), child];
+                return child;
+            },
+            addEventListener() {},
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: { title: 'Dragonite V', url: 'https://www.vinted.it/items/50-dragonite' },
+        best: { card_id: '1', name: 'Dragonite V', set_name: 'Unknown Set', card_number: '1/100' },
+        blueprintId: '1',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/1',
+        rows: [
+            { card_id: '1', name: 'First API Result', set_name: 'Unknown Set', card_number: '1/100' },
+            { card_id: '2', name: 'Second With Logo', set_name: 'Known Set', card_number: '2/100', expansion_symbol_url: 'https://cdn.example/logo.png' },
+            { card_id: '3', name: 'Third API Result', set_name: 'Unknown Set', card_number: '3/100' },
+        ],
+    });
+
+    const rendered = elementsById.get('candidateList').children;
+    assert.equal(rendered[0].href, 'https://pokoin.com/marketplace/en/cards/1');
+    assert.equal(rendered[1].href, 'https://pokoin.com/marketplace/en/cards/2');
+    assert.equal(rendered[2].href, 'https://pokoin.com/marketplace/en/cards/3');
+    assert.equal(rendered[1].querySelector('img').src, 'https://cdn.example/logo.png');
 });
 
 test('CardTrader injected button intercepts click and opens side panel workflow', async () => {

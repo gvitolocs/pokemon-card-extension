@@ -57,6 +57,7 @@
 9. Vinted clue chips live inside the overlay and wrap naturally there. Pokemon-name-like chips start on; directly present variation chips such as `v`, `ex`, `gx`, `vmax`, and normalized `vastro` -> `vstar` also start on and are included in primary clue/search payloads. Other useful but non-name-like clues start off. Changing a chip re-runs the background search and updates the same blue button state and candidate preview list used by side-panel resolution.
 10. Vinted keeps one overlay root per listing. A MutationObserver watches for Vinted SPA rerenders that remove the host, then reattaches the same fixed overlay without duplicating panels, searches, or losing the current button/chip/candidate state. Vinted-specific navigation watching detects true listing URL changes and resets the guard so the new listing renders and searches once.
 11. The Vinted overlay sits at the lower-left viewport edge to avoid covering the listing content and remains isolated from Vinted CSS.
+12. Expansion logos only decorate candidate rows when available. They do not reorder side-panel results; candidate order remains the order returned by the background/API ranking.
 
 ## Processor Boundaries
 
