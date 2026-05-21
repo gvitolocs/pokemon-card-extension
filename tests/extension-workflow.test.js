@@ -1990,6 +1990,7 @@ test('Cardmarket matched button remains visually distinct after relabel', () => 
 test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const isExpansionText = extractFunctionSource(source, 'isCardmarketExpansionText');
     const normalizeExpansionAlias = extractFunctionSource(source, 'normalizeExpansionAlias');
     const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
     const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
@@ -1997,7 +1998,7 @@ test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     const buildQueries = extractFunctionSource(source, 'buildCardvaultQueries');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(`${cleanCardmarketText}\n${normalizeExpansionAlias}\n${removeNoise}\n${scrapeStructured}\n${compact}\n${buildQueries}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields; this.buildCardvaultQueries = buildCardvaultQueries;`, sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${isExpansionText}\n${normalizeExpansionAlias}\n${removeNoise}\n${scrapeStructured}\n${compact}\n${buildQueries}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields; this.buildCardvaultQueries = buildCardvaultQueries;`, sandbox);
 
     const structured = sandbox.scrapeStructuredCardFields(
         'Camerupt (ASC 028)',
@@ -2029,10 +2030,14 @@ test('Cardmarket provided title HTML yields name, prefixed collector, and span e
     ]);
     sandbox.document = {
         querySelector: (selector) => {
-            if (selector.includes('h1 span') || selector.includes('h1 .text-muted')) return span;
             return null;
         },
-        querySelectorAll: () => [],
+        querySelectorAll: (selector) => {
+            if (selector.includes('h1 span') || selector.includes('h1 .text-muted')) {
+                return [pokoinButton, span];
+            }
+            return [];
+        },
         title: '',
     };
     sandbox.window = { location: { href: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' } };
@@ -2062,12 +2067,13 @@ test('Cardmarket provided title HTML yields name, prefixed collector, and span e
 test('Cardmarket structured parser keeps trainer composite card names', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const isExpansionText = extractFunctionSource(source, 'isCardmarketExpansionText');
     const normalizeExpansionAlias = extractFunctionSource(source, 'normalizeExpansionAlias');
     const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
     const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(`${cleanCardmarketText}\n${normalizeExpansionAlias}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${isExpansionText}\n${normalizeExpansionAlias}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
 
     const structured = sandbox.scrapeStructuredCardFields('Arven\'s Mabosstiff ex (mC 484)');
 
@@ -2266,8 +2272,7 @@ test('Cardmarket background search payload uses structured card name first', asy
 
     assert.equal(response.success, true);
     assert.equal(response.results[0].name_en, 'Camerupt');
-    assert.equal(response.results[0].pokoin_price, '$3.21');
-    assert.equal(fetchBodies[0].body.search_term, 'Camerupt');
+    assert.equal(response.results[0].pokoin_price, '');
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Camerupt');
     assert.equal(extensionPayload.collectorNumber, 'ASC 028');
@@ -2377,6 +2382,97 @@ test('Cardmarket Piplup prefixed number uses structured payload and exact rankin
     assert.equal(extensionPayload.expansion, 'MEP Black Star Promos');
 });
 
+test('Cardmarket Piplup fallback ranks MEP 042 above generic rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: 'sc-006',
+                            name: 'Piplup',
+                            expansionName: 'Stellar Crown',
+                            collectorNumber: '006/142',
+                            score: 9999,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: body.search_term === 'Piplup MEP 042'
+                            ? [
+                                { card_id: 'sc-006', name: 'Piplup', canonical_name: 'Piplup', set_name: 'Stellar Crown', card_number: '006/142', search_rank: 9999 },
+                                { card_id: 'mep-042', name: 'Piplup', canonical_name: 'Piplup', set_name: 'MEP Black Star Promos', card_number: 'MEP 042', search_rank: 10 },
+                                { card_id: 'c1-023', name: 'Piplup', canonical_name: 'Piplup', set_name: 'Collection X', card_number: '023', search_rank: 800 },
+                            ]
+                            : [],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Piplup (MEP 042)',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+            { tab: { id: 8, title: 'Piplup (MEP 042)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, 'mep-042');
+    assert.equal(response.results[0].collector_number, 'MEP 042');
+    assert.equal(response.results[0].expansion_name_en, 'MEP Black Star Promos');
+    assert.ok(fetchBodies.some((entry) => entry.body.search_term === 'Piplup MEP 042'));
+});
+
 test('Cardmarket background search prefers trainer composite over shorter Pokemon match', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -2472,7 +2568,6 @@ test('Cardmarket background search prefers trainer composite over shorter Pokemo
 
     assert.equal(response.success, true);
     assert.equal(response.results[0].name_en, 'Arven\'s Mabosstiff ex');
-    assert.equal(fetchBodies[0].body.search_term, 'Arven\'s Mabosstiff ex');
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Arven\'s Mabosstiff ex');
     assert.equal(extensionPayload.collectorNumber, 'MC 484');
@@ -2694,7 +2789,7 @@ test('background search de-dupes repeated identical title requests', async () =>
     assert.equal(responses[1].success, true);
     assert.equal(responses[0].results[0].name_en, 'Reshiram');
     assert.equal(responses[1].results[0].name_en, 'Reshiram');
-    assert.equal(fetchCalls, 3, 'name resolution, structured search, and one price lookup should run once for duplicate requests');
+    assert.equal(fetchCalls, 3, 'name resolution, structured search, and async price enrichment should run once for duplicate requests');
 });
 
 test('background side panel open honors selected Vinted candidate without reordering search', async () => {
@@ -4027,6 +4122,62 @@ test('side panel does not use direct full-panel classes for other marketplaces',
     assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), false);
     assert.equal(bodyClassList.contains('direct-card-view'), false);
     assert.equal(elementsById.get('candidatesSection').hidden, false);
+});
+
+test('side panel loading state uses short Pokoin copy', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const classList = createClassListStub();
+        const element = {
+            id,
+            textContent: '',
+            hidden: false,
+            src: '',
+            classList,
+            replaceChildren() {
+                this.children = [];
+            },
+            appendChild(child) {
+                this.children = [...(this.children || []), child];
+                return child;
+            },
+            addEventListener() {},
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({ loading: true });
+
+    assert.equal(elementsById.get('cardName').textContent, 'Resolving card...');
+    assert.equal(elementsById.get('status').textContent, 'Finding Pokoin matches...');
+    assert.equal(elementsById.get('status').hidden, false);
 });
 
 test('side panel preserves API candidate order while rendering logos', () => {

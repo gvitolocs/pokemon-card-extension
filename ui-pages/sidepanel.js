@@ -280,7 +280,7 @@ function renderState(state) {
 
     if (state?.loading) {
         elements.cardName.textContent = 'Resolving card...';
-        setStatus('Reading the active marketplace page and searching Cardvault.');
+        setStatus('Finding Pokoin matches...');
         return;
     }
 

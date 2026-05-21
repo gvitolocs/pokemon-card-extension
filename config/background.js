@@ -286,11 +286,21 @@ function cleanCardmarketText(value = '') {
         .trim();
 }
 
-function scrapeCardmarketContext(title = '') {
-    const subtitleFromHeadingSpan = cleanCardmarketText(
-        document.querySelector('.page-title-container h1 span, h1 span.h4, h1 .text-muted')
-            ?.textContent || ''
+function isCardmarketExpansionText(value = '') {
+    const cleanValue = cleanCardmarketText(value);
+    return Boolean(
+        cleanValue &&
+        !/^\(?\d+\)?$/.test(cleanValue) &&
+        !/^Pokoin\.com\b/i.test(String(value || '').trim())
     );
+}
+
+function scrapeCardmarketContext(title = '') {
+    const subtitleFromHeadingSpan = [...document.querySelectorAll('.page-title-container h1 span, h1 span.h4, h1 .text-muted')]
+        .map((element) => element.textContent || '')
+        .filter(isCardmarketExpansionText)
+        .map(cleanCardmarketText)
+        .find(Boolean) || '';
     const subtitle = cleanCardmarketText(
         document.querySelector('.page-title-container h1 + div, .page-title-container .font-italic, .page-title-container em, .page-title-container small')
             ?.textContent || ''
@@ -821,6 +831,64 @@ async function searchCardvault(title, preferredName = '') {
     return { rows: [], debug: { attemptedQueries } };
 }
 
+function buildStructuredFallbackQueries(structuredCard = {}, title = '') {
+    const name = structuredCard.searchName || structuredCard.name || '';
+    const collectorNumber = structuredCard.collectorNumber || structuredCard.printedCollectorNumber || '';
+    const numericCollectorNumber = structuredCard.numericCollectorNumber || '';
+    const expansion = structuredCard.expansion || '';
+    return [
+        [name, collectorNumber].filter(Boolean).join(' '),
+        [name, numericCollectorNumber].filter(Boolean).join(' '),
+        [name, expansion, collectorNumber].filter(Boolean).join(' '),
+        title,
+        name,
+    ]
+        .map((query) => removeMarketplaceSearchNoise(query).replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+}
+
+async function searchCardvaultForStructuredCard(title = '', structuredCard = {}) {
+    const attemptedQueries = [];
+    const queries = [...new Set(buildStructuredFallbackQueries(structuredCard, title))];
+
+    for (const searchTerm of queries) {
+        const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+            method: 'POST',
+            headers: {
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+                search_term: searchTerm,
+                result_limit: 8,
+                pool_limit: 80,
+                search_language: 'en',
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Cardvault search failed with HTTP ${response.status}`);
+        }
+
+        const payload = await response.json();
+        const rows = sortRowsForStructuredCard(
+            sortRowsForTitle(normalizeCardvaultRows(payload), title, structuredCard?.name || ''),
+            structuredCard
+        );
+        attemptedQueries.push({
+            query: searchTerm,
+            rowCount: rows.length,
+            responseShape: Array.isArray(payload) ? 'array' : typeof payload,
+            searchContext: payload?.search_context || null,
+        });
+
+        if (rows.length > 0) {
+            return { rows, debug: { attemptedQueries } };
+        }
+    }
+
+    return { rows: [], debug: { attemptedQueries } };
+}
+
 function rowFromExtensionMatch(match) {
     if (!match) {
         return null;
@@ -964,6 +1032,29 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
 
         return Number(b.search_rank || 0) - Number(a.search_rank || 0);
     });
+}
+
+function hasExactStructuredIdentity(structuredCard = {}) {
+    return Boolean(
+        structuredCard?.expansion &&
+        (structuredCard.collectorNumber || structuredCard.printedCollectorNumber || structuredCard.numericCollectorNumber)
+    );
+}
+
+function rowMatchesStructuredIdentity(row = {}, structuredCard = {}) {
+    if (!hasExactStructuredIdentity(structuredCard)) {
+        return false;
+    }
+    const requestedCollectorNumber = structuredCard.collectorNumber ||
+        structuredCard.printedCollectorNumber ||
+        structuredCard.numericCollectorNumber ||
+        '';
+    return expansionMatches(row.set_name || '', structuredCard.expansion || '') &&
+        collectorNumberMatches(row.card_number || '', requestedCollectorNumber);
+}
+
+function mergeAndRankStructuredRows(primaryRows = [], fallbackRows = [], structuredCard = {}) {
+    return sortRowsForStructuredCard(uniqueRowsById([...primaryRows, ...fallbackRows]), structuredCard);
 }
 
 function uniqueRowsById(rows = []) {
@@ -1467,6 +1558,24 @@ async function enrichRowsWithPokoinPrices(rows = [], limit = 8) {
     return rows;
 }
 
+function rowsNeedPokoinPrices(rows = [], limit = 8) {
+    return rows.slice(0, limit).some((row) => row?.card_id && !row.pokoin_price && !row.pokoinPrice);
+}
+
+function schedulePriceEnrichment(rows = [], onComplete = null) {
+    if (!rowsNeedPokoinPrices(rows)) {
+        return Promise.resolve(rows);
+    }
+    return enrichRowsWithPokoinPrices(rows)
+        .then((enrichedRows) => {
+            if (typeof onComplete === 'function') {
+                return onComplete(enrichedRows);
+            }
+            return enrichedRows;
+        })
+        .catch(() => rows);
+}
+
 function stableSearchUrl(url = '') {
     try {
         const parsed = new URL(url);
@@ -1609,47 +1718,68 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 }];
                 debug.cardtraderBlueprintId = pageInfo.cardtraderBlueprintId;
             } else {
-                try {
-                    const nameResolutionTitle = titleForNameResolution(
-                        pageInfo.title,
-                        pageInfo.originalTitle || tab?.title || '',
-                        pageInfo.clues
-                    );
-                    const nameResolution = await resolveNameFromCardvaultTitle(
-                        nameResolutionTitle,
-                        isCardmarketUrl(pageInfo.url) ? pageInfo.structuredCard : null
-                    );
-                    debug.nameResolution = nameResolution;
-                    if (shouldUseResolvedCardName(nameResolution.name, pageInfo.structuredCard)) {
-                        pageInfo.structuredCard = {
-                            ...(pageInfo.structuredCard || {}),
-                            name: nameResolution.name,
+                const exactIdentity = hasExactStructuredIdentity(pageInfo.structuredCard);
+                if (exactIdentity) {
+                    try {
+                        const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
+                        rows = extensionSearchResult.rows;
+                        debug.extensionSearch = extensionSearchResult.debug;
+                        debug.exactStructuredFastPath = true;
+                    } catch (extensionSearchError) {
+                        debug.extensionSearch = {
+                            endpoint: '/api/extension-card-search',
+                            error: extensionSearchError.message || 'Extension card search failed.',
                         };
-                        if (pageInfo.structuredCard.variation) {
-                            pageInfo.structuredCard.searchName = searchNameWithVariation(nameResolution.name, pageInfo.structuredCard.variation);
+                    }
+                }
+
+                if (!rows.some((row) => rowMatchesStructuredIdentity(row, pageInfo.structuredCard))) {
+                    try {
+                        const nameResolutionTitle = titleForNameResolution(
+                            pageInfo.title,
+                            pageInfo.originalTitle || tab?.title || '',
+                            pageInfo.clues
+                        );
+                        const nameResolution = await resolveNameFromCardvaultTitle(
+                            nameResolutionTitle,
+                            isCardmarketUrl(pageInfo.url) ? pageInfo.structuredCard : null
+                        );
+                        debug.nameResolution = nameResolution;
+                        if (shouldUseResolvedCardName(nameResolution.name, pageInfo.structuredCard)) {
+                            pageInfo.structuredCard = {
+                                ...(pageInfo.structuredCard || {}),
+                                name: nameResolution.name,
+                            };
+                            if (pageInfo.structuredCard.variation) {
+                                pageInfo.structuredCard.searchName = searchNameWithVariation(nameResolution.name, pageInfo.structuredCard.variation);
+                            }
+                        }
+                    } catch (nameResolutionError) {
+                        debug.nameResolution = {
+                            source: 'marketplace_card_names_for_language',
+                            error: nameResolutionError.message || 'Card name resolution failed.',
+                        };
+                    }
+
+                    if (!exactIdentity || rows.length === 0) {
+                        try {
+                            const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
+                            rows = mergeAndRankStructuredRows(rows, extensionSearchResult.rows, pageInfo.structuredCard);
+                            debug.extensionSearch = extensionSearchResult.debug;
+                        } catch (extensionSearchError) {
+                            debug.extensionSearch = {
+                                endpoint: '/api/extension-card-search',
+                                error: extensionSearchError.message || 'Extension card search failed.',
+                            };
                         }
                     }
-                } catch (nameResolutionError) {
-                    debug.nameResolution = {
-                        source: 'marketplace_card_names_for_language',
-                        error: nameResolutionError.message || 'Card name resolution failed.',
-                    };
                 }
 
-                try {
-                    const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
-                    rows = extensionSearchResult.rows;
-                    debug.extensionSearch = extensionSearchResult.debug;
-                } catch (extensionSearchError) {
-                    debug.extensionSearch = {
-                        endpoint: '/api/extension-card-search',
-                        error: extensionSearchError.message || 'Extension card search failed.',
-                    };
-                }
-
-                if (rows.length === 0) {
-                    const searchResult = await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
-                    rows = searchResult.rows;
+                if (rows.length === 0 || (exactIdentity && !rows.some((row) => rowMatchesStructuredIdentity(row, pageInfo.structuredCard)))) {
+                    const searchResult = exactIdentity
+                        ? await searchCardvaultForStructuredCard(pageInfo.title, pageInfo.structuredCard)
+                        : await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
+                    rows = mergeAndRankStructuredRows(rows, searchResult.rows, pageInfo.structuredCard);
                     debug.attemptedQueries = searchResult.debug.attemptedQueries;
                 }
             }
@@ -1658,8 +1788,6 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
             debug.error = error;
         }
     }
-
-    await enrichRowsWithPokoinPrices(rows);
 
     const best = rows[0] || null;
     const blueprintId = best?.card_id ? String(best.card_id) : '';
@@ -1693,6 +1821,34 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
             error,
             debug,
         },
+    });
+
+    void schedulePriceEnrichment(rows, async (enrichedRows) => {
+        const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
+        const currentUrl = currentSidePanelState?.pageInfo?.url || '';
+        const currentBlueprintId = currentSidePanelState?.blueprintId || currentSidePanelState?.best?.card_id || '';
+        if (
+            !sameUrlWithoutHash(currentUrl, pageInfo.url || tab?.url || '') ||
+            String(currentBlueprintId || '') !== String(blueprintId || '')
+        ) {
+            return enrichedRows;
+        }
+        const enrichedBest = enrichedRows[0] || null;
+        await chrome.storage.session.set({
+            sidePanelState: {
+                updatedAt: Date.now(),
+                pageInfo,
+                rows: enrichedRows,
+                best: enrichedBest,
+                blueprintId,
+                pokoinUrl,
+                error,
+                debug: {
+                    ...debug,
+                    priceEnriched: true,
+                },
+            },
+        });
     });
 
     await observeCardmarketScrape({ pageInfo, rows, best, blueprintId, pokoinUrl, error, debug }, {
@@ -1784,42 +1940,57 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         ? { expansion: cardmarketExpansionFromUrl(requestUrl) }
                         : null;
                     const structuredCard = scrapeStructuredCardFields(title, cardmarketContext);
-                    const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
-                    const nameResolution = await resolveNameFromCardvaultTitle(
-                        titleForNameResolution(title, request.originalTitle || tab?.title || '', [...clues, ...primaryClues]),
-                        structuredContext
-                    );
-                    if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
-                        structuredCard.name = nameResolution.name;
-                        if (structuredCard.variation) {
-                            structuredCard.searchName = searchNameWithVariation(nameResolution.name, structuredCard.variation);
+                    const exactIdentity = hasExactStructuredIdentity(structuredCard);
+                    let rows = [];
+                    let searchResult = null;
+                    if (exactIdentity) {
+                        searchResult = await searchExtensionCard(structuredCard);
+                        rows = searchResult.rows;
+                    }
+
+                    if (!rows.some((row) => rowMatchesStructuredIdentity(row, structuredCard))) {
+                        const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
+                        const nameResolution = await resolveNameFromCardvaultTitle(
+                            titleForNameResolution(title, request.originalTitle || tab?.title || '', [...clues, ...primaryClues]),
+                            structuredContext
+                        );
+                        if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
+                            structuredCard.name = nameResolution.name;
+                            if (structuredCard.variation) {
+                                structuredCard.searchName = searchNameWithVariation(nameResolution.name, structuredCard.variation);
+                            }
+                        }
+                        if (!exactIdentity || rows.length === 0) {
+                            searchResult = await searchExtensionCard(structuredCard);
+                            rows = mergeAndRankStructuredRows(rows, searchResult.rows, structuredCard);
                         }
                     }
-                    const searchResult = await searchExtensionCard(structuredCard);
-                    if (searchResult.rows.length > 0) {
-                        await enrichRowsWithPokoinPrices(searchResult.rows);
-                        if (isCardmarketUrl(requestUrl)) {
-                            const legacyRows = searchResult.rows.map(legacyResultFromRow);
-                            await sendCardmarketObservation({
-                                structuredCard,
-                                cardmarketContext: {
-                                    url: normalizeObservationUrl(requestUrl),
-                                    title,
-                                    hostname: requestUrl ? new URL(requestUrl).hostname : '',
-                                    expansion: structuredCard.expansion || '',
-                                    subtitle: '',
-                                    breadcrumbParts: [],
-                                },
-                                match: matchFromRow(legacyRows[0]),
-                                promoteVerifiedLink: false,
-                            });
-                            return legacyRows;
-                        }
-                        return searchResult.rows.map(legacyResultFromRow);
+
+                    if (rows.length === 0 || (exactIdentity && !rows.some((row) => rowMatchesStructuredIdentity(row, structuredCard)))) {
+                        const fallbackSearch = exactIdentity
+                            ? await searchCardvaultForStructuredCard(title, structuredCard)
+                            : await searchCardvault(title, structuredCard?.name || '');
+                        rows = mergeAndRankStructuredRows(rows, fallbackSearch.rows, structuredCard);
                     }
-                    const fallbackSearch = await searchCardvault(title, structuredCard?.name || '');
-                    await enrichRowsWithPokoinPrices(fallbackSearch.rows);
-                    return fallbackSearch.rows.map(legacyResultFromRow);
+
+                    const legacyRows = rows.map(legacyResultFromRow);
+                    void schedulePriceEnrichment(rows);
+                    if (isCardmarketUrl(requestUrl) && legacyRows.length > 0) {
+                        await sendCardmarketObservation({
+                            structuredCard,
+                            cardmarketContext: {
+                                url: normalizeObservationUrl(requestUrl),
+                                title,
+                                hostname: requestUrl ? new URL(requestUrl).hostname : '',
+                                expansion: structuredCard.expansion || '',
+                                subtitle: '',
+                                breadcrumbParts: [],
+                            },
+                            match: matchFromRow(legacyRows[0]),
+                            promoteVerifiedLink: false,
+                        });
+                    }
+                    return legacyRows;
                 })
                 .then((results) => {
                     backgroundSearchResultCache.set(searchSignature, results);
