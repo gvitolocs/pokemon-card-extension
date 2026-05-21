@@ -447,11 +447,13 @@ class CardmarketProcessor {
 
     cleanProductTitleText(titleElement) {
         const clone = titleElement.cloneNode(true);
-        clone.querySelectorAll?.('[data-pokemon-linker-button], [data-pokoin-extension-panel], button').forEach((element) => {
-            if (/Pokoin\.com/i.test(element.textContent || '') || element.getAttribute?.('data-pokemon-linker-button') === 'true') {
-                element.remove();
-            }
-        });
+        if (clone.querySelectorAll) {
+            [...clone.querySelectorAll('[data-pokemon-linker-button], [data-pokoin-extension-panel], button')].forEach((element) => {
+                if (/Pokoin\.com/i.test(element.textContent || '') || element.getAttribute?.('data-pokemon-linker-button') === 'true') {
+                    element.remove();
+                }
+            });
+        }
         return (clone.textContent || titleElement.textContent || '')
             .replace(/\bPokoin\.com(?:\s*\(\d+\))?\b/gi, ' ')
             .replace(/\s+/g, ' ')

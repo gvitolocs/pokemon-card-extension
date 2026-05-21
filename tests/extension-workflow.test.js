@@ -33,6 +33,7 @@ function loadBackgroundHelpers(helperNames = []) {
     const source = readRepoFile('config/background.js');
     const sandbox = {
         console: { log() {}, warn() {}, error() {} },
+        document: { querySelector: () => null, querySelectorAll: () => [], title: '' },
         URL,
         setTimeout,
         clearTimeout,
@@ -234,6 +235,9 @@ function createDomElement(tagName = 'div', attributes = {}) {
             clone.style = { ...this.style };
             clone.textContent = this.textContent;
             clone.innerHTML = this.innerHTML;
+            if (arguments[0] === true) {
+                this.children.forEach((child) => clone.appendChild(child.cloneNode?.(true) || child));
+            }
             return clone;
         },
         querySelector(selector) {
@@ -2001,7 +2005,7 @@ test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     );
 
     assert.equal(structured.name, 'Camerupt');
-    assert.equal(structured.searchName, 'Camerupt ASC 028');
+    assert.equal(structured.searchName, 'Camerupt');
     assert.equal(structured.collectorNumber, 'ASC 028');
     assert.equal(structured.numericCollectorNumber, '028');
     assert.equal(structured.expansion, 'Ascended Heroes');
@@ -2031,6 +2035,7 @@ test('Cardmarket provided title HTML yields name, prefixed collector, and span e
         querySelectorAll: () => [],
         title: '',
     };
+    sandbox.window = { location: { href: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' } };
 
     const rawTitle = `${h1.textContent} ${span.textContent} ${pokoinButton.textContent}`;
     const context = sandbox.scrapeCardmarketContext(rawTitle);
@@ -2046,9 +2051,10 @@ test('Cardmarket provided title HTML yields name, prefixed collector, and span e
     assert.equal(structured.collectorNumber, 'MEP 042');
     assert.equal(structured.numericCollectorNumber, '042');
     assert.equal(structured.expansion, 'MEP Black Star Promos');
-    assert.match(structured.searchName, /Piplup MEP 042/);
+    assert.equal(structured.searchName, 'Piplup');
     assert.match(queryTitle, /Piplup/);
     assert.match(queryTitle, /MEP 042/);
+    assert.match(queryTitle, /\b042\b/);
     assert.match(queryTitle, /MEP Black Star Promos/);
     assert.doesNotMatch(structured.rawTitle, /Pokoin\.com/);
 });
@@ -2066,7 +2072,7 @@ test('Cardmarket structured parser keeps trainer composite card names', () => {
     const structured = sandbox.scrapeStructuredCardFields('Arven\'s Mabosstiff ex (mC 484)');
 
     assert.equal(structured.name, 'Arven\'s Mabosstiff ex');
-    assert.equal(structured.searchName, 'Arven\'s Mabosstiff ex MC 484');
+    assert.equal(structured.searchName, 'Arven\'s Mabosstiff ex');
     assert.equal(structured.collectorNumber, 'MC 484');
     assert.equal(structured.numericCollectorNumber, '484');
 });
@@ -2263,7 +2269,7 @@ test('Cardmarket background search payload uses structured card name first', asy
     assert.equal(response.results[0].pokoin_price, '$3.21');
     assert.equal(fetchBodies[0].body.search_term, 'Camerupt');
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
-    assert.equal(extensionPayload.name, 'Camerupt ASC 028');
+    assert.equal(extensionPayload.name, 'Camerupt');
     assert.equal(extensionPayload.collectorNumber, 'ASC 028');
 });
 
@@ -2367,7 +2373,7 @@ test('Cardmarket Piplup prefixed number uses structured payload and exact rankin
     assert.equal(response.results[0].blueprint_id, 'mep-042');
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Piplup');
-    assert.equal(extensionPayload.collectorNumber, '042');
+    assert.equal(extensionPayload.collectorNumber, 'MEP 042');
     assert.equal(extensionPayload.expansion, 'MEP Black Star Promos');
 });
 
@@ -2405,7 +2411,7 @@ test('Cardmarket background search prefers trainer composite over shorter Pokemo
                 return {
                     ok: true,
                     json: async () => ({
-                        matches: body.name === 'Arven\'s Mabosstiff ex'
+                        matches: /^Arven's Mabosstiff ex\b/.test(body.name || '')
                             ? [{
                                 cardId: '484',
                                 name: 'Arven\'s Mabosstiff ex',
@@ -2469,7 +2475,7 @@ test('Cardmarket background search prefers trainer composite over shorter Pokemo
     assert.equal(fetchBodies[0].body.search_term, 'Arven\'s Mabosstiff ex');
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Arven\'s Mabosstiff ex');
-    assert.equal(extensionPayload.collectorNumber, '484');
+    assert.equal(extensionPayload.collectorNumber, 'MC 484');
 });
 
 test('background marketplace search preserves trainer composite names across sites', async () => {
@@ -2524,7 +2530,7 @@ test('background marketplace search preserves trainer composite names across sit
                     return {
                         ok: true,
                         json: async () => ({
-                            matches: body.name === 'Arven\'s Mabosstiff ex'
+                            matches: /^Arven's Mabosstiff ex\b/.test(body.name || '')
                                 ? [{
                                     cardId: '484',
                                     name: 'Arven\'s Mabosstiff ex',

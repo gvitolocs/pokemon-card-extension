@@ -370,7 +370,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         return {
             rawTitle: cleanTitle,
             name: cleanName,
-            collectorNumber: cardNumber,
+            collectorNumber: printedCollectorNumber,
             collectorNumberPrefix: cardPrefix?.toUpperCase() || '',
             printedCollectorNumber,
             numericCollectorNumber: cardNumber,
@@ -978,6 +978,8 @@ async function searchExtensionCard(structuredCard) {
     const payload = {
         name: structuredCard.searchName || structuredCard.name,
         collectorNumber: structuredCard.collectorNumber,
+        numericCollectorNumber: structuredCard.numericCollectorNumber,
+        printedCollectorNumber: structuredCard.printedCollectorNumber,
         expansion: structuredCard.expansion,
         rarity: structuredCard.rarity,
         variation: structuredCard.variation,
