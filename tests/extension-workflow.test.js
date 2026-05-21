@@ -1223,6 +1223,49 @@ test('Vinted Magnezone V keeps V variation distinct from ex', async () => {
     assert.deepEqual(messages.at(-1).previewRows.map((row) => row.card_id), ['magnezone-v']);
 });
 
+test('Vinted Mega Latias ex keeps Mega and ex selected in payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/380-mega-latias-ex', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /latias/i.test(String(title || '')) ? 'Latias' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = messages[0].vintedPayload;
+    assert.ok(selectedLabels.includes('Mega Latias ex'), 'attached Mega phrase should be selected');
+    assert.ok(selectedLabels.includes('Mega'), 'leading Mega modifier should stay selected');
+    assert.ok(selectedLabels.includes('ex'), 'explicit ex modifier should stay selected');
+    assert.equal(selectedLabels.includes('Megaevoluzione'), false, 'localized noisy evolution word should not be selected');
+    assert.equal(payload.name, 'Latias');
+    assert.deepEqual(new Set(payload.variation.split(/\s+/).filter(Boolean)), new Set(['Mega', 'ex']));
+    assert.deepEqual(new Set(payload.primaryClues), new Set(['Mega Latias ex', 'Mega', 'ex']));
+    assert.equal(messages[0].title, 'Mega Latias ex');
+    assert.doesNotMatch(messages[0].title, /Megaevoluzione|PSA/i);
+});
+
 test('Vinted Pikachu volo VMAX keeps noisy word out of structured payload', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -1365,6 +1408,100 @@ test('background Vinted selected keys keep unselected title words out of search'
     assert.equal(response.results[0].blueprint_id, 'flying-pikachu-vmax');
     assert.ok(fetchBodies.length > 0);
     assert.ok(fetchBodies.every((entry) => !JSON.stringify(entry.body).match(/\bvolo\b/i)));
+});
+
+test('background Vinted Mega Latias ex rejects non-Mega Latias rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.name, 'Mega Latias ex');
+                assert.equal(body.variation, 'Mega ex');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'alto-mares-latias', name: "Alto Mare's Latias", expansionName: 'Pokémon Movie VS Pack', collectorNumber: '011/018', score: 100 },
+                            { cardId: 'latias', name: 'Latias', expansionName: 'Generic Set', collectorNumber: '10', score: 98 },
+                            { cardId: 'mega-latias-ex', name: 'Mega Latias EX', expansionName: 'XY Promos', collectorNumber: 'XY78', score: 75 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.doesNotMatch(body.search_term || '', /Megaevoluzione|PSA/i);
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Mega Latias ex',
+                originalTitle: 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10',
+                url: 'https://www.vinted.it/items/380-mega-latias-ex',
+                clues: ['Mega Latias ex', 'Mega', 'ex'],
+                selectedClues: ['Mega Latias ex', 'Mega', 'ex'],
+                primaryClues: ['Mega Latias ex', 'Mega', 'ex'],
+                vintedPayload: {
+                    source: 'vinted',
+                    listingKey: 'https://www.vinted.it/items/380-mega-latias-ex',
+                    originalTitle: 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10',
+                    searchTitle: 'Mega Latias ex',
+                    name: 'Latias',
+                    variation: 'Mega ex',
+                    selectedClues: ['Mega Latias ex', 'Mega', 'ex'],
+                    primaryClues: ['Mega Latias ex', 'Mega', 'ex'],
+                },
+            },
+            { tab: { id: 380, title: 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10', url: 'https://www.vinted.it/items/380-mega-latias-ex' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.deepEqual(Array.from(response.results.map((row) => row.blueprint_id)), ['mega-latias-ex']);
+    assert.ok(fetchBodies.some((entry) => entry.url.includes('/api/extension-card-search')));
 });
 
 test('Vinted Magneton PROMO 159 keeps promo collector and preview rows in side panel payload', async () => {
