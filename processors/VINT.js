@@ -254,17 +254,21 @@ class VintedProcessor {
 
     hasAttachedVariationForName(name = '', sourceText = '') {
         const nameCompact = this.compactClueValue(name);
-        const sourceCompact = this.compactClueValue(sourceText);
-        if (!nameCompact || !sourceCompact) {
+        const normalizedSource = this.normalizeClueValue(sourceText);
+        if (!nameCompact || !normalizedSource) {
             return false;
         }
 
-        const aliasCompacts = Object.entries(this.targetedVintedNameAliases())
+        const namePattern = this.normalizeClueValue(name)
+            .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            .replace(/\s+/g, '\\s*');
+        const aliasPatterns = Object.entries(this.targetedVintedNameAliases())
             .filter(([, canonicalName]) => this.compactClueValue(canonicalName) === nameCompact)
-            .map(([alias]) => alias);
-        return [nameCompact, ...aliasCompacts].some((compact) =>
-            this.vintedVariationCompacts().some((variation) => sourceCompact.includes(`${compact}${variation}`))
-        );
+            .map(([alias]) => alias.split('').join('\\s*'));
+        const variationPattern = '(?:vmax|vstar|ex|gx|v|lv\\.?\\s*x|mega|radiant|shining|prime|break)';
+        return [namePattern, ...aliasPatterns]
+            .filter(Boolean)
+            .some((pattern) => new RegExp(`\\b${pattern}\\s*${variationPattern}\\b`, 'i').test(normalizedSource));
     }
 
     isAttachedNamePhraseClue(value = '') {
@@ -518,10 +522,26 @@ class VintedProcessor {
         const selectedCompositeNames = prepared
             .filter((keyword) => keyword.compositeName && keyword.selectedByDefault)
             .map((keyword) => keyword.compact);
+        const hasSelectedTitleCollector = prepared.some((keyword) =>
+            keyword.collectorNumber &&
+            keyword.selectedByDefault &&
+            /^(?:title|title-pattern|title-expansion)$/.test(keyword.source || '')
+        );
 
         const sorted = prepared
             .map((keyword) => {
                 const attachedVariation = keyword.variation && selectedAttachedVariations.has(keyword.compact);
+                const selectedExplicitTitleVariation = Boolean(
+                    keyword.variation &&
+                    this.vintedVariationCompacts().includes(keyword.compact) &&
+                    keyword.source === 'title-pattern' &&
+                    hasSelectedTitleCollector
+                );
+                const selectedValidatedNameWithTitleCollector = Boolean(
+                    keyword.nameLike &&
+                    !this.hasAttachedVariationForName(keyword.label || keyword.value, sourceText) &&
+                    hasSelectedTitleCollector
+                );
                 const shadowedByComposite = Boolean(
                     keyword.nameLike &&
                     !keyword.compositeName &&
@@ -531,9 +551,14 @@ class VintedProcessor {
                 );
                 const enrichedKeyword = {
                     ...keyword,
-                    attachedVariation,
+                    attachedVariation: attachedVariation || selectedExplicitTitleVariation,
                     shadowedByComposite,
-                    selectedByDefault: (keyword.selectedByDefault || attachedVariation) && !shadowedByComposite,
+                    selectedByDefault: (
+                        keyword.selectedByDefault ||
+                        attachedVariation ||
+                        selectedExplicitTitleVariation ||
+                        selectedValidatedNameWithTitleCollector
+                    ) && !shadowedByComposite,
                 };
                 return {
                     ...enrichedKeyword,

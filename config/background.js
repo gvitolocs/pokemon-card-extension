@@ -1429,6 +1429,9 @@ function rowMatchesStructuredVariation(row = {}, structuredCard = {}) {
     if (requestedVariation === 'v' && !hasExplicitVariationStructuredRows([row], structuredCard)) {
         return false;
     }
+    if (hasStructuredCollectorIdentity(structuredCard) && !rowVariation) {
+        return false;
+    }
     return !rowVariation || rowVariation === requestedVariation;
 }
 
@@ -1601,8 +1604,13 @@ function rowMatchesExactStructuredName(row = {}, structuredCard = {}) {
 }
 
 function rowMatchesGoodEnoughExact(row = {}, structuredCard = {}) {
-    return rowMatchesExactStructuredName(row, structuredCard) &&
-        rowMatchesStructuredCollectorIdentity(row, structuredCard);
+    const requestedCollectorNumber = structuredCard.collectorNumber ||
+        structuredCard.printedCollectorNumber ||
+        structuredCard.numericCollectorNumber ||
+        '';
+    return rowMatchesExactOrStructuredVariationName(row, structuredCard) &&
+        collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber) &&
+        (!structuredCard.expansion || expansionMatches(rowExpansionName(row), structuredCard.expansion || ''));
 }
 
 function hasGoodEnoughExactRows(rows = [], structuredCard = {}) {
@@ -1615,6 +1623,23 @@ function hasExplicitVariationStructuredRows(rows = [], structuredCard = {}) {
 }
 
 function filterStrongExactRows(rows = [], structuredCard = {}) {
+    if (
+        hasStructuredCollectorIdentity(structuredCard) &&
+        normalizeVariationValue(structuredCard?.variation || '')
+    ) {
+        const requestedCollectorNumber = structuredCard.collectorNumber ||
+            structuredCard.printedCollectorNumber ||
+            structuredCard.numericCollectorNumber ||
+            '';
+        const exactVariationRows = rows.filter((row) =>
+            rowMatchesExactOrStructuredVariationName(row, structuredCard) &&
+            rowMatchesStructuredVariation(row, structuredCard) &&
+            collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber) &&
+            (!structuredCard.expansion || expansionMatches(rowExpansionName(row), structuredCard.expansion || ''))
+        );
+        return exactVariationRows.length > 0 ? exactVariationRows : rows;
+    }
+
     if (
         hasStructuredCollectorIdentity(structuredCard) &&
         !normalizeVariationValue(structuredCard?.variation || '') &&
@@ -1652,6 +1677,22 @@ function filterStrongExactRows(rows = [], structuredCard = {}) {
         return exactRows.length > 0 ? exactRows : rows;
     }
     return rows;
+}
+
+function rowMatchesExactOrStructuredVariationName(row = {}, structuredCard = {}) {
+    if (rowMatchesExactStructuredName(row, structuredCard)) {
+        return true;
+    }
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
+    const rowName = compactSearchValue(row?.name || '');
+    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
+    return Boolean(
+        requestedName &&
+        requestedVariation &&
+        rowVariation === requestedVariation &&
+        rowName.includes(requestedName)
+    );
 }
 
 function shouldRunAutocompleteFallback(rows = [], structuredCard = {}) {

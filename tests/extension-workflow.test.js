@@ -1185,6 +1185,54 @@ test('Vinted Magnezone V keeps V variation distinct from ex', async () => {
     assert.deepEqual(messages.at(-1).previewRows.map((row) => row.card_id), ['magnezone-v']);
 });
 
+test('Vinted Pikachu volo VMAX keeps noisy word out of structured payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/7-pikachu-volo-vmax', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^pikachu$/i.test(String(title || '').trim()) ? 'Pikachu' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pikachu volo Vmax 007/025';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = messages[0].vintedPayload;
+    assert.ok(selectedLabels.includes('Pikachu'), 'base Pokemon name should be selected');
+    assert.ok(selectedLabels.includes('VMAX'), 'explicit title variation should be selected');
+    assert.ok(selectedLabels.includes('007/025'), 'collector should be selected');
+    assert.equal(selectedLabels.includes('Pikachu volo VMAX'), false);
+    assert.equal(selectedLabels.includes('Pikachu volo'), false);
+    assert.equal(payload.name, 'Pikachu');
+    assert.equal(payload.variation, 'VMAX');
+    assert.equal(payload.collectorNumber, '007/025');
+    assert.equal(payload.numericCollectorNumber, '007');
+    assert.deepEqual(new Set(payload.primaryClues), new Set(['Pikachu', 'VMAX']));
+    assert.ok(/\bPikachu\b/.test(messages[0].title));
+    assert.ok(/\b007\/025\b/.test(messages[0].title));
+    assert.ok(/\bVMAX\b/.test(messages[0].title));
+    assert.doesNotMatch(messages[0].title, /\bvolo\b/i);
+});
+
 test('Vinted Magneton PROMO 159 keeps promo collector and preview rows in side panel payload', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -3208,6 +3256,38 @@ test('background ranks explicit V variation above ex rows', () => {
     assert.equal(sandbox.rowMatchesStructuredVariation(rows[1], structuredCard), true);
     assert.equal(sorted[0].card_id, 'magnezone-v');
     assert.equal(sorted.at(-1).card_id, 'magnezone-ex');
+});
+
+test('background rejects no-variation Pikachu rows for explicit VMAX collector request', () => {
+    const sandbox = loadBackgroundHelpers([
+        'sortRowsForStructuredCard',
+        'filterStrongExactRows',
+        'rowMatchesStructuredVariation',
+        'shouldRunAutocompleteFallback',
+        'hasGoodEnoughExactRows',
+    ]);
+    const structuredCard = {
+        name: 'Pikachu',
+        searchName: 'Pikachu VMAX',
+        variation: 'VMAX',
+        collectorNumber: '007/025',
+        numericCollectorNumber: '007',
+        rarity: 'illustration',
+    };
+    const rows = [
+        { card_id: 'pitch-pikachu', name: "Pitch's Pikachu", set_name: 'XY Promos', card_number: '272709', search_rank: 999999 },
+        { card_id: 'plain-pikachu-007', name: 'Pikachu', set_name: 'Some Set', card_number: '007/025', search_rank: 999998 },
+        { card_id: 'flying-pikachu-vmax', name: 'Flying Pikachu VMAX', set_name: 'Celebrations', card_number: '007/025', search_rank: 10 },
+    ];
+    const acceptedRows = rows.filter((row) => sandbox.rowMatchesStructuredVariation(row, structuredCard));
+    const sorted = sandbox.sortRowsForStructuredCard(rows, structuredCard);
+    const exactRows = sandbox.filterStrongExactRows(sorted, structuredCard);
+
+    assert.deepEqual(Array.from(acceptedRows.map((row) => row.card_id)), ['flying-pikachu-vmax']);
+    assert.equal(sorted[0].card_id, 'flying-pikachu-vmax');
+    assert.deepEqual(Array.from(exactRows.map((row) => row.card_id)), ['flying-pikachu-vmax']);
+    assert.equal(sandbox.hasGoodEnoughExactRows(exactRows, structuredCard), true);
+    assert.equal(sandbox.shouldRunAutocompleteFallback(exactRows, structuredCard), false);
 });
 
 test('background keeps Rocket Zapdos composite above generic and V variants', () => {
