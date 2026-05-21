@@ -65,14 +65,6 @@ class PokemonCardTraderLinker {
         try {
             console.log('🃏 Pokemon Card Trader Linker - Fast initialization...');
             
-            // Clear successful matches when the page changes
-            this.successfulMatches.clear();
-            
-            // Start the observer immediately for fast insertion
-            this.startObserver();
-            
-            console.log('✅ Extension initialized quickly');
-            
             // Expose global functions for processors
             this.exportGlobalFunctions();
             
@@ -80,6 +72,14 @@ class PokemonCardTraderLinker {
             this.initializeProcessors();
             patchCardTraderCardPage();
             watchCardTraderNavigation();
+
+            // Clear successful matches when the page changes
+            this.successfulMatches.clear();
+            
+            // Start generic processing after site processors exist, so Vinted does not hit legacy fallback first.
+            this.startObserver();
+            
+            console.log('✅ Extension initialized quickly');
             
         } catch (error) {
             console.error('❌ Error nell\'initialization:', error);
@@ -123,7 +123,7 @@ class PokemonCardTraderLinker {
             if (window.VintedProcessor) {
                 console.log('✅ [CardTrader] Initializing VintedProcessor');
                 try {
-                    window.vintedProcessor = new window.VintedProcessor();
+                    window.vintedProcessor = window.vintedProcessor || new window.VintedProcessor();
                     window.vintedProcessor.init();
                     console.log('✅ [CardTrader] VintedProcessor initialized successfully');
                 } catch (error) {
@@ -586,14 +586,6 @@ async function initializeExtension() {
         
 
         
-        // Clear successful matches when the page changes
-        successfulMatches.clear();
-        
-        // Start the observer immediately for fast insertion
-        startObserver();
-        
-        console.log('✅ Extension initialized quickly');
-        
         // Expose global functions for processors
         window.extractTitleInfo = extractTitleInfo;
         window.searchCardInDatabase = searchCardInDatabase;
@@ -620,6 +612,14 @@ async function initializeExtension() {
             initializeProcessors();
             patchCardTraderCardPage();
             watchCardTraderNavigation();
+
+            // Clear successful matches when the page changes
+            successfulMatches.clear();
+            
+            // Start generic processing after site processors exist, so Vinted does not hit legacy fallback first.
+            startObserver();
+            
+            console.log('✅ Extension initialized quickly');
             
         }, 500); // 500ms delay to ensure files are loaded
         
@@ -629,7 +629,7 @@ async function initializeExtension() {
             if (hostname.includes('vinted')) {
                 if (window.VintedProcessor) {
                     console.log('✅ [CardTrader] Initializing VintedProcessor');
-                    window.vintedProcessor = new window.VintedProcessor();
+                    window.vintedProcessor = window.vintedProcessor || new window.VintedProcessor();
                     window.vintedProcessor.init();
                 } else {
                     console.log('⚠️ [CardTrader] VintedProcessor not available, using original logic');

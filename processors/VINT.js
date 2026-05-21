@@ -14,7 +14,14 @@ class VintedProcessor {
         this.latestSearchToken = 0;
         this.currentPanel = null;
         this.currentPanelHost = null;
+        this.currentButton = null;
+        this.currentListingKey = '';
+        this.lastAppliedSearchSignature = '';
+        this.searchResultsBySignature = new Map();
+        this.inFlightSearches = new Map();
         this.vintedPanelObserver = null;
+        this.vintedNavigationObserver = null;
+        this.vintedNavigationTimer = null;
         this.vintedReinsertTimer = null;
         this.vintedProcessAttempts = new Map();
         this.vintedProcessRetryDelayMs = 500;
@@ -237,6 +244,49 @@ class VintedProcessor {
         return clues.filter((clue) => selectedCompacts.has(this.compactClueValue(clue)));
     }
 
+    currentVintedListingKey(url = window.location.href) {
+        try {
+            const parsed = new URL(url);
+            parsed.hash = '';
+            parsed.search = '';
+            return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+        } catch (error) {
+            return String(url || '').split('#')[0].split('?')[0].replace(/\/+$/, '');
+        }
+    }
+
+    buildVintedSearchSignature(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
+        const primaryClues = this.selectedPrimaryClues(clues)
+            .map((clue) => this.compactClueValue(clue))
+            .sort();
+        const selectedClues = clues
+            .map((clue) => this.compactClueValue(clue))
+            .filter(Boolean)
+            .sort();
+        return [
+            this.currentVintedListingKey(),
+            this.compactClueValue(this.buildVintedSearchTitle(title, clues)),
+            selectedClues.join(','),
+            primaryClues.join(','),
+        ].join('|');
+    }
+
+    resetVintedListingState(nextListingKey) {
+        if (this.currentPanelHost?.remove) {
+            this.currentPanelHost.remove();
+        }
+        this.currentListingKey = nextListingKey;
+        this.currentPanel = null;
+        this.currentPanelHost = null;
+        this.currentButton = null;
+        this.currentKeywords = [];
+        this.selectedKeywordValues = new Set();
+        this.latestSearchToken += 1;
+        this.lastAppliedSearchSignature = '';
+        this.searchResultsBySignature.clear();
+        this.inFlightSearches.clear();
+    }
+
     buildVintedSearchTitle(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
         const primaryClues = this.selectedPrimaryClues(clues);
         const searchParts = primaryClues.length > 0
@@ -385,16 +435,33 @@ class VintedProcessor {
     }
 
     async searchCardWithBackground(title, clues = this.selectedKeywordLabels()) {
+        const signature = this.buildVintedSearchSignature(title, clues);
+        if (this.searchResultsBySignature.has(signature)) {
+            return this.searchResultsBySignature.get(signature);
+        }
+        if (this.inFlightSearches.has(signature)) {
+            return this.inFlightSearches.get(signature);
+        }
+
         const primaryClues = this.selectedPrimaryClues(clues);
-        const response = await chrome.runtime.sendMessage({
+        const requestUrl = window.location.href;
+        const searchPromise = chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: this.buildVintedSearchTitle(title, clues),
             originalTitle: title,
             clues,
             primaryClues,
-            url: window.location.href,
+            url: requestUrl,
+        }).then((response) => {
+            const results = response?.success && Array.isArray(response.results) ? response.results : [];
+            this.searchResultsBySignature.set(signature, results);
+            return results;
+        }).finally(() => {
+            this.inFlightSearches.delete(signature);
         });
-        return response?.success && Array.isArray(response.results) ? response.results : [];
+
+        this.inFlightSearches.set(signature, searchPromise);
+        return searchPromise;
     }
 
     vintedInsertedPanelStyles() {
@@ -791,6 +858,7 @@ class VintedProcessor {
      */
     init() {
         console.log('🟢 [VINT] Initializing Vinted processor...');
+        this.startVintedNavigationObserver();
         
         if (this.isProductPage()) {
             console.log('✅ [VINT] Product page detected, starting processing...');
@@ -820,11 +888,60 @@ class VintedProcessor {
         return isVinted && (hasItemPath || hasItemTitle);
     }
 
+    scheduleVintedPageProcess() {
+        if (this.vintedNavigationTimer || typeof setTimeout !== 'function') {
+            return;
+        }
+
+        this.vintedNavigationTimer = setTimeout(() => {
+            this.vintedNavigationTimer = null;
+            if (this.isProductPage()) {
+                this.processProductPage();
+            }
+        }, 250);
+    }
+
+    startVintedNavigationObserver() {
+        if (this.vintedNavigationObserver || typeof MutationObserver !== 'function') {
+            return;
+        }
+
+        if (!window.__pokoinVintedHistoryPatched) {
+            window.__pokoinVintedHistoryPatched = true;
+            ['pushState', 'replaceState'].forEach((methodName) => {
+                const original = history[methodName];
+                if (typeof original !== 'function') {
+                    return;
+                }
+                history[methodName] = function pokoinVintedHistoryPatch(...args) {
+                    const result = original.apply(this, args);
+                    window.dispatchEvent(new Event('pokoin:vinted-navigation'));
+                    return result;
+                };
+            });
+            window.addEventListener('popstate', () => window.dispatchEvent(new Event('pokoin:vinted-navigation')));
+        }
+
+        window.addEventListener('pokoin:vinted-navigation', () => this.scheduleVintedPageProcess());
+        this.vintedNavigationObserver = new MutationObserver(() => this.scheduleVintedPageProcess());
+        this.vintedNavigationObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
+    }
+
     /**
      * Process Vinted product page
      */
     processProductPage() {
-        if (this.processedPages.has(window.location.href)) {
+        const pageKey = this.currentVintedListingKey();
+        if (this.currentListingKey && this.currentListingKey !== pageKey) {
+            this.resetVintedListingState(pageKey);
+        } else if (!this.currentListingKey) {
+            this.currentListingKey = pageKey;
+        }
+
+        if (
+            this.processedPages.has(pageKey) &&
+            this.isVintedOwnedNodeConnected(this.currentButton)
+        ) {
             console.log('🚫 [VINT] Product page already processed, skipping');
             return;
         }
@@ -863,7 +980,7 @@ class VintedProcessor {
             this.runVintedSearch(titleInfo, title);
             
             // Mark page as processed
-            this.processedPages.add(window.location.href);
+            this.processedPages.add(pageKey);
             
         } catch (error) {
             console.error('❌ [VINT] Error while processing product page:', error);
@@ -936,14 +1053,21 @@ class VintedProcessor {
     }
 
     async runVintedSearch(titleInfo, title) {
-        const searchToken = ++this.latestSearchToken;
-        void titleInfo;
-        const backgroundResults = await this.searchCardWithBackground(title);
-
-        if (searchToken !== this.latestSearchToken) {
+        const clues = this.selectedKeywordLabels();
+        const searchSignature = this.buildVintedSearchSignature(title, clues);
+        if (searchSignature === this.lastAppliedSearchSignature && this.searchResultsBySignature.has(searchSignature)) {
             return;
         }
 
+        const searchToken = ++this.latestSearchToken;
+        void titleInfo;
+        const backgroundResults = await this.searchCardWithBackground(title, clues);
+
+        if (searchToken !== this.latestSearchToken || searchSignature !== this.buildVintedSearchSignature(title, clues)) {
+            return;
+        }
+
+        this.lastAppliedSearchSignature = searchSignature;
         if (backgroundResults.length > 0) {
             this.updateButtonWithResults(backgroundResults);
         } else {
@@ -976,6 +1100,8 @@ class VintedProcessor {
      */
     createVintedPanelButton(titleElement = this.currentTitleElement) {
         console.log('🔄 [VINT] Creating compact Vinted action panel...');
+        const panel = this.ensureVintedPanel(titleElement);
+        this.removeOwnedPanelChildren('[data-pokemon-linker-button]');
         
         // Create gray fixed-position button
         const button = document.createElement('button');
@@ -1005,7 +1131,6 @@ class VintedProcessor {
             button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
         });
         
-        const panel = this.ensureVintedPanel(titleElement);
         if (typeof panel.prepend === 'function') {
             panel.prepend(button);
         } else {

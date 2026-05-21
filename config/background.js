@@ -839,6 +839,29 @@ function sameUrlWithoutHash(a = '', b = '') {
 }
 
 const sidePanelRefreshTimers = new Map();
+const backgroundSearchInFlight = new Map();
+const backgroundSearchResultCache = new Map();
+
+function stableSearchUrl(url = '') {
+    try {
+        const parsed = new URL(url);
+        parsed.hash = '';
+        parsed.search = '';
+        return parsed.href.replace(/\/+$/, '');
+    } catch (error) {
+        return String(url || '').split('#')[0].split('?')[0].replace(/\/+$/, '');
+    }
+}
+
+function buildBackgroundSearchSignature({ title = '', originalTitle = '', clues = [], primaryClues = [], url = '' } = {}) {
+    return [
+        stableSearchUrl(url),
+        compactSearchValue(title),
+        compactSearchValue(originalTitle),
+        normalizeRequestClues(clues).map(compactSearchValue).sort().join(','),
+        normalizeRequestClues(primaryClues).map(compactSearchValue).sort().join(','),
+    ].join('|');
+}
 
 async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
     if (!tab?.id || !isSupportedMarketplaceUrl(tab.url)) {
@@ -1050,41 +1073,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const clues = normalizeRequestClues(request.clues);
         const primaryClues = normalizeRequestClues(request.primaryClues);
         const title = buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
-        Promise.resolve()
-            .then(async () => {
-                if (directCardTraderBlueprintId) {
-                    const directName = cleanCardTraderDirectName(title || tab?.title || '', request.url || tab?.url || '', directCardTraderBlueprintId);
-                    return [legacyResultFromRow({
-                        card_id: directCardTraderBlueprintId,
-                        name: directName,
-                        source: 'cardtrader_url',
-                        search_rank: 999999,
-                    })];
-                }
-                if (!title) {
-                    return [];
-                }
-                const structuredCard = scrapeStructuredCardFields(title);
-                const structuredContext = isCardmarketUrl(request.url || tab?.url || '') ? structuredCard : null;
-                const nameResolution = await resolveNameFromCardvaultTitle(title, structuredContext);
-                if (nameResolution.name && (
-                    !structuredCard.name ||
-                    compactSearchValue(nameResolution.name) === compactSearchValue(structuredCard.name)
-                )) {
-                    structuredCard.name = nameResolution.name;
-                    if (structuredCard.variation) {
-                        structuredCard.searchName = [nameResolution.name, structuredCard.variation]
-                            .filter(Boolean)
-                            .join(' ');
+        const searchSignature = buildBackgroundSearchSignature({
+            title,
+            originalTitle: request.originalTitle || request.title || tab?.title || '',
+            clues,
+            primaryClues,
+            url: request.url || tab?.url || '',
+        });
+        if (backgroundSearchResultCache.has(searchSignature)) {
+            sendResponse({ success: true, results: backgroundSearchResultCache.get(searchSignature) });
+            return true;
+        }
+        if (!backgroundSearchInFlight.has(searchSignature)) {
+            backgroundSearchInFlight.set(searchSignature, Promise.resolve()
+                .then(async () => {
+                    if (directCardTraderBlueprintId) {
+                        const directName = cleanCardTraderDirectName(title || tab?.title || '', request.url || tab?.url || '', directCardTraderBlueprintId);
+                        return [legacyResultFromRow({
+                            card_id: directCardTraderBlueprintId,
+                            name: directName,
+                            source: 'cardtrader_url',
+                            search_rank: 999999,
+                        })];
                     }
-                }
-                const searchResult = await searchExtensionCard(structuredCard);
-                if (searchResult.rows.length > 0) {
-                    return searchResult.rows.map(legacyResultFromRow);
-                }
-                const fallbackSearch = await searchCardvault(title, structuredCard?.name || '');
-                return fallbackSearch.rows.map(legacyResultFromRow);
-            })
+                    if (!title) {
+                        return [];
+                    }
+                    const structuredCard = scrapeStructuredCardFields(title);
+                    const structuredContext = isCardmarketUrl(request.url || tab?.url || '') ? structuredCard : null;
+                    const nameResolution = await resolveNameFromCardvaultTitle(title, structuredContext);
+                    if (nameResolution.name && (
+                        !structuredCard.name ||
+                        compactSearchValue(nameResolution.name) === compactSearchValue(structuredCard.name)
+                    )) {
+                        structuredCard.name = nameResolution.name;
+                        if (structuredCard.variation) {
+                            structuredCard.searchName = [nameResolution.name, structuredCard.variation]
+                                .filter(Boolean)
+                                .join(' ');
+                        }
+                    }
+                    const searchResult = await searchExtensionCard(structuredCard);
+                    if (searchResult.rows.length > 0) {
+                        return searchResult.rows.map(legacyResultFromRow);
+                    }
+                    const fallbackSearch = await searchCardvault(title, structuredCard?.name || '');
+                    return fallbackSearch.rows.map(legacyResultFromRow);
+                })
+                .then((results) => {
+                    backgroundSearchResultCache.set(searchSignature, results);
+                    return results;
+                })
+                .finally(() => {
+                    backgroundSearchInFlight.delete(searchSignature);
+                }));
+        }
+        backgroundSearchInFlight.get(searchSignature)
             .then((results) => sendResponse({ success: true, results }))
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
     } else if (request.action === 'openSidePanelForCurrentTab') {

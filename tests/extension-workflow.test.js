@@ -31,13 +31,18 @@ function extractFunctionSource(source, functionName, offset = 0) {
 
 function loadProcessor(relativePath, className, overrides = {}) {
     const source = readRepoFile(relativePath);
+    const defaultWindow = {
+        location: { href: 'https://example.test/item', hostname: 'example.test', pathname: '/item' },
+        addEventListener() {},
+        dispatchEvent() {},
+    };
     const sandbox = {
         console: {
             log() {},
             warn: overrides.warn || (() => {}),
             error: overrides.error || (() => {}),
         },
-        window: overrides.window || {},
+        window: Object.assign(defaultWindow, overrides.window || {}),
         document: overrides.document || {
             querySelectorAll: () => [],
             contains: () => true,
@@ -54,6 +59,16 @@ function loadProcessor(relativePath, className, overrides = {}) {
             observe() {}
         },
         Node: { ELEMENT_NODE: 1 },
+        URL,
+        Event: class {
+            constructor(type) {
+                this.type = type;
+            }
+        },
+        history: overrides.history || {
+            pushState() {},
+            replaceState() {},
+        },
         setTimeout: overrides.setTimeout || setTimeout,
         clearTimeout: overrides.clearTimeout || clearTimeout,
     };
@@ -110,6 +125,9 @@ function createDomElement(tagName = 'div', attributes = {}) {
         setAttribute(name, value) {
             this.attributes[name] = value;
         },
+        removeAttribute(name) {
+            delete this.attributes[name];
+        },
         getAttribute(name) {
             return this.attributes[name];
         },
@@ -153,12 +171,35 @@ function createDomElement(tagName = 'div', attributes = {}) {
             this.updateSiblings();
             return child;
         },
+        replaceChild(newChild, oldChild) {
+            const index = this.children.indexOf(oldChild);
+            if (index === -1) {
+                return oldChild;
+            }
+            newChild.parentNode = this;
+            newChild.parentElement = this;
+            oldChild.parentNode = null;
+            oldChild.parentElement = null;
+            this.children.splice(index, 1, newChild);
+            this.updateSiblings();
+            return oldChild;
+        },
         updateSiblings() {
             this.children.forEach((child, index, children) => {
                 child.nextSibling = children[index + 1] || null;
             });
         },
-        addEventListener() {},
+        addEventListener(type, listener) {
+            this.eventListeners = this.eventListeners || {};
+            this.eventListeners[type] = listener;
+        },
+        cloneNode() {
+            const clone = createDomElement(tagName, { ...this.attributes });
+            clone.style = { ...this.style };
+            clone.textContent = this.textContent;
+            clone.innerHTML = this.innerHTML;
+            return clone;
+        },
         querySelector(selector) {
             for (const child of this.children) {
                 if (child.matches?.(selector)) {
@@ -232,6 +273,12 @@ function createDomElement(tagName = 'div', attributes = {}) {
             }
             if (selector.startsWith('[data-pokoin-candidate-preview]')) {
                 return this.attributes['data-pokoin-candidate-preview'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokemon-linker-button]')) {
+                return this.attributes['data-pokemon-linker-button'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-vinted-keyword]')) {
+                return this.attributes['data-pokoin-vinted-keyword'] !== undefined;
             }
             return false;
         },
@@ -352,6 +399,220 @@ test('Vinted falls back to background without error spam', async () => {
     assert.equal(warnings.length, 0, 'background-first Vinted search should not warn on content fetch');
     assert.equal(chromeMessages.at(-1).action, 'searchCardForTitle');
     assert.equal(sandbox.window.VintedProcessor, Processor);
+});
+
+function createVintedProductDom() {
+    const details = createDomElement('section', { 'data-testid': 'item-details' });
+    const title = createDomElement('h1', { 'data-testid': 'item-title' });
+    const description = createDomElement('p', { 'data-testid': 'item-description' });
+    const actionArea = createDomElement('div', { 'data-testid': 'item-actions' });
+    title.textContent = 'Carta Pokemon Reshiram';
+    description.textContent = 'Reshiram card SWSH154 Evolving Skies 192/203';
+    details.appendChild(title);
+    details.appendChild(description);
+    details.appendChild(actionArea);
+    return { details, title, description, actionArea };
+}
+
+test('Vinted process renders button, clue chips, and candidate preview once', async () => {
+    const { details, title, description } = createVintedProductDom();
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/10-reshiram?ref=feed#photo',
+                hostname: 'www.vinted.it',
+                pathname: '/items/10-reshiram',
+            },
+            extractTitleInfo: (value) => ({
+                pokemonName: /^reshiram$/i.test(String(value || '').replace(/carta pokemon/i, '').trim()) ? 'Reshiram' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return {
+                        success: true,
+                        results: [{ name_en: 'Reshiram', search_score: 94, collector_number: 'SWSH154' }],
+                    };
+                },
+            },
+        },
+        document: {
+            querySelector: (selector) => {
+                if (selector === '[data-testid="item-description"]') return description;
+                if (selector === '[data-pokoin-vinted-panel-host]') return details.querySelector(selector);
+                if (selector === '[data-testid="item-details"]') return details;
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return [title].filter((element) => element.matches(selector) || selector === 'h1');
+                }
+                if (selector === '[data-pokoin-vinted-panel-host]') {
+                    return details.querySelectorAll(selector);
+                }
+                return [];
+            },
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: details,
+            body: details,
+        },
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+    processor.processProductPage();
+
+    const host = details.querySelector('[data-pokoin-vinted-panel-host]');
+    const panel = host.shadowRoot.querySelector('[data-pokoin-vinted-panel]');
+    assert.equal(panel.querySelectorAll('[data-pokemon-linker-button]').length, 1);
+    assert.ok(panel.querySelectorAll('[data-pokoin-vinted-keyword]').length > 0, 'clue chips should render');
+    assert.equal(panel.querySelectorAll('[data-pokoin-candidate-preview]').length, 1);
+    assert.equal(processor.currentButton.style.background, '#28a745');
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
+});
+
+test('Vinted rerender reinsertion does not search again unless clues change', async () => {
+    const { details, title, description } = createVintedProductDom();
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/11-reshiram',
+                hostname: 'www.vinted.it',
+                pathname: '/items/11-reshiram',
+            },
+            extractTitleInfo: (value) => ({
+                pokemonName: /^reshiram$/i.test(String(value || '').replace(/carta pokemon/i, '').trim()) ? 'Reshiram' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Reshiram', search_score: 91 }] };
+                },
+            },
+        },
+        document: {
+            querySelector: (selector) => {
+                if (selector === '[data-testid="item-description"]') return description;
+                if (selector === '[data-pokoin-vinted-panel-host]') return details.querySelector(selector);
+                if (selector === '[data-testid="item-details"]') return details;
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return [title].filter((element) => element.matches(selector) || selector === 'h1');
+                }
+                if (selector === '[data-pokoin-vinted-panel-host]') {
+                    return details.querySelectorAll(selector);
+                }
+                return [];
+            },
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: details,
+            body: details,
+        },
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+    const host = processor.currentPanelHost;
+    host.remove();
+    processor.ensureVintedPanel(title);
+    processor.processProductPage();
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
+
+    const inactiveChip = processor.currentPanel.querySelectorAll('[data-pokoin-vinted-keyword]')
+        .find((chip) => chip.attributes['aria-pressed'] === 'false');
+    assert.ok(inactiveChip, 'a manual clue chip should be available to toggle');
+    inactiveChip.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+    });
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 2);
+    assert.equal(inactiveChip.attributes['aria-pressed'], 'true');
+});
+
+test('Vinted new listing URL resets duplicate guard and searches once', async () => {
+    const { details, title, description } = createVintedProductDom();
+    const messages = [];
+    const location = {
+        href: 'https://www.vinted.it/items/12-reshiram?foo=1',
+        hostname: 'www.vinted.it',
+        pathname: '/items/12-reshiram',
+    };
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location,
+            extractTitleInfo: () => ({ pokemonName: 'Reshiram' }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Reshiram', search_score: 91 }] };
+                },
+            },
+        },
+        document: {
+            querySelector: (selector) => {
+                if (selector === '[data-testid="item-description"]') return description;
+                if (selector === '[data-pokoin-vinted-panel-host]') return details.querySelector(selector);
+                if (selector === '[data-testid="item-details"]') return details;
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return [title].filter((element) => element.matches(selector) || selector === 'h1');
+                }
+                if (selector === '[data-pokoin-vinted-panel-host]') {
+                    return details.querySelectorAll(selector);
+                }
+                return [];
+            },
+            contains: (element) => details.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: details,
+            body: details,
+        },
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+    location.href = 'https://www.vinted.it/items/12-reshiram?foo=2#photo';
+    processor.processProductPage();
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1, 'query/hash-only URL changes should not search again');
+
+    location.href = 'https://www.vinted.it/items/13-reshiram';
+    location.pathname = '/items/13-reshiram';
+    title.textContent = 'Carta Pokemon Reshiram nuova';
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 2, 'new listing URL should search once');
 });
 
 test('Vinted description keywords ignore generic card words and keep useful clues', () => {
@@ -1028,6 +1289,97 @@ test('Cardmarket background search payload uses structured card name first', asy
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Camerupt');
     assert.equal(extensionPayload.collectorNumber, '028');
+});
+
+test('background search de-dupes repeated identical title requests', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    let releaseFetch;
+    const fetchGate = new Promise((resolve) => {
+        releaseFetch = resolve;
+    });
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            fetchCalls += 1;
+            await fetchGate;
+            const body = JSON.parse(options.body || '{}');
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: body.search_term === 'Reshiram'
+                            ? [{ card_id: '1', name: 'Reshiram', canonical_name: 'Reshiram', search_rank: 99 }]
+                            : [],
+                    }),
+                };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: '1',
+                            name: 'Reshiram',
+                            expansionName: 'Black White',
+                            collectorNumber: 'SWSH154',
+                            score: 95,
+                        }],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const request = {
+        action: 'searchCardForTitle',
+        title: 'Reshiram',
+        originalTitle: 'Carta Pokemon Reshiram',
+        clues: ['Reshiram'],
+        primaryClues: ['Reshiram'],
+        url: 'https://www.vinted.it/items/20-reshiram?ref=feed#photo',
+    };
+    const sender = { tab: { id: 8, title: 'Carta Pokemon Reshiram', url: request.url } };
+    const firstResponse = new Promise((resolve) => messageListener(request, sender, resolve));
+    const secondResponse = new Promise((resolve) => messageListener({ ...request, url: 'https://www.vinted.it/items/20-reshiram?foo=bar' }, sender, resolve));
+    releaseFetch();
+    const responses = await Promise.all([firstResponse, secondResponse]);
+
+    assert.equal(responses[0].success, true);
+    assert.equal(responses[1].success, true);
+    assert.equal(responses[0].results[0].name_en, 'Reshiram');
+    assert.equal(responses[1].results[0].name_en, 'Reshiram');
+    assert.equal(fetchCalls, 2, 'name resolution and structured search should run once each for duplicate requests');
 });
 
 test('Cardmarket side panel refresh clears loading after search failure', async () => {

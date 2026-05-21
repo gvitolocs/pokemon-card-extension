@@ -16,6 +16,8 @@
 12. Direct CardTrader state stores a human card name for the side-panel header. If CardTrader only provides a URL-like title, the extension derives the name from the card URL slug instead of showing the long `cardtrader.com/...` path.
 13. Cardmarket buttons are styled as compact inline controls in both gray and green states. Relabeling the button after matches are found reapplies the small Pokoin icon sizing so the raw icon asset cannot stretch across the product image area.
 14. Vinted renders its Pokoin button, clue chips, and candidate preview inside an extension-owned root marked with `data-pokoin-extension-panel`. The root uses Shadow DOM when the browser supports it, with reset styles on the host and inside the shadow tree so Vinted page CSS cannot restyle the Pokoin controls.
+15. Vinted processing is keyed by a stable listing URL that ignores query strings and hashes. Repeated `processProductPage()` calls, MutationObserver callbacks, and same-listing SPA rerenders reattach or reuse the existing owned root instead of creating another button, clue chip group, preview list, or background search.
+16. Vinted preview searches are keyed by listing URL plus the selected clue signature. One in-flight search is shared for identical listing/clue inputs, stale responses are ignored, and cached results prevent identical repeated `searchCardForTitle` messages. Toggling a clue intentionally creates one new signature and runs exactly one new preview search.
 
 ## Match Resolution Flow
 
@@ -50,7 +52,7 @@
 7. Vinted's in-page preview and the side panel can show up to eight candidates without a visible "Best candidates" heading.
 8. Vinted renders the Pokoin button and clue chips inside one compact extension-owned panel inserted into the product details/title block, before the listing action area when Vinted exposes one. Anchor selection is Vinted-specific: it prefers `item-title` inside `item-page-summary-plugin`, `item-details`, or related item detail containers, ignores ad placeholders, skeletons, global headers, nav, category rows, and feed/catalog containers, and waits briefly for the real details block when Vinted initially renders only the top ad/skeleton area.
 9. The Vinted chips wrap naturally inside that normal page container, so they do not float over the product images, title, details, or right-side content. Pokemon-name-like chips start on; non-name-like chips start off. Changing a chip re-runs the background search and updates the same green button state and candidate preview list used by side-panel resolution. Those controls live inside the owned root, so page queries and Vinted CSS do not own or override them.
-10. Vinted keeps one owned root per page. A MutationObserver watches for Vinted SPA rerenders that remove the host, then reattaches the same host to the safe product anchor without duplicating panels or losing the current button/chip/candidate state.
+10. Vinted keeps one owned root per listing. A MutationObserver watches for Vinted SPA rerenders that remove the host, then reattaches the same host to the safe product anchor without duplicating panels or losing the current button/chip/candidate state. Vinted-specific navigation watching detects true listing URL changes and resets the guard so the new listing renders and searches once.
 11. Vinted uses a fixed fallback panel only after no safe item title/details anchor exists. That fallback is isolated the same way as the anchored panel and sits at the lower-left viewport edge instead of the upper-right product/sidebar area to avoid covering the listing content.
 
 ## Processor Boundaries
@@ -58,6 +60,8 @@
 Marketplace processors are responsible for page detection, button placement, lightweight preview UI, and sending `searchCardForTitle` / `openSidePanelForCurrentTab` messages. The background service worker owns Cardvault search, fallback autocomplete, and the canonical side-panel payload: `pageInfo`, `rows`, `best`, `blueprintId`, `pokoinUrl`, `error`, and debug metadata. Processors should not open Pokoin cards directly, should not depend on having a resolved candidate before wiring the side-panel click handler, and should avoid repeated direct content-script API fetches that produce noisy page-context failures.
 
 eBay and Cardmarket processors attach the side-panel click handler as soon as the gray button is created, then only update visual state after matches arrive. Vinted additionally sends selected clue chips and primary Pokemon-name-like clues. CardTrader sends the blueprint id directly and lets the background service worker write a complete direct-card side-panel state.
+
+The background `searchCardForTitle` path also de-dupes identical active requests by stable URL, title, and clue signature. This protects the backend if a content script and processor both send the same search, while still allowing manual side-panel refreshes and clue changes to resolve with fresh state when their inputs differ.
 
 ## CardTrader Direct Path
 
