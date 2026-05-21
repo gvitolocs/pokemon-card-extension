@@ -29,6 +29,39 @@ function extractFunctionSource(source, functionName, offset = 0) {
     throw new Error(`Unable to extract ${functionName}`);
 }
 
+function loadBackgroundHelpers(helperNames = []) {
+    const source = readRepoFile('config/background.js');
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\n${helperNames.map((name) => `this.${name} = ${name};`).join('\n')}`, sandbox, { filename: 'config/background.js' });
+    return sandbox;
+}
+
 function loadProcessor(relativePath, className, overrides = {}) {
     const source = readRepoFile(relativePath);
     const defaultWindow = {
@@ -1268,6 +1301,103 @@ test('Vinted selected keyword toggles shape background and side-panel messages',
     assert.deepEqual([...messages[1].primaryClues], []);
 });
 
+test('Vinted title collector number and localized expansion are selected and structured', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/42-pikachu-evoluzioni', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^pikachu$/i.test(String(title || '').trim()) ? 'Pikachu' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pikachu, Evoluzioni 35/108';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.label === '35/108'), 'collector number chip should render');
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.label === 'Evolutions'), 'Italian Evoluzioni should map to Evolutions chip');
+    assert.ok(selectedLabels.includes('Pikachu'), 'Pokemon name should default selected');
+    assert.ok(selectedLabels.includes('35/108'), 'title collector number should default selected');
+    assert.ok(selectedLabels.includes('Evolutions'), 'title expansion alias should default selected');
+    assert.deepEqual([...messages[0].primaryClues], ['Pikachu']);
+    assert.ok(messages[0].clues.includes('35/108'));
+    assert.ok(messages[0].clues.includes('Evolutions'));
+    assert.match(messages[0].title, /Pikachu/);
+    assert.match(messages[0].title, /Evolutions/);
+    assert.match(messages[0].title, /35\/108/);
+});
+
+test('Vinted collector chip toggle changes signature and ignores stale results', async () => {
+    const messages = [];
+    let resolveFirst;
+    const firstResponse = new Promise((resolve) => {
+        resolveFirst = resolve;
+    });
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/43-pikachu', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^pikachu$/i.test(String(title || '').trim()) ? 'Pikachu' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (messages.length === 1) {
+                        return firstResponse;
+                    }
+                    return {
+                        success: true,
+                        results: [{ name_en: 'Pikachu', collector_number: '35/108', expansion_name_en: 'Evolutions', search_score: 95 }],
+                    };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pikachu';
+    processor.currentButton = createButtonStub();
+    processor.renderCandidatePreview = (results) => {
+        processor.previewResults = results;
+    };
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '35/108');
+    processor.selectedKeywordValues = new Set(['pikachu']);
+
+    const firstSearch = processor.runVintedSearch({}, processor.currentTitle, 'initial');
+    await Promise.resolve();
+    processor.selectedKeywordValues.add('35108');
+    const secondSearch = processor.runVintedSearch({}, processor.currentTitle, 'keyword-toggle');
+    await secondSearch;
+    resolveFirst({ success: true, results: [{ name_en: 'Pikachu', collector_number: '179/165', expansion_name_en: 'Pokemon 151', search_score: 99 }] });
+    await firstSearch;
+
+    assert.equal(messages.length, 2, 'toggle should send one new background search');
+    assert.deepEqual([...messages[0].clues], ['Pikachu']);
+    assert.deepEqual([...messages[1].clues], ['Pikachu', '35/108']);
+    assert.match(messages[1].title, /35\/108/);
+    assert.equal(processor.previewResults[0].collector_number, '35/108', 'stale earlier results should not replace toggled results');
+});
+
 test('Vinted placement uses transparent overlay outside product details', () => {
     const bodyAppends = [];
     const body = documentStubBody(bodyAppends);
@@ -1856,13 +1986,14 @@ test('Cardmarket matched button remains visually distinct after relabel', () => 
 test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const normalizeExpansionAlias = extractFunctionSource(source, 'normalizeExpansionAlias');
     const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
     const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
     const compact = extractFunctionSource(source, 'compactSearchValue');
     const buildQueries = extractFunctionSource(source, 'buildCardvaultQueries');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${scrapeStructured}\n${compact}\n${buildQueries}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields; this.buildCardvaultQueries = buildCardvaultQueries;`, sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${normalizeExpansionAlias}\n${removeNoise}\n${scrapeStructured}\n${compact}\n${buildQueries}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields; this.buildCardvaultQueries = buildCardvaultQueries;`, sandbox);
 
     const structured = sandbox.scrapeStructuredCardFields(
         'Camerupt (ASC 028)',
@@ -1870,36 +2001,85 @@ test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     );
 
     assert.equal(structured.name, 'Camerupt');
-    assert.equal(structured.searchName, 'Camerupt');
-    assert.equal(structured.collectorNumber, '028');
+    assert.equal(structured.searchName, 'Camerupt ASC 028');
+    assert.equal(structured.collectorNumber, 'ASC 028');
+    assert.equal(structured.numericCollectorNumber, '028');
     assert.equal(structured.expansion, 'Ascended Heroes');
     assert.deepEqual([...sandbox.buildCardvaultQueries(structured.name)], ['Camerupt']);
+});
+
+test('Cardmarket provided title HTML yields name, prefixed collector, and span expansion', () => {
+    const h1 = createDomElement('h1');
+    h1.textContent = 'Piplup (MEP 042)';
+    const span = createDomElement('span', { class: 'h4 text-muted fst-italic fw-normal' });
+    span.textContent = ' MEP Black Star Promos - Singles';
+    h1.appendChild(span);
+    const pokoinButton = createDomElement('button', { 'data-pokemon-linker-button': 'true' });
+    pokoinButton.textContent = 'Pokoin.com (1)';
+    h1.appendChild(pokoinButton);
+
+    const sandbox = loadBackgroundHelpers([
+        'scrapeCardmarketContext',
+        'scrapeStructuredCardFields',
+        'buildTitleWithRequestClues',
+    ]);
+    sandbox.document = {
+        querySelector: (selector) => {
+            if (selector.includes('h1 span') || selector.includes('h1 .text-muted')) return span;
+            return null;
+        },
+        querySelectorAll: () => [],
+        title: '',
+    };
+
+    const rawTitle = `${h1.textContent} ${span.textContent} ${pokoinButton.textContent}`;
+    const context = sandbox.scrapeCardmarketContext(rawTitle);
+    const structured = sandbox.scrapeStructuredCardFields(rawTitle, context);
+    const queryTitle = sandbox.buildTitleWithRequestClues(structured.name, [
+        structured.collectorNumber,
+        structured.numericCollectorNumber,
+        structured.expansion,
+    ]);
+
+    assert.equal(context.expansion, 'MEP Black Star Promos');
+    assert.equal(structured.name, 'Piplup');
+    assert.equal(structured.collectorNumber, 'MEP 042');
+    assert.equal(structured.numericCollectorNumber, '042');
+    assert.equal(structured.expansion, 'MEP Black Star Promos');
+    assert.match(structured.searchName, /Piplup MEP 042/);
+    assert.match(queryTitle, /Piplup/);
+    assert.match(queryTitle, /MEP 042/);
+    assert.match(queryTitle, /MEP Black Star Promos/);
+    assert.doesNotMatch(structured.rawTitle, /Pokoin\.com/);
 });
 
 test('Cardmarket structured parser keeps trainer composite card names', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const normalizeExpansionAlias = extractFunctionSource(source, 'normalizeExpansionAlias');
     const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
     const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${normalizeExpansionAlias}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
 
     const structured = sandbox.scrapeStructuredCardFields('Arven\'s Mabosstiff ex (mC 484)');
 
     assert.equal(structured.name, 'Arven\'s Mabosstiff ex');
-    assert.equal(structured.searchName, 'Arven\'s Mabosstiff ex');
-    assert.equal(structured.collectorNumber, '484');
+    assert.equal(structured.searchName, 'Arven\'s Mabosstiff ex MC 484');
+    assert.equal(structured.collectorNumber, 'MC 484');
+    assert.equal(structured.numericCollectorNumber, '484');
 });
 
 test('background parser maps fullart to illustration rarity', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const normalizeExpansionAlias = extractFunctionSource(source, 'normalizeExpansionAlias');
     const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
     const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${normalizeExpansionAlias}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
 
     const structured = sandbox.scrapeStructuredCardFields('Pokémon Froslass Fullart');
 
@@ -1951,6 +2131,43 @@ test('background keeps Base Set family above Expedition Base Set', () => {
     assert.equal(sandbox.isAllowedBaseSetFamily(rows[1]), true);
     assert.equal(sorted.slice(0, 3).map((row) => row.card_id).join(','), 'base,shadowless,base-jp');
     assert.equal(sorted.at(-1).card_id, 'expedition');
+});
+
+test('background ranks exact collector and expansion above generic high-score rows', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard']);
+    const rows = [
+        { card_id: '151-179', name: 'Pikachu', set_name: 'Pokemon 151', card_number: '179/165', search_rank: 9999 },
+        { card_id: 'evo-35', name: 'Pikachu', set_name: 'Evolutions', card_number: '35/108', search_rank: 10 },
+        { card_id: 'evo-36', name: 'Pikachu', set_name: 'Evolutions', card_number: '36/108', search_rank: 500 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Pikachu',
+        expansion: 'Evolutions',
+        collectorNumber: '35/108',
+    });
+
+    assert.equal(sorted[0].card_id, 'evo-35');
+    assert.equal(sorted.at(-1).card_id, '151-179');
+});
+
+test('Cardmarket ranking prefers exact name, prefixed collector, and expansion', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard']);
+    const rows = [
+        { card_id: 'generic-price', name: 'Piplup', set_name: 'Brilliant Stars', card_number: '35/172', search_rank: 999 },
+        { card_id: 'exact', name: 'Piplup', set_name: 'MEP Black Star Promos', card_number: '042', search_rank: 40 },
+        { card_id: 'same-number-wrong-set', name: 'Piplup', set_name: 'Ultra Prism', card_number: '42/156', search_rank: 900 },
+        { card_id: 'generic-name', name: 'Piplup', set_name: 'MEP Black Star Promos', card_number: '007', search_rank: 950 },
+    ];
+
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Piplup',
+        collectorNumber: 'MEP 042',
+        numericCollectorNumber: '042',
+        expansion: 'MEP Black Star Promos',
+    });
+
+    assert.equal(sorted[0].card_id, 'exact');
+    assert.equal(sorted.at(-1).card_id, 'generic-price');
 });
 
 test('Cardmarket background search payload uses structured card name first', async () => {
@@ -2046,8 +2263,112 @@ test('Cardmarket background search payload uses structured card name first', asy
     assert.equal(response.results[0].pokoin_price, '$3.21');
     assert.equal(fetchBodies[0].body.search_term, 'Camerupt');
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
-    assert.equal(extensionPayload.name, 'Camerupt');
-    assert.equal(extensionPayload.collectorNumber, '028');
+    assert.equal(extensionPayload.name, 'Camerupt ASC 028');
+    assert.equal(extensionPayload.collectorNumber, 'ASC 028');
+});
+
+test('Cardmarket Piplup prefixed number uses structured payload and exact ranking', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: body.search_term === 'Piplup'
+                            ? [{ card_id: 'name', name: 'Piplup', canonical_name: 'Piplup', search_rank: 100 }]
+                            : [],
+                    }),
+                };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            {
+                                cardId: 'generic',
+                                name: 'Piplup',
+                                expansionName: 'Pokemon 151',
+                                collectorNumber: '179',
+                                score: 9999,
+                            },
+                            {
+                                cardId: 'mep-042',
+                                name: 'Piplup',
+                                expansionName: 'MEP Black Star Promos',
+                                collectorNumber: 'MEP 042',
+                                score: 20,
+                            },
+                            {
+                                cardId: 'mep-043',
+                                name: 'Piplup',
+                                expansionName: 'MEP Black Star Promos',
+                                collectorNumber: 'MEP 043',
+                                score: 800,
+                            },
+                        ],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Piplup (MEP 042)',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+            { tab: { id: 8, title: 'Piplup (MEP 042)', url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, 'mep-042');
+    const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
+    assert.equal(extensionPayload.name, 'Piplup');
+    assert.equal(extensionPayload.collectorNumber, '042');
+    assert.equal(extensionPayload.expansion, 'MEP Black Star Promos');
 });
 
 test('Cardmarket background search prefers trainer composite over shorter Pokemon match', async () => {
@@ -2536,7 +2857,7 @@ test('background clue helpers remove generic card words from request titles', ()
     vm.createContext(sandbox);
     vm.runInContext(`${removeNoise}\n${compact}\n${normalize}\n${build}\n${buildPrimary}\nthis.normalizeRequestClues = normalizeRequestClues; this.buildTitleWithRequestClues = buildTitleWithRequestClues; this.buildPrimaryClueSearchTitle = buildPrimaryClueSearchTitle;`, sandbox);
 
-    assert.deepEqual(sandbox.normalizeRequestClues(['card', 'carte', 'SWSH154', 'Evolving Skies']), ['SWSH154', 'Evolving Skies']);
+    assert.deepEqual(sandbox.normalizeRequestClues(['card', 'carte', 'SWSH154', 'Evolving Skies', '35/108']), ['SWSH154', 'Evolving Skies', '35/108']);
     const title = sandbox.buildTitleWithRequestClues('Carta Pokemon Dragonite V', ['card', 'SWSH154']);
     assert.match(title, /Dragonite V/);
     assert.match(title, /SWSH154/);
@@ -2545,11 +2866,16 @@ test('background clue helpers remove generic card words from request titles', ()
         sandbox.buildPrimaryClueSearchTitle('Carta Pokémon reshiram B/N ita', ['reshiram', 'Nita'], ['reshiram']),
         'reshiram'
     );
+    assert.equal(
+        sandbox.buildPrimaryClueSearchTitle('Pikachu, Evoluzioni 35/108', ['Pikachu', 'Evolutions', '35/108'], ['Pikachu']),
+        'Pikachu Evolutions 35/108'
+    );
 });
 
 test('background normalizes Vastro typo to VSTAR in request parsing', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const normalizeExpansionAlias = extractFunctionSource(source, 'normalizeExpansionAlias');
     const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
     const compact = extractFunctionSource(source, 'compactSearchValue');
     const normalize = extractFunctionSource(source, 'normalizeRequestClues');
@@ -2558,7 +2884,7 @@ test('background normalizes Vastro typo to VSTAR in request parsing', () => {
     const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
     const sandbox = {};
     vm.createContext(sandbox);
-    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${compact}\n${normalize}\n${build}\n${buildPrimary}\n${scrapeStructured}\nthis.normalizeRequestClues = normalizeRequestClues; this.buildPrimaryClueSearchTitle = buildPrimaryClueSearchTitle; this.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${normalizeExpansionAlias}\n${removeNoise}\n${compact}\n${normalize}\n${build}\n${buildPrimary}\n${scrapeStructured}\nthis.normalizeRequestClues = normalizeRequestClues; this.buildPrimaryClueSearchTitle = buildPrimaryClueSearchTitle; this.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
 
     assert.deepEqual(sandbox.normalizeRequestClues(['Vastro']), ['vstar']);
     assert.equal(sandbox.buildPrimaryClueSearchTitle('Reggigas Vastro', ['Vastro'], []), 'Reggigas vstar');

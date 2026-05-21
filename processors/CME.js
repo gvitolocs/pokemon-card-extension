@@ -174,7 +174,7 @@ class CardmarketProcessor {
                 return;
             }
             
-            const title = titleElement.textContent.trim();
+            const title = this.cleanProductTitleText(titleElement);
             if (!title) {
                 console.log('⚠️ [CME] Product title is empty');
                 return;
@@ -443,6 +443,19 @@ class CardmarketProcessor {
             return window.extractTitleInfo(title);
         }
         return { pokemonName: null };
+    }
+
+    cleanProductTitleText(titleElement) {
+        const clone = titleElement.cloneNode(true);
+        clone.querySelectorAll?.('[data-pokemon-linker-button], [data-pokoin-extension-panel], button').forEach((element) => {
+            if (/Pokoin\.com/i.test(element.textContent || '') || element.getAttribute?.('data-pokemon-linker-button') === 'true') {
+                element.remove();
+            }
+        });
+        return (clone.textContent || titleElement.textContent || '')
+            .replace(/\bPokoin\.com(?:\s*\(\d+\))?\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
     }
 
     /**

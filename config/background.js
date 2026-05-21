@@ -272,12 +272,17 @@ async function extractTitleFromPage() {
 
 function cleanCardmarketText(value = '') {
     return String(value || '')
+        .replace(/\bPokoin\.com(?:\s*\(\d+\))?\b/gi, ' ')
         .replace(/\s+/g, ' ')
-        .replace(/\s+-\s+Singles?\s*$/i, '')
+        .replace(/\s*-?\s*Singles?\s*$/i, '')
         .trim();
 }
 
 function scrapeCardmarketContext(title = '') {
+    const subtitleFromHeadingSpan = cleanCardmarketText(
+        document.querySelector('.page-title-container h1 span, h1 span.h4, h1 .text-muted')
+            ?.textContent || ''
+    );
     const subtitle = cleanCardmarketText(
         document.querySelector('.page-title-container h1 + div, .page-title-container .font-italic, .page-title-container em, .page-title-container small')
             ?.textContent || ''
@@ -285,6 +290,7 @@ function scrapeCardmarketContext(title = '') {
     const breadcrumbParts = [...document.querySelectorAll('.breadcrumb a, nav a')]
         .map((element) => cleanCardmarketText(element.textContent))
         .filter(Boolean);
+    const pageUrlExpansion = cardmarketExpansionFromUrl(window.location.href);
     const expansionFromBreadcrumb = breadcrumbParts
         .slice()
         .reverse()
@@ -297,37 +303,81 @@ function scrapeCardmarketContext(title = '') {
         .match(/\)\s*[-–]\s*(.+?)(?:\s*[-–]\s*Singles?)?$/i)?.[1] || '';
 
     return {
-        subtitle,
+        subtitle: subtitleFromHeadingSpan || subtitle,
         breadcrumbParts,
-        expansion: subtitle || expansionFromBreadcrumb || cleanCardmarketText(documentTitleExpansion),
+        expansion: subtitleFromHeadingSpan || subtitle || pageUrlExpansion || expansionFromBreadcrumb || cleanCardmarketText(documentTitleExpansion),
     };
+}
+
+function normalizeExpansionAlias(value = '') {
+    const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
+    const aliases = [
+        { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
+        { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
+    ];
+    return aliases.find(({ pattern }) => pattern.test(cleanValue))?.name || cleanValue;
+}
+
+function parseCardmarketCollectorCode(value = '') {
+    const match = String(value || '').match(/\b([A-Z0-9]{1,6})?\s*(\d{1,4}[a-z]?)\b/i);
+    if (!match) {
+        return { collectorNumber: '', printedNumber: '' };
+    }
+    const prefix = (match[1] || '').trim();
+    const printedNumber = match[2];
+    return {
+        collectorNumber: [prefix.toUpperCase(), printedNumber].filter(Boolean).join(' '),
+        printedNumber,
+    };
+}
+
+function cardmarketExpansionFromUrl(url = '') {
+    try {
+        const pathParts = new URL(url).pathname
+            .split('/')
+            .map((part) => decodeURIComponent(part))
+            .filter(Boolean);
+        const singlesIndex = pathParts.findIndex((part) => /^Singles$/i.test(part));
+        const expansionSlug = singlesIndex >= 0 ? pathParts[singlesIndex + 1] : '';
+        return expansionSlug
+            ? expansionSlug.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+            : '';
+    } catch (error) {
+        return '';
+    }
 }
 
 function scrapeStructuredCardFields(title = '', context = null) {
     const cleanTitle = String(title || '')
         .replace(/\s*\|\s*Vinted\s*$/i, '')
         .replace(/\s*\|\s*Cardmarket\s*$/i, '')
+        .replace(/\bPokoin\.com(?:\s*\(\d+\))?\b/gi, ' ')
         .replace(/\bvastro\b/gi, 'vstar')
         .replace(/\bfull\s*-?\s*art\b|\bfullart\b/gi, 'illustration')
         .replace(/\s+/g, ' ')
         .trim();
-    const cardmarketMatch = cleanTitle.match(/^(.+?)\s*\((?:[A-Z0-9]{2,6}\s*)?(\d{1,4}[a-z]?)\)\s*(?:[-–]\s*(.+?))?$/i);
+    const cardmarketMatch = cleanTitle.match(/^(.+?)\s*\((?:([A-Z0-9]{1,6})\s*)?(\d{1,4}[a-z]?)\)\s*(?:[-–]?\s*(.+?))?$/i);
     if (cardmarketMatch) {
-        const [, cardName, cardNumber, trailingExpansion] = cardmarketMatch;
-        const expansion = cleanCardmarketText(
+        const [, cardName, cardPrefix, cardNumber, trailingExpansion] = cardmarketMatch;
+        const printedCollectorNumber = cardPrefix ? `${cardPrefix.toUpperCase()} ${cardNumber}` : cardNumber;
+        const expansion = normalizeExpansionAlias(cleanCardmarketText(
             context?.expansion ||
             trailingExpansion ||
             ''
-        );
+        ));
+        const cleanName = removeMarketplaceSearchNoise(cardName);
 
         return {
             rawTitle: cleanTitle,
-            name: removeMarketplaceSearchNoise(cardName),
+            name: cleanName,
             collectorNumber: cardNumber,
+            collectorNumberPrefix: cardPrefix?.toUpperCase() || '',
+            printedCollectorNumber,
+            numericCollectorNumber: cardNumber,
             expansion,
             rarity: '',
             variation: '',
-            searchName: removeMarketplaceSearchNoise(cardName),
+            searchName: cleanName,
         };
     }
 
@@ -337,10 +387,11 @@ function scrapeStructuredCardFields(title = '', context = null) {
         .replace(/\s+/g, ' ')
         .trim();
 
+    const prefixedCollectorNumber = cleanTitle.match(/\b([A-Z]{1,6})\s?(\d{1,4}[a-z]?)(?:\s*\/\s*\d{1,4}[a-z]?)?\b/i);
     const collectorNumber = (
-        cleanTitle.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0] ||
-        cleanTitle.match(/\b\d{1,3}\s*\/\s*\d{1,3}\b/)?.[0] ||
-        cleanTitle.match(/\b[A-Z]{1,5}\d{1,3}[a-z]?\b/)?.[0] ||
+        cleanTitle.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i)?.[0] ||
+        cleanTitle.match(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/)?.[0] ||
+        prefixedCollectorNumber?.[2] ||
         ''
     ).replace(/\s+/g, '');
 
@@ -355,6 +406,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
     const hasEditionHint = /\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/i.test(cleanTitle);
     const expansionAliases = [
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
+        { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
     ];
     const aliasedExpansion = expansionAliases.find(({ pattern }) => pattern.test(cleanTitle))?.name || '';
     const expansionNoise = [
@@ -364,10 +416,11 @@ function scrapeStructuredCardFields(title = '', context = null) {
         'BW Black Star Promos',
         'Paldean Fates',
         'Pokemon 151',
+        'Evolutions',
     ];
-    const expansion = aliasedExpansion || expansionNoise.find((candidate) =>
+    const expansion = normalizeExpansionAlias(aliasedExpansion || expansionNoise.find((candidate) =>
         new RegExp(`\\b${candidate.replace(/\s+/g, '\\s+')}\\b`, 'i').test(cleanTitle)
-    ) || '';
+    ) || '');
 
     let name = withoutMarketplaceNoise;
     if (collectorNumber) {
@@ -378,6 +431,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
     }
     name = name
         .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
+        .replace(/\bevoluzioni\b/gi, ' ')
         .replace(/\b(?:Legendary|Treasure|Treasures|Promo|Promos)\b/gi, ' ')
         .replace(/\b(?:special illustration rare|illustration rare|illustration|secret rare|ultra rare|holo rare|holo|promo|rare)\b/gi, ' ')
         .replace(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
@@ -388,6 +442,10 @@ function scrapeStructuredCardFields(title = '', context = null) {
         rawTitle: cleanTitle,
         name: removeMarketplaceSearchNoise(name),
         collectorNumber,
+        collectorNumberPrefix: prefixedCollectorNumber?.[1]?.toUpperCase() || '',
+        printedCollectorNumber: prefixedCollectorNumber?.[1]
+            ? `${prefixedCollectorNumber[1].toUpperCase()} ${prefixedCollectorNumber[2]}`
+            : collectorNumber,
         expansion,
         editionHint: hasEditionHint,
         rarity,
@@ -413,7 +471,8 @@ function normalizeRequestClues(clues = []) {
     const seen = new Set();
     return (Array.isArray(clues) ? clues : [])
         .map((clue) => removeMarketplaceSearchNoise(clue)
-            .replace(/[^a-z0-9/'\s-]+/gi, ' ')
+            .replace(/\bevoluzioni\b/gi, 'Evolutions')
+            .replace(/[^a-z0-9/'\s-]+/gi, (match) => match.includes('/') ? '/' : ' ')
             .replace(/\s+/g, ' ')
             .trim())
         .filter((clue) => {
@@ -457,12 +516,17 @@ function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) 
             /\b(?:vmax|vstar|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(clue)
         );
         const expansionClues = normalizedClues.filter((clue) =>
-            /\b(?:base\s+set|set\s+base)\b/i.test(clue)
+            /\b(?:base\s+set|set\s+base|evolutions|evoluzioni|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(clue)
+        );
+        const collectorClues = normalizedClues.filter((clue) =>
+            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(clue) ||
+            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(clue) ||
+            /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(clue)
         );
         const rarityClues = normalizedClues.filter((clue) =>
             /\billustration\b/i.test(clue)
         );
-        return buildTitleWithRequestClues('', [...normalizedPrimaryClues, ...expansionClues, ...rarityClues, ...variationClues]);
+        return buildTitleWithRequestClues('', [...normalizedPrimaryClues, ...expansionClues, ...collectorClues, ...rarityClues, ...variationClues]);
     }
     return buildTitleWithRequestClues(title, clues);
 }
@@ -802,22 +866,80 @@ function isAllowedBaseSetFamily(row) {
         setName === 'baseexpansionpack';
 }
 
+function expansionMatches(rowExpansion = '', requestedExpansion = '') {
+    const rowSet = compactSetValue(rowExpansion || '');
+    const requestedSet = compactSetValue(requestedExpansion || '');
+    if (!requestedSet) {
+        return true;
+    }
+    if (requestedSet === 'baseset') {
+        return isAllowedBaseSetFamily({ set_name: rowExpansion });
+    }
+    return rowSet === requestedSet ||
+        Boolean(rowSet && requestedSet && (rowSet.includes(requestedSet) || requestedSet.includes(rowSet)));
+}
+
+function normalizeCollectorValue(value = '') {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/\b(?:no|number|num|card)\b/g, ' ')
+        .replace(/[^a-z0-9/]+/g, '')
+        .replace(/^0+(\d)/, '$1');
+}
+
+function collectorNumberMatches(rowNumber = '', requestedNumber = '') {
+    const rowCompact = normalizeCollectorValue(rowNumber);
+    const requestedCompact = normalizeCollectorValue(requestedNumber);
+    if (!rowCompact || !requestedCompact) {
+        return false;
+    }
+
+    const rowPrimary = rowCompact.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+        rowCompact.match(/\d{1,4}[a-z]?/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+        '';
+    const requestedPrimary = requestedCompact.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+        requestedCompact.match(/\d{1,4}[a-z]?/i)?.[0]?.replace(/^0+(\d)/, '$1') ||
+        '';
+    return rowCompact === requestedCompact ||
+        rowCompact.endsWith(requestedCompact) ||
+        requestedCompact.endsWith(rowCompact) ||
+        Boolean(rowPrimary && requestedPrimary && rowPrimary === requestedPrimary);
+}
+
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const requestedExpansion = compactSetValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
+    const requestedCollectorNumber = structuredCard.collectorNumber ||
+        structuredCard.printedCollectorNumber ||
+        structuredCard.numericCollectorNumber ||
+        '';
     const hasEditionHint = Boolean(structuredCard.editionHint);
 
     return [...rows].sort((a, b) => {
-        const aExpansionMatch = requestedExpansion === 'baseset'
-            ? isAllowedBaseSetFamily(a)
-            : compactSetValue(a.set_name || '') === requestedExpansion;
-        const bExpansionMatch = requestedExpansion === 'baseset'
-            ? isAllowedBaseSetFamily(b)
-            : compactSetValue(b.set_name || '') === requestedExpansion;
+        const aExpansionMatch = expansionMatches(a.set_name || '', structuredCard.expansion || '');
+        const bExpansionMatch = expansionMatches(b.set_name || '', structuredCard.expansion || '');
         const aExpansionPenalty = requestedExpansion && !aExpansionMatch ? 1 : 0;
         const bExpansionPenalty = requestedExpansion && !bExpansionMatch ? 1 : 0;
         if (aExpansionPenalty !== bExpansionPenalty) {
             return aExpansionPenalty - bExpansionPenalty;
+        }
+
+        const aCollectorPenalty = requestedCollectorNumber && !collectorNumberMatches(a.card_number || '', requestedCollectorNumber) ? 1 : 0;
+        const bCollectorPenalty = requestedCollectorNumber && !collectorNumberMatches(b.card_number || '', requestedCollectorNumber) ? 1 : 0;
+        if (aCollectorPenalty !== bCollectorPenalty) {
+            return aCollectorPenalty - bCollectorPenalty;
+        }
+
+        const aExactStructuredMatch = requestedExpansion &&
+            requestedCollectorNumber &&
+            aExpansionPenalty === 0 &&
+            aCollectorPenalty === 0 ? 0 : 1;
+        const bExactStructuredMatch = requestedExpansion &&
+            requestedCollectorNumber &&
+            bExpansionPenalty === 0 &&
+            bCollectorPenalty === 0 ? 0 : 1;
+        if (aExactStructuredMatch !== bExactStructuredMatch) {
+            return aExactStructuredMatch - bExactStructuredMatch;
         }
 
         const aEditionBoost = hasEditionHint && isAllowedBaseSetFamily(a) ? 0 : 1;
@@ -1332,12 +1454,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         const clues = normalizeRequestClues(request.clues);
         const primaryClues = normalizeRequestClues(request.primaryClues);
         const title = buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
+        const requestUrl = request.url || tab?.url || '';
         const searchSignature = buildBackgroundSearchSignature({
             title,
             originalTitle: request.originalTitle || request.title || tab?.title || '',
             clues,
             primaryClues,
-            url: request.url || tab?.url || '',
+            url: requestUrl,
         });
         if (backgroundSearchResultCache.has(searchSignature)) {
             sendResponse({ success: true, results: backgroundSearchResultCache.get(searchSignature) });
@@ -1358,8 +1481,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (!title) {
                         return [];
                     }
-                    const structuredCard = scrapeStructuredCardFields(title);
-                    const structuredContext = isCardmarketUrl(request.url || tab?.url || '') ? structuredCard : null;
+                    const cardmarketContext = isCardmarketUrl(requestUrl)
+                        ? { expansion: cardmarketExpansionFromUrl(requestUrl) }
+                        : null;
+                    const structuredCard = scrapeStructuredCardFields(title, cardmarketContext);
+                    const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
                     const nameResolution = await resolveNameFromCardvaultTitle(
                         titleForNameResolution(title, request.originalTitle || tab?.title || '', [...clues, ...primaryClues]),
                         structuredContext

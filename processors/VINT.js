@@ -234,24 +234,61 @@ class VintedProcessor {
         return /\b(?:base\s+set|set\s+base)\b/i.test(this.normalizeClueValue(value));
     }
 
+    isCollectorNumberClue(value = '') {
+        const label = this.normalizeClueValue(value);
+        return /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(label) ||
+            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label) ||
+            /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label);
+    }
+
+    vintedExpansionAliases() {
+        return [
+            { pattern: /\bevoluzioni\b/i, label: 'Evolutions' },
+        ];
+    }
+
+    isExpansionClue(value = '') {
+        return this.isBaseSetClue(value) ||
+            /\b(?:evolutions|evoluzioni|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
+    }
+
+    sourceContainsClue(value = '', sourceText = '') {
+        const compactClue = this.compactClueValue(value);
+        const compactSource = this.compactClueValue(sourceText);
+        if (compactClue && compactSource.includes(compactClue)) {
+            return true;
+        }
+        return this.vintedExpansionAliases().some(({ pattern, label }) =>
+            this.compactClueValue(label) === compactClue && pattern.test(sourceText)
+        );
+    }
+
     prepareVintedKeywordCandidates(candidates = [], sourceText = '') {
         const prepared = candidates
             .map((candidate, index) => {
                 const nameLike = this.isPokemonNameLikeClue(candidate);
                 const variation = this.isVariationClue(candidate.label || candidate.value);
                 const baseSet = this.isBaseSetClue(candidate.label || candidate.value);
+                const collectorNumber = this.isCollectorNumberClue(candidate.label || candidate.value);
+                const expansion = this.isExpansionClue(candidate.label || candidate.value);
                 const illustration = this.isIllustrationClue(candidate.label || candidate.value);
                 const attachedNamePhrase = this.isAttachedNamePhraseClue(candidate);
                 const selectedNameLike = nameLike && !this.hasAttachedVariationForName(candidate.label || candidate.value, sourceText);
+                const selectedHighConfidenceContext =
+                    (collectorNumber || expansion) &&
+                    /^(?:title|title-pattern|title-expansion)$/.test(candidate.source || '') &&
+                    this.sourceContainsClue(candidate.label || candidate.value, sourceText);
                 return {
                     ...candidate,
                     nameLike,
                     variation,
                     baseSet,
+                    collectorNumber,
+                    expansion,
                     illustration,
                     attachedNamePhrase,
                     attachedVariation: false,
-                    selectedByDefault: attachedNamePhrase || selectedNameLike,
+                    selectedByDefault: attachedNamePhrase || selectedNameLike || selectedHighConfidenceContext,
                     _index: index,
                 };
             });
@@ -325,18 +362,27 @@ class VintedProcessor {
         const candidates = [];
         const expansionHints = [
             'Base Set', 'Base Set 2', 'Base Set Shadowless', 'Jungle', 'Fossil', 'Team Rocket',
+            'Evolutions',
             'Legendary Treasures', 'Black Star Promos', 'Evolving Skies', 'Fusion Strike',
             'Paldean Fates', 'Pokemon 151', 'Scarlet Violet', 'Obsidian Flames', 'Crown Zenith',
             'Chilling Reign', 'Silver Tempest', 'Brilliant Stars', 'Astral Radiance',
         ];
         expansionHints.forEach((hint) => {
-            if (new RegExp(`\\b${hint.replace(/\s+/g, '\\s+')}\\b`, 'i').test(sourceText)) {
+            const pattern = new RegExp(`\\b${hint.replace(/\s+/g, '\\s+')}\\b`, 'i');
+            if (pattern.test(title)) {
+                this.addKeywordCandidate(candidates, hint, 'title-expansion');
+            } else if (pattern.test(description)) {
                 this.addKeywordCandidate(candidates, hint, 'expansion');
             }
         });
         if (/\bset\s+base\b/i.test(sourceText)) {
-            this.addKeywordCandidate(candidates, 'Base Set', 'expansion');
+            this.addKeywordCandidate(candidates, 'Base Set', /\bset\s+base\b/i.test(title) ? 'title-expansion' : 'expansion');
         }
+        this.vintedExpansionAliases().forEach(({ pattern, label }) => {
+            if (pattern.test(sourceText)) {
+                this.addKeywordCandidate(candidates, label, pattern.test(title) ? 'title-expansion' : 'expansion');
+            }
+        });
         const hasFullArtHint = /\bfull\s*-?\s*art\b|\bfullart\b/i.test(sourceText);
         if (hasFullArtHint) {
             this.addKeywordCandidate(candidates, 'illustration', 'rarity');
@@ -350,7 +396,10 @@ class VintedProcessor {
             /\b(?:vmax|vstar|vastro|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
         ];
         cluePatterns.forEach((pattern) => {
-            for (const match of sourceText.matchAll(pattern)) {
+            for (const match of title.matchAll(pattern)) {
+                this.addKeywordCandidate(candidates, match[0].replace(/\s+/g, ' '), 'title-pattern');
+            }
+            for (const match of description.matchAll(pattern)) {
                 this.addKeywordCandidate(candidates, match[0].replace(/\s+/g, ' '), 'pattern');
             }
         });
@@ -405,6 +454,14 @@ class VintedProcessor {
 
     selectedBaseSetClues(clues = this.selectedKeywordLabels()) {
         return clues.filter((clue) => this.isBaseSetClue(clue));
+    }
+
+    selectedExpansionClues(clues = this.selectedKeywordLabels()) {
+        return clues.filter((clue) => this.isExpansionClue(clue));
+    }
+
+    selectedCollectorNumberClues(clues = this.selectedKeywordLabels()) {
+        return clues.filter((clue) => this.isCollectorNumberClue(clue));
     }
 
     currentVintedListingKey(url = window.location.href) {
@@ -484,7 +541,8 @@ class VintedProcessor {
     buildVintedSearchTitle(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
         const primaryClues = this.selectedPrimaryClues(clues);
         const variationClues = this.selectedVariationClues(clues);
-        const baseSetClues = this.selectedBaseSetClues(clues);
+        const expansionClues = this.selectedExpansionClues(clues);
+        const collectorNumberClues = this.selectedCollectorNumberClues(clues);
         const illustrationClues = this.selectedIllustrationClues(clues);
         const primaryCompacts = primaryClues.map((clue) => this.compactClueValue(clue));
         const searchPrimaryClues = primaryClues.filter((clue) => {
@@ -511,7 +569,7 @@ class VintedProcessor {
             );
         };
         const searchParts = primaryClues.length > 0
-            ? [...searchPrimaryClues, ...baseSetClues, ...illustrationClues, ...additionalVariationClues]
+            ? [...searchPrimaryClues, ...expansionClues, ...collectorNumberClues, ...illustrationClues, ...additionalVariationClues]
             : [this.removeVintedMarketplaceNoise(title), ...clues];
 
         return searchParts
