@@ -835,6 +835,45 @@ test('Vinted description keywords ignore generic card words and keep useful clue
     assert.ok(labels.includes('192/203'), 'collector number should be extracted');
 });
 
+test('Vinted collector codes stay atomic and suppress noisy partial chips', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor');
+    const processor = new Processor();
+
+    const keywords = processor.extractVintedKeywords(
+        'Landorus AR SV 11b 137',
+        'Appena sbustata, carta Pokemon in perfette condizioni. Altro codice 35/108.'
+    );
+    const labels = keywords.map((keyword) => keyword.label);
+    const lowerLabels = labels.map((label) => label.toLowerCase());
+
+    assert.ok(labels.includes('SV 11b 137'), 'full collector code should be one chip');
+    assert.ok(labels.includes('35/108'), 'slash collector number should stay one chip');
+    assert.equal(lowerLabels.includes('11b 137'), false);
+    assert.equal(lowerLabels.includes('137 appena'), false);
+    assert.equal(lowerLabels.includes('11b 137 appena'), false);
+});
+
+test('Vinted illustration chip is always visible and only auto-selected from title hint', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: (title) => ({
+                pokemonName: /landorus/i.test(String(title || '')) ? 'Landorus' : null,
+            }),
+        },
+    });
+    const processor = new Processor();
+
+    const withoutHint = processor.extractVintedKeywords('Landorus AR SV 11b 137', 'Appena sbustata');
+    const manualIllustration = withoutHint.find((keyword) => keyword.label === 'illustration');
+    assert.ok(manualIllustration, 'illustration chip should always render');
+    assert.equal(manualIllustration.selectedByDefault, false);
+
+    const withTitleHint = processor.extractVintedKeywords('Landorus AR Full Art', 'Appena sbustata');
+    const selectedIllustration = withTitleHint.find((keyword) => keyword.label === 'illustration');
+    assert.ok(selectedIllustration, 'illustration chip should render with title hint');
+    assert.equal(selectedIllustration.selectedByDefault, true);
+});
+
 test('Vinted scrapes provided product HTML selectors for title and description', () => {
     const details = createDomElement('section', {
         class: 'box--item-details',
@@ -1261,7 +1300,7 @@ test('Vinted Base Set clue is manual unless user selects it', async () => {
     assert.equal(messages[1].title, 'Mewtwo Base Set');
 });
 
-test('Vinted fullart title normalizes to manual illustration clue', async () => {
+test('Vinted fullart title defaults illustration clue on', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -1291,11 +1330,11 @@ test('Vinted fullart title normalizes to manual illustration clue', async () => 
 
     await processor.searchCardWithBackground(processor.currentTitle);
 
-    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'illustration' && keyword.selectedByDefault === false));
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'illustration' && keyword.selectedByDefault === true));
     assert.ok(!processor.currentKeywords.some((keyword) => /Fullart Scrivimi/i.test(keyword.value)));
     assert.deepEqual([...messages[0].primaryClues], ['Froslass']);
-    assert.deepEqual(Array.from(messages[0].clues), ['Froslass']);
-    assert.equal(messages[0].title, 'Froslass');
+    assert.deepEqual(Array.from(messages[0].clues), ['Froslass', 'illustration']);
+    assert.equal(messages[0].title, 'Froslass illustration');
 });
 
 test('Vinted selected keyword toggles shape background and side-panel messages', async () => {
@@ -2058,7 +2097,12 @@ test('Vinted Pokoin button icon stays compact inside overlay reset', () => {
     assert.equal(icon.style.maxWidth, '20px');
     assert.equal(icon.style.flex, '0 0 20px');
     assert.equal(icon.style.objectFit, 'cover');
+    processor.setPokoinButtonLabel(button);
+    assert.match(button.innerHTML, /class="pokoin-icon"/);
+    assert.doesNotMatch(button.innerHTML, /<img(?![^>]*data-pokoin-button-icon)/);
     assert.match(resetStyles, /\[data-pokoin-button-icon\]/);
+    assert.match(resetStyles, /\[data-pokoin-vinted-panel\]\s+img/);
+    assert.match(resetStyles, /\.pokoin-icon/);
     assert.match(resetStyles, /max-width:\s*20px\s*!important/);
     assert.doesNotMatch(resetStyles, /img\s*\{[^}]*max-width:\s*none/s);
 });
@@ -3659,6 +3703,182 @@ test('exact name variation search skips autocomplete after extension match', asy
     assert.equal(fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body.name, 'Tornadus ex');
 });
 
+test('Cardmarket exact rows survive name and fallback fetch failure', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async (url, options = {}) => {
+            fetchBodies.push({ url, body: options.body ? JSON.parse(options.body) : {} });
+            if (url.includes('/api/cardtrader-redirect')) {
+                throw new TypeError('Failed to fetch');
+            }
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: 'cinccino-cri-119',
+                            name: 'Cinccino ex',
+                            expansionName: 'Caos Nascente',
+                            collectorNumber: '119',
+                            score: 99,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                throw new TypeError('Failed to fetch');
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Cinccino ex (CRI 119)',
+                        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Caos-Nascente/Cinccino-ex-CRI119',
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: {
+                            rawTitle: 'Cinccino ex (CRI 119)',
+                            name: 'Cinccino ex',
+                            searchName: 'Cinccino ex',
+                            collectorNumber: 'CRI 119',
+                            collectorNumberPrefix: 'CRI',
+                            printedCollectorNumber: 'CRI 119',
+                            numericCollectorNumber: '119',
+                            expansion: 'Caos Nascente',
+                        },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 11,
+        title: 'Cinccino ex (CRI 119)',
+        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Caos-Nascente/Cinccino-ex-CRI119',
+    });
+
+    assert.equal(result.blueprintId, 'cinccino-cri-119');
+    assert.equal(result.rows.length, 1);
+    assert.equal(result.error, '');
+    assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
+    assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
+    assert.equal(storage.sidePanelState.blueprintId, 'cinccino-cri-119');
+});
+
+test('Cardmarket fallback fetch failure is terminal when no rows exist', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async (url) => {
+            if (url.includes('/api/extension-card-search')) {
+                return { ok: true, json: async () => ({ matches: [] }) };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                throw new TypeError('Failed to fetch');
+            }
+            if (url.includes('/api/cardtrader-redirect')) {
+                throw new TypeError('Failed to fetch');
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Unknownmon (CRI 999)',
+                        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Caos-Nascente/Unknownmon-CRI999',
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: {
+                            rawTitle: 'Unknownmon (CRI 999)',
+                            name: 'Unknownmon',
+                            searchName: 'Unknownmon',
+                            collectorNumber: 'CRI 999',
+                            numericCollectorNumber: '999',
+                            expansion: 'Caos Nascente',
+                        },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 11,
+        title: 'Unknownmon (CRI 999)',
+        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Caos-Nascente/Unknownmon-CRI999',
+    });
+
+    assert.equal(result.rows.length, 0);
+    assert.match(result.error, /Failed to fetch/);
+    assert.equal(storage.sidePanelState.loading, undefined);
+    assert.equal(storage.sidePanelState.rows.length, 0);
+    assert.match(storage.sidePanelState.error, /Failed to fetch/);
+});
+
 test('name-only low candidate extension rows still use autocomplete fallback', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -4590,6 +4810,92 @@ test('background side panel open pins eBay preview rows', async () => {
     assert.equal(finalState.blueprintId, '96');
     assert.equal(finalState.debug.pinnedPreviewRows, true);
     assert.equal(finalState.debug.previewSignature, 'ebay|https://www.ebay.com/itm/555-tornadus-ex');
+});
+
+test('background side panel open pins Cardmarket preview rows after button match', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const storageWrites = [];
+    const openedPanels = [];
+    const cardmarketUrl = 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Caos-Nascente/Cinccino-ex-CRI119';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new TypeError('Failed to fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 11, title: 'Cinccino ex (CRI 119)', url: cardmarketUrl }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('Cardmarket preview row path should not scrape before painting side panel');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async (payload) => openedPanels.push(payload),
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: cardmarketUrl,
+                title: 'Cinccino ex (CRI 119)',
+                originalTitle: 'Cinccino ex (CRI 119)',
+                clues: ['CRI 119', 'Caos Nascente'],
+                previewSignature: `cardmarket|${cardmarketUrl}`,
+                previewSource: 'cardmarket_button',
+                previewRows: [
+                    { blueprint_id: 'cinccino-cri-119', name_en: 'Cinccino ex', expansion_name_en: 'Caos Nascente', collector_number: '119', search_score: 99 },
+                ],
+            },
+            { tab: { id: 11, title: 'Cinccino ex (CRI 119)', url: cardmarketUrl } },
+            resolve
+        );
+    });
+
+    const finalState = storageWrites.at(-1).sidePanelState;
+    assert.equal(response.success, true);
+    assert.deepEqual(openedPanels.map((panel) => panel.tabId), [11]);
+    assert.equal(fetchCalls, 1);
+    assert.equal(finalState.blueprintId, 'cinccino-cri-119');
+    assert.deepEqual(finalState.rows.map((row) => row.card_id), ['cinccino-cri-119']);
+    assert.equal(finalState.debug.pinnedPreviewRows, true);
+    assert.equal(finalState.debug.previewSource, 'cardmarket_button');
+    assert.equal(finalState.error, '');
 });
 
 test('Cardmarket side panel refresh clears loading after search failure', async () => {
@@ -6926,6 +7232,57 @@ test('eBay side-panel open passes button preview rows', async () => {
     assert.deepEqual(openMessage.previewRows.map((row) => row.card_id), ['96', '90']);
     assert.deepEqual(openMessage.previewRows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
     assert.match(openMessage.previewSignature, /^ebay\|https:\/\/www\.ebay\.com\/itm\/555-tornadus-ex$/);
+});
+
+test('Cardmarket side-panel open passes button preview rows', async () => {
+    const messages = [];
+    const cardmarketUrl = 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Caos-Nascente/Cinccino-ex-CRI119';
+    const { Processor } = loadProcessor('processors/CME.js', 'CardmarketProcessor', {
+        window: {
+            location: { href: cardmarketUrl, hostname: 'www.cardmarket.com' },
+        },
+        document: {
+            title: 'Cinccino ex (CRI 119)',
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action === 'searchCardForTitle') {
+                        return {
+                            success: true,
+                            results: [
+                                { blueprint_id: 'cinccino-cri-119', name_en: 'Cinccino ex', expansion_name_en: 'Caos Nascente', collector_number: '119', search_score: 99 },
+                            ],
+                        };
+                    }
+                    return { success: true };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    const context = {
+        title: 'Cinccino ex (CRI 119)',
+        details: { number: 'CRI 119', expansion: 'Caos Nascente' },
+        key: cardmarketUrl,
+    };
+
+    const results = await processor.searchProductWithBackground(context);
+    processor.productPreviewRowsByKey.set(context.key, results);
+    await processor.openProductSidePanel(context);
+
+    const openMessage = messages.at(-1);
+    assert.equal(openMessage.action, 'openSidePanelForCurrentTab');
+    assert.equal(openMessage.title, 'Cinccino ex (CRI 119)');
+    assert.deepEqual(openMessage.previewRows.map((row) => row.card_id), ['cinccino-cri-119']);
+    assert.equal(openMessage.previewSource, 'cardmarket_button');
+    assert.match(openMessage.previewSignature, /^cardmarket\|https:\/\/www\.cardmarket\.com/);
 });
 
 test('eBay and Cardmarket gray buttons open the side panel before matches resolve', () => {

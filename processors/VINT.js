@@ -47,7 +47,7 @@ class VintedProcessor {
             ? `${this.currentMatchCount} ${this.currentMatchCount === 1 ? 'match' : 'matches'}`
             : 'Pokoin.com';
         button.innerHTML = `
-            <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
+            <img class="pokoin-icon" data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:20px;height:20px;min-width:20px;min-height:20px;max-width:20px;max-height:20px;flex:0 0 20px;border-radius:50%;object-fit:cover;display:block;">
             <span>${label}</span>
         `;
     }
@@ -244,9 +244,50 @@ class VintedProcessor {
 
     isCollectorNumberClue(value = '') {
         const label = this.normalizeClueValue(value);
-        return /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(label) ||
+        return /\b[A-Z0-9]{2,6}\s+[A-Z0-9]*\d[A-Z0-9]*\s+\d{1,4}[a-z]?\b/i.test(label) ||
+            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/i.test(label) ||
+            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(label) ||
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label) ||
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label);
+    }
+
+    vintedCollectorNumberPatterns() {
+        return [
+            /\b[A-Z0-9]{2,6}\s+[A-Z0-9]*\d[A-Z0-9]*\s+\d{1,4}[a-z]?\b/gi,
+            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/gi,
+            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
+            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
+            /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
+        ];
+    }
+
+    collectVintedCollectorClues(text = '') {
+        const matches = [];
+        this.vintedCollectorNumberPatterns().forEach((pattern) => {
+            for (const match of String(text || '').matchAll(pattern)) {
+                matches.push(match[0].replace(/\s+/g, ' ').trim());
+            }
+        });
+        const seen = new Set();
+        const uniqueMatches = matches.filter((label) => {
+            const compact = this.compactClueValue(label);
+            const prefix = String(label || '').trim().split(/\s+/)[0] || '';
+            if (!compact || seen.has(compact) || this.isVariationClue(prefix)) {
+                return false;
+            }
+            seen.add(compact);
+            return true;
+        });
+        return uniqueMatches
+            .sort((left, right) => this.compactClueValue(right).length - this.compactClueValue(left).length)
+            .filter((label, index, all) => {
+                const compact = this.compactClueValue(label);
+                return !all.some((other, otherIndex) =>
+                    otherIndex < index &&
+                    this.compactClueValue(other).includes(compact) &&
+                    !String(label || '').includes('/')
+                );
+            });
     }
 
     vintedExpansionAliases() {
@@ -286,6 +327,7 @@ class VintedProcessor {
                     (collectorNumber || expansion) &&
                     /^(?:title|title-pattern|title-expansion)$/.test(candidate.source || '') &&
                     this.sourceContainsClue(candidate.label || candidate.value, sourceText);
+                const selectedIllustrationContext = illustration && candidate.source === 'title-illustration';
                 return {
                     ...candidate,
                     nameLike,
@@ -296,7 +338,7 @@ class VintedProcessor {
                     illustration,
                     attachedNamePhrase,
                     attachedVariation: false,
-                    selectedByDefault: attachedNamePhrase || selectedNameLike || selectedHighConfidenceContext,
+                    selectedByDefault: attachedNamePhrase || selectedNameLike || selectedHighConfidenceContext || selectedIllustrationContext,
                     _index: index,
                 };
             });
@@ -320,14 +362,26 @@ class VintedProcessor {
                 };
             })
             .sort((left, right) => {
-                if (left.selectedByDefault !== right.selectedByDefault) {
-                    return left.selectedByDefault ? -1 : 1;
-                }
                 if (left.attachedNamePhrase !== right.attachedNamePhrase) {
                     return left.attachedNamePhrase ? -1 : 1;
                 }
                 if (left.attachedVariation !== right.attachedVariation) {
                     return left.attachedVariation ? -1 : 1;
+                }
+                if (left.nameLike !== right.nameLike) {
+                    return left.nameLike ? -1 : 1;
+                }
+                if (left.selectedByDefault !== right.selectedByDefault) {
+                    return left.selectedByDefault ? -1 : 1;
+                }
+                if (left.expansion !== right.expansion) {
+                    return left.expansion ? -1 : 1;
+                }
+                if (left.collectorNumber !== right.collectorNumber) {
+                    return left.collectorNumber ? -1 : 1;
+                }
+                if (left.illustration !== right.illustration) {
+                    return left.illustration ? 1 : -1;
                 }
                 return left._index - right._index;
             })
@@ -391,15 +445,16 @@ class VintedProcessor {
                 this.addKeywordCandidate(candidates, label, pattern.test(title) ? 'title-expansion' : 'expansion');
             }
         });
-        const hasFullArtHint = /\bfull\s*-?\s*art\b|\bfullart\b/i.test(sourceText);
-        if (hasFullArtHint) {
-            this.addKeywordCandidate(candidates, 'illustration', 'rarity');
-        }
+        const titleHasIllustrationHint = /\b(?:full\s*-?\s*art|fullart|illustration)\b/i.test(title);
+        this.addKeywordCandidate(candidates, 'illustration', titleHasIllustrationHint ? 'title-illustration' : 'manual-illustration');
+
+        const collectorClues = [
+            ...this.collectVintedCollectorClues(title).map((label) => ({ label, source: 'title-pattern' })),
+            ...this.collectVintedCollectorClues(description).map((label) => ({ label, source: 'pattern' })),
+        ];
+        collectorClues.forEach(({ label, source }) => this.addKeywordCandidate(candidates, label, source));
 
         const cluePatterns = [
-            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
-            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
-            /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
             /\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|holo|promo|rare)\b/gi,
             /\b(?:vmax|vstar|vastro|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
         ];
@@ -422,11 +477,26 @@ class VintedProcessor {
             .split(/\s+/)
             .map((word) => this.normalizeClueValue(word))
             .filter((word) => word && !this.vintedKeywordStopWords().has(word.toLowerCase()));
+        const collectorCompacts = collectorClues.map(({ label }) => this.compactClueValue(label)).filter(Boolean);
+        const collectorTokenCompacts = collectorClues
+            .flatMap(({ label }) => label.split(/\s+/).map((token) => this.compactClueValue(token)).filter(Boolean));
+        const phraseOverlapsCollector = (phrase) => {
+            const compactPhrase = this.compactClueValue(phrase);
+            return collectorCompacts.some((collectorCompact) =>
+                compactPhrase &&
+                compactPhrase !== collectorCompact &&
+                (collectorCompact.includes(compactPhrase) || compactPhrase.includes(collectorCompact))
+            ) ||
+                phrase.split(/\s+/)
+                    .map((token) => this.compactClueValue(token))
+                    .filter(Boolean)
+                    .some((token) => collectorTokenCompacts.includes(token) && !collectorCompacts.includes(compactPhrase));
+        };
 
         for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
             for (let index = 0; index <= words.length - size; index += 1) {
                 const phrase = words.slice(index, index + size).join(' ');
-                if (phrase.length >= 3 && !/^\d+$/.test(phrase)) {
+                if (phrase.length >= 3 && !/^\d+$/.test(phrase) && !phraseOverlapsCollector(phrase)) {
                     this.addKeywordCandidate(candidates, phrase, 'text');
                 }
             }
@@ -1003,9 +1073,21 @@ class VintedProcessor {
                 -webkit-appearance: none;
                 font: inherit;
             }
-            img {
-                max-width: 100%;
-                height: auto;
+            [data-pokoin-vinted-panel] img,
+            [data-pokoin-vinted-panel] svg,
+            [data-pokoin-vinted-header-row] img,
+            [data-pokoin-vinted-header-row] svg,
+            [data-pokemon-linker-button] img,
+            .pokoin-icon {
+                width: 20px !important;
+                height: 20px !important;
+                min-width: 20px !important;
+                min-height: 20px !important;
+                max-width: 20px !important;
+                max-height: 20px !important;
+                flex: 0 0 auto !important;
+                object-fit: contain !important;
+                display: block !important;
             }
             [data-pokoin-button-icon] {
                 width: 20px !important;
@@ -1914,7 +1996,7 @@ class VintedProcessor {
             this.currentButton.innerHTML = `
                 <span class="web_ui__Button__content">
                     <span class="web_ui__Button__label">
-                        <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:22px;height:22px;border-radius:50%;object-fit:cover;margin-right:8px;vertical-align:middle;">
+                        <img class="pokoin-icon" data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:20px;height:20px;min-width:20px;min-height:20px;max-width:20px;max-height:20px;flex:0 0 20px;border-radius:50%;object-fit:cover;display:block;margin-right:8px;vertical-align:middle;">
                         ${this.vintedOverlayCollapsed && this.currentMatchCount > 0 ? `${this.currentMatchCount} ${this.currentMatchCount === 1 ? 'match' : 'matches'}` : 'Pokoin.com'}
                     </span>
                 </span>

@@ -9,6 +9,7 @@ class CardmarketProcessor {
         this.processedPages = new Set();
         this.inFlightProductSearches = new Map();
         this.readyRetryTimers = new Map();
+        this.productPreviewRowsByKey = new Map();
     }
 
     pokoinIconUrl() {
@@ -92,12 +93,43 @@ class CardmarketProcessor {
         return response?.success && Array.isArray(response.results) ? response.results : [];
     }
 
+    buildSidePanelPreviewRowsPayload(context = {}) {
+        const rows = this.productPreviewRowsByKey.get(context.key || this.stableProductKey()) || [];
+        const previewRows = rows
+            .slice(0, 8)
+            .map((result) => {
+                const cardId = result.card_id || result.blueprint_id || result.cardId || result.blueprintId;
+                if (!cardId) {
+                    return null;
+                }
+                return {
+                    card_id: String(cardId),
+                    name: result.name || result.name_en || result.pokemon_name || '',
+                    set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
+                    card_number: result.card_number || result.collector_number || result.collectorNumber || '',
+                    expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                    source: result.source || 'cardmarket_button_preview',
+                    search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
+                    pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                };
+            })
+            .filter(Boolean);
+        return previewRows.length > 0
+            ? {
+                previewRows,
+                previewSignature: `cardmarket|${context.key || this.stableProductKey()}`,
+                previewSource: 'cardmarket_button',
+            }
+            : {};
+    }
+
     openProductSidePanel(context) {
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
             url: window.location.href,
             title: context.title,
             ...this.buildStructuredRequestContext(context),
+            ...this.buildSidePanelPreviewRowsPayload(context),
             cardmarketReady: true,
         }).catch((error) => {
             console.warn('⚠️ [CME] Unable to open side panel:', error);
@@ -370,6 +402,7 @@ class CardmarketProcessor {
             this.inFlightProductSearches.set(context.key, searchPromise);
             searchPromise.then(results => {
                 if (results && results.length > 0) {
+                    this.productPreviewRowsByKey.set(context.key, results);
                     this.applyPokoinButtonState(targetButton, 'matched', this.countHighConfidenceMatches(results));
                     console.log(`✅ [CME] Link found, button marked as matched`);
                     

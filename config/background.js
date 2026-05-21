@@ -11,6 +11,8 @@ const POKOIN_TOKEN_REFRESH_SKEW_MS = 60 * 1000;
 const POKOIN_FALLBACK_TOKEN_TTL_MS = 50 * 60 * 1000;
 const CARDMARKET_OBSERVATION_ENDPOINT = `${CARDVAULT_API_BASE_URL}/api/cardmarket-scrape-observation`;
 const MAX_PENDING_CARDMARKET_OBSERVATIONS = 20;
+const CARDVAULT_FETCH_TIMEOUT_MS = 6000;
+const CARDVAULT_FETCH_RETRY_DELAY_MS = 250;
 
 let stats = {
     cardsProcessed: 0,
@@ -69,6 +71,50 @@ function isSupportedMarketplaceUrl(url = '') {
     } catch (error) {
         return false;
     }
+}
+
+function isTransientFetchError(error = {}) {
+    const message = String(error?.message || error || '');
+    return error?.name === 'TypeError' ||
+        error?.name === 'AbortError' ||
+        /failed to fetch|network|timeout|aborted/i.test(message);
+}
+
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function cardvaultFetch(url, options = {}, retryOptions = {}) {
+    const attempts = Number.isFinite(retryOptions.attempts) ? retryOptions.attempts : 2;
+    const timeoutMs = Number.isFinite(retryOptions.timeoutMs) ? retryOptions.timeoutMs : CARDVAULT_FETCH_TIMEOUT_MS;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        const controller = typeof AbortController !== 'undefined' && !options.signal
+            ? new AbortController()
+            : null;
+        const timeoutId = controller
+            ? setTimeout(() => controller.abort(), timeoutMs)
+            : null;
+        try {
+            return await fetch(url, {
+                ...options,
+                ...(controller ? { signal: controller.signal } : {}),
+            });
+        } catch (error) {
+            lastError = error;
+            if (attempt >= attempts || !isTransientFetchError(error)) {
+                throw error;
+            }
+            await delay(CARDVAULT_FETCH_RETRY_DELAY_MS);
+        } finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
+    }
+
+    throw lastError || new Error('Cardvault request failed.');
 }
 
 function cardtraderBlueprintIdFromUrl(url = '') {
@@ -816,7 +862,7 @@ async function resolveNameFromCardvaultTitle(title = '', structuredCard = null) 
     const attemptedTerms = [];
 
     for (const term of candidateNameTermsFromTitle(title, structuredCard)) {
-        const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+        const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
@@ -968,7 +1014,7 @@ async function searchCardvault(title, preferredName = '') {
         : buildCardvaultQueries(title);
 
     for (const searchTerm of [...new Set(queries.filter(Boolean))]) {
-        const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+        const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
@@ -1024,7 +1070,7 @@ async function searchCardvaultForStructuredCard(title = '', structuredCard = {})
     const queries = [...new Set(buildStructuredFallbackQueries(structuredCard, title))];
 
     for (const searchTerm of queries) {
-        const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+        const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
@@ -1419,7 +1465,7 @@ async function searchExtensionCard(structuredCard) {
         limit: 8,
     };
 
-    const response = await fetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
+    const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
         method: 'POST',
         headers: {
             'content-type': 'application/json',
@@ -1434,21 +1480,25 @@ async function searchExtensionCard(structuredCard) {
     const data = await response.json();
     let matches = data.matches || [];
     if (structuredCard.editionHint && !structuredCard.expansion && structuredCard.name) {
-        const editionResponse = await fetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
-            method: 'POST',
-            headers: {
-                'content-type': 'application/json',
-            },
-            body: JSON.stringify({
-                ...payload,
-                expansion: 'Base Set',
-                editionHint: false,
-                limit: 5,
-            }),
-        });
-        if (editionResponse.ok) {
-            const editionData = await editionResponse.json();
-            matches = [...(editionData.matches || []), ...matches];
+        try {
+            const editionResponse = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
+                method: 'POST',
+                headers: {
+                    'content-type': 'application/json',
+                },
+                body: JSON.stringify({
+                    ...payload,
+                    expansion: 'Base Set',
+                    editionHint: false,
+                    limit: 5,
+                }),
+            });
+            if (editionResponse.ok) {
+                const editionData = await editionResponse.json();
+                matches = [...(editionData.matches || []), ...matches];
+            }
+        } catch (error) {
+            console.warn('⚠️ [Background] Ignored edition refinement failure:', error);
         }
     }
 
@@ -2474,11 +2524,21 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 }
 
                 if (shouldRunAutocompleteFallback(rows, pageInfo.structuredCard)) {
-                    const searchResult = exactIdentity
-                        ? await searchCardvaultForStructuredCard(pageInfo.title, pageInfo.structuredCard)
-                        : await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
-                    rows = mergeAndRankStructuredRows(rows, searchResult.rows, pageInfo.structuredCard);
-                    debug.attemptedQueries = searchResult.debug.attemptedQueries;
+                    try {
+                        const searchResult = exactIdentity
+                            ? await searchCardvaultForStructuredCard(pageInfo.title, pageInfo.structuredCard)
+                            : await searchCardvault(pageInfo.title, pageInfo.structuredCard?.name || '');
+                        rows = mergeAndRankStructuredRows(rows, searchResult.rows, pageInfo.structuredCard);
+                        debug.attemptedQueries = searchResult.debug.attemptedQueries;
+                    } catch (fallbackError) {
+                        debug.autocompleteFallback = {
+                            error: fallbackError.message || 'Autocomplete fallback failed.',
+                            preservedRowCount: rows.length,
+                        };
+                        if (rows.length === 0) {
+                            error = fallbackError.message || 'Cardvault search failed.';
+                        }
+                    }
                     markPhase('autocompleteFallbackMs');
                 }
             }
@@ -2704,10 +2764,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
 
                     if (shouldRunAutocompleteFallback(rows, structuredCard)) {
-                        const fallbackSearch = exactIdentity
-                            ? await searchCardvaultForStructuredCard(title, structuredCard)
-                            : await searchCardvault(title, structuredCard?.name || '');
-                        rows = mergeAndRankStructuredRows(rows, fallbackSearch.rows, structuredCard);
+                        try {
+                            const fallbackSearch = exactIdentity
+                                ? await searchCardvaultForStructuredCard(title, structuredCard)
+                                : await searchCardvault(title, structuredCard?.name || '');
+                            rows = mergeAndRankStructuredRows(rows, fallbackSearch.rows, structuredCard);
+                        } catch (fallbackError) {
+                            if (rows.length === 0) {
+                                throw fallbackError;
+                            }
+                            console.warn('⚠️ [Background] Preserved exact rows after fallback failure:', fallbackError);
+                        }
                     }
 
                     const legacyRows = rows.map(legacyResultFromRow);
