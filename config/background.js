@@ -422,6 +422,7 @@ function normalizeExpansionAlias(value = '') {
     const aliases = [
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
         { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
+        { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
     ];
     return aliases.find(({ pattern }) => pattern.test(cleanValue))?.name || cleanValue;
 }
@@ -1302,6 +1303,18 @@ function hasExactSearchFastPath(structuredCard = {}) {
     return hasExactStructuredIdentity(structuredCard) || hasExactNameVariation(structuredCard);
 }
 
+function collectorNumberForExtensionPayload(structuredCard = {}) {
+    const collectorNumber = structuredCard.collectorNumber || structuredCard.printedCollectorNumber || '';
+    if (
+        /^POR$/i.test(structuredCard.collectorNumberPrefix || '') &&
+        structuredCard.numericCollectorNumber &&
+        compactSetValue(structuredCard.expansion || '') === 'perfectorder'
+    ) {
+        return structuredCard.numericCollectorNumber;
+    }
+    return collectorNumber;
+}
+
 function rowMatchesStructuredIdentity(row = {}, structuredCard = {}) {
     if (!hasExactStructuredIdentity(structuredCard)) {
         return false;
@@ -1337,7 +1350,7 @@ async function searchExtensionCard(structuredCard) {
 
     const payload = {
         name: structuredCard.searchName || structuredCard.name,
-        collectorNumber: structuredCard.collectorNumber,
+        collectorNumber: collectorNumberForExtensionPayload(structuredCard),
         numericCollectorNumber: structuredCard.numericCollectorNumber,
         printedCollectorNumber: structuredCard.printedCollectorNumber,
         expansion: structuredCard.expansion,

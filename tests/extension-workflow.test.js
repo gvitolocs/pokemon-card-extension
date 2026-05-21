@@ -2796,6 +2796,92 @@ test('Cardmarket Piplup prefixed number uses structured payload and exact rankin
     assert.equal(extensionPayload.expansion, 'MEP Black Star Promos');
 });
 
+test('Cardmarket Meowth POR 062 uses Perfect Order numeric exact payload and skips fallback', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.name, 'Meowth ex');
+                assert.equal(body.collectorNumber, '062');
+                assert.equal(body.printedCollectorNumber, 'POR 062');
+                assert.equal(body.expansion, 'Perfect Order');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: '378907',
+                            name: 'Meowth ex',
+                            expansionName: 'Perfect Order',
+                            collectorNumber: 'Ultra Rare | 062/088',
+                            score: 14830.5,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                throw new Error('autocomplete should not run after exact Meowth match');
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Meowth ex (POR 062)',
+                url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Equilibrio-Perfetto/Meowth-ex-POR062',
+            },
+            { tab: { id: 8, title: 'Meowth ex (POR 062)', url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Equilibrio-Perfetto/Meowth-ex-POR062' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results.length, 1);
+    assert.equal(response.results[0].blueprint_id, '378907');
+    assert.equal(response.results[0].collector_number, 'Ultra Rare | 062/088');
+    assert.equal(response.results[0].expansion_name_en, 'Perfect Order');
+    assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
+    assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
+});
+
 test('exact name variation search skips autocomplete after extension match', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;

@@ -9,6 +9,7 @@ const elements = {
     candidatesSection: document.getElementById('candidatesSection'),
     candidateList: document.getElementById('candidateList'),
     runtimeInfo: document.getElementById('runtimeInfo'),
+    debugInfo: document.getElementById('debugInfo'),
 };
 
 function setStatus(message, isError = false) {
@@ -261,6 +262,21 @@ function renderCandidate(row, isBest = false) {
     return link;
 }
 
+function formatPhaseTimings(phaseTimings = {}) {
+    const labels = [
+        ['pageInfoMs', 'page'],
+        ['extensionSearchMs', 'exact'],
+        ['nameResolutionMs', 'name'],
+        ['extensionSearchAfterResolutionMs', 'post-name'],
+        ['autocompleteFallbackMs', 'fallback'],
+        ['totalMs', 'total'],
+    ];
+    return labels
+        .filter(([key]) => Number.isFinite(Number(phaseTimings[key])))
+        .map(([key, label]) => `${label} ${Math.round(Number(phaseTimings[key]))}ms`)
+        .join(' · ');
+}
+
 function renderState(state) {
     const pageInfo = state?.pageInfo || {};
     const best = state?.best || null;
@@ -276,6 +292,10 @@ function renderState(state) {
     elements.candidateList.replaceChildren();
     elements.runtimeInfo.textContent = [extensionVersion && `v${extensionVersion}`, buildMarker].filter(Boolean).join(' · ');
     elements.runtimeInfo.hidden = !elements.runtimeInfo.textContent;
+    if (elements.debugInfo) {
+        elements.debugInfo.textContent = formatPhaseTimings(state?.debug?.phaseTimings);
+        elements.debugInfo.hidden = !elements.debugInfo.textContent;
+    }
 
     if (state?.error) {
         elements.cardName.textContent = 'No card loaded';
