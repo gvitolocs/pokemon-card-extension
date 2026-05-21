@@ -1631,7 +1631,10 @@ function filterStrongExactRows(rows = [], structuredCard = {}) {
                 (!requestedParts.primary.startsWith('0') && rowParts.numericPrimary === requestedParts.numericPrimary);
         });
         const hasNameMismatch = rows.some((row) => !rowMatchesExactStructuredName(row, structuredCard));
-        if ((requestedParts.prefix && !hasPrefixedRow && !hasNameMismatch) || !exactRowsHaveAllRequestedPrimary) {
+        const hasExpansionMismatch = rows.some((row) =>
+            structuredCard.expansion && !expansionMatches(rowExpansionName(row), structuredCard.expansion || '')
+        );
+        if ((!hasNameMismatch && !hasExpansionMismatch && !hasPrefixedRow) || !exactRowsHaveAllRequestedPrimary) {
             return rows;
         }
         return exactRows.length > 0 ? exactRows : rows;
