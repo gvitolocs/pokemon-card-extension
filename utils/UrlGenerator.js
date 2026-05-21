@@ -1,6 +1,8 @@
 /**
- * UrlGenerator.js - CardTrader link generation
- * Handles URL generation for CardTrader and related services.
+ * UrlGenerator.js - Pokoin marketplace URL helpers.
+ *
+ * Some method names still mention CardTrader because older processors call them.
+ * The generated card destinations are Pokoin URLs.
  */
 
 class UrlGenerator {
@@ -9,16 +11,16 @@ class UrlGenerator {
     }
     
     /**
-     * Generate CardTrader URL for a blueprint ID
+     * Generate Pokoin marketplace URL for a CardTrader/Pokoin blueprint ID.
      */
     generateCardTraderLink(blueprintId) {
         if (!blueprintId) {
-            console.warn('⚠️ [CardTrader] Missing blueprint ID, cannot generate link');
+            console.warn('⚠️ [Pokoin] Missing blueprint ID, cannot generate link');
             return null;
         }
         
-        const url = `https://www.cardtrader.com/blueprints/${blueprintId}`;
-        console.log(`🔗 [CardTrader] Generated link: ${url}`);
+        const url = `https://pokoin.com/marketplace/en/cards/${encodeURIComponent(blueprintId)}`;
+        console.log(`🔗 [Pokoin] Generated marketplace link: ${url}`);
         return url;
     }
     
@@ -48,23 +50,23 @@ class UrlGenerator {
     }
     
     /**
-     * Generate generic CardTrader search URL
+     * Generate generic Pokoin marketplace search URL.
      */
     generateSearchLink(searchTerm) {
         if (!searchTerm) {
-            console.warn('⚠️ [CardTrader] Missing search term');
+            console.warn('⚠️ [Pokoin] Missing search term');
             return null;
         }
         
         const encodedTerm = encodeURIComponent(searchTerm);
-        const url = `https://www.cardtrader.com/cards?search=${encodedTerm}`;
+        const url = `https://pokoin.com/marketplace/en?search=${encodedTerm}`;
         
-        console.log(`🔗 [CardTrader] Generated search link: ${url}`);
+        console.log(`🔗 [Pokoin] Generated marketplace search link: ${url}`);
         return url;
     }
     
     /**
-     * Generate URL for a specific card search on CardTrader
+     * Generate URL for a specific card search on Pokoin.
      */
     generateSpecificCardLink(pokemonName, expansionName, collectorNumber) {
         if (!pokemonName) {
@@ -118,11 +120,11 @@ class UrlGenerator {
     }
     
     /**
-     * Generate fallback CardTrader URL
+     * Generate fallback Pokoin URL.
      */
     generateFallbackLink(titleInfo) {
         if (!titleInfo || !titleInfo.pokemonName) {
-            return 'https://www.cardtrader.com/cards';
+            return 'https://pokoin.com/marketplace/en';
         }
         
         const searchTerm = `${titleInfo.pokemonName} ${titleInfo.expansionName || ''} ${titleInfo.collectorNumber || ''}`.trim();

@@ -41,7 +41,7 @@ cd pokemon-card-extension
 
 ### Automatic Mode
 
-1. Open eBay, Vinted, or Cardmarket
+1. Open eBay, Vinted, Cardmarket, or CardTrader
 2. Browse card listings
 3. Wait for Pokoin buttons to appear
 
@@ -61,6 +61,7 @@ Button states:
 - eBay (regional and international domains)
 - Vinted (regional and international domains)
 - Cardmarket
+- CardTrader card pages
 
 ## Configuration
 
@@ -81,8 +82,15 @@ Testing helpers:
 
 - `tests/generate-icons.html`
 - `tests/cardvault-api-smoke.test.js`
+- `tests/extension-workflow.test.js`
 
-Run the Cardvault API smoke suite with:
+Run the focused workflow suite with:
+
+```bash
+node --test tests/extension-workflow.test.js
+```
+
+Run the live Cardvault API smoke suite with:
 
 ```bash
 node --test tests/cardvault-api-smoke.test.js

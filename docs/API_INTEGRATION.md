@@ -1,61 +1,64 @@
-# CardTrader API Integration
+# Pokoin/Cardvault API Integration
 
 ## Overview
 
-The extension supports token-based CardTrader API behavior for more specific link generation and richer lookup flows.
+The active extension resolves cards through Pokoin/Cardvault endpoints hosted at `https://pokoin.com`. Older CardTrader token and direct browser database ideas are historical only; the current runtime does not call CardTrader APIs with a user token and does not connect directly to Supabase or any browser-side database client.
 
 ## Main Integration Points
 
 ### `config/api-config.js`
 
-- API base URL settings
-- Request timeout settings
-- Basic request behavior and guardrails
+- Lightweight compatibility config loaded before runtime scripts
+- Defines the Pokoin base URL used by legacy helpers
+- Does not configure Supabase or CardTrader token access
 
-### `ui-pages/settings.html` + `ui-pages/settings.js`
+### `config/background.js`
 
-- User-facing token input
-- Option to enable advanced API mode
-- Persisted settings via `chrome.storage.sync`
+- Owns the reliable marketplace search path
+- Calls `/api/extension-card-search` for structured matching
+- Falls back to `/api/marketplace-autocomplete` when needed
+- Builds the canonical side-panel state
 
 ### `content.js` and processors
 
 - Title extraction and normalization
-- Query decision flow
-- Fallback to generic links when no reliable match is found
+- Compatibility adapters such as `searchCardInDatabase`
+- Marketplace-specific button wiring and side-panel messages
+- Legacy-shaped result objects (`blueprint_id`, `name_en`, `expansion_name_en`) for older processor call sites
 
 ## Link Generation Strategy
 
-1. Try direct match from extracted title data
-2. Build targeted search URL when direct match is uncertain
-3. Fallback to generic CardTrader search flow if needed
+1. CardTrader card pages with `/cards/:id` use that URL blueprint id directly as the Pokoin card id.
+2. Other marketplace pages send title and structured clues to the background service worker.
+3. Structured search runs first through `/api/extension-card-search`.
+4. Autocomplete is used as the fallback candidate source.
+5. Successful matches open `https://pokoin.com/marketplace/en/cards/:id` in the side panel.
 
-## Token Configuration
+## Compatibility Names
 
-1. Open extension settings
-2. Paste CardTrader token
-3. Enable advanced API mode
-4. Save settings
+Some function names still carry old integration language:
 
-Token handling notes:
+- `searchCardInDatabase` now calls Pokoin/Cardvault APIs and returns legacy-shaped rows for processor compatibility.
+- `generateCardTraderLink` should be treated as a compatibility name for generating Pokoin marketplace card URLs.
+- `blueprint_id` remains in processor-facing result objects because several call sites still expect it.
 
-- Token is stored in browser extension storage
-- Avoid storing tokens in source files
-- Never commit personal API credentials
+These names are harmless compatibility surfaces as long as they continue to route to Pokoin/Cardvault behavior.
 
 ## Failure Modes
 
-- Rate limiting from upstream API
+- Pokoin/Cardvault API rate limiting
 - Timeouts/network interruptions
 - Incomplete title metadata for precise matching
 
 Expected behavior in failures:
 
-- Extension degrades to safe search/fallback links
-- Core listing scanning should remain functional
+- The side panel reports the failed refresh state.
+- Marketplace scanning and button insertion should remain functional.
+- Processors can continue through background fallback even when content-script search is unavailable.
 
 ## Maintenance Notes
 
 - Keep docs aligned with existing files only.
-- Remove references to non-existent wrappers/classes.
-- Validate token flow whenever settings UI changes.
+- Do not add Supabase/browser database clients to content scripts.
+- Do not reintroduce CardTrader token/API configuration unless the runtime is deliberately rebuilt for it.
+- Prefer Pokoin/Cardvault naming in new code; keep legacy names only where they preserve existing call-site compatibility.

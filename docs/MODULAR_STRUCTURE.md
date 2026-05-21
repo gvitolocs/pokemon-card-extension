@@ -48,7 +48,7 @@ pokemon-card-extension/
 
 ### `ui/ButtonManager.js`
 
-- Creates and clones CardTrader buttons
+- Creates and clones Pokoin marketplace buttons
 - Inserts buttons into supported marketplace layouts
 - Handles visual state updates (loading/success/disabled)
 
@@ -60,7 +60,7 @@ pokemon-card-extension/
 
 ### `utils/UrlGenerator.js`
 
-- Builds CardTrader and search URLs
+- Builds Pokoin marketplace card and search URLs
 - Centralizes URL sanitation/open logic
 
 ### `processors/*.js`
@@ -77,7 +77,7 @@ pokemon-card-extension/
 2. `content.js` initializes global runtime behavior
 3. Site processor detects listings and extracts title info
 4. Pokoin/Cardvault API lookup resolves best match
-5. Button state is updated with the generated destination URL
+5. Button state is updated and opens the side panel with the generated Pokoin destination URL
 
 ## Side Panel Matching Workflow
 
@@ -99,3 +99,4 @@ pokemon-card-extension/
 ## Notes
 
 - Keep processor logic site-focused and avoid cross-site DOM assumptions.
+- Names such as `generateCardTraderLink`, `searchCardInDatabase`, and `blueprint_id` are compatibility surfaces for older processor code. New behavior should route through Pokoin/Cardvault APIs and side-panel URLs.

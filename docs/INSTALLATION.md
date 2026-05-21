@@ -22,15 +22,15 @@ Glaceon ex Special Illustration Rare #150 Terastal Festival
 
 ### Automatic Check
 
-1. Open eBay/Vinted/Cardmarket.
+1. Open eBay, Vinted, Cardmarket, or CardTrader.
 2. Browse Pokemon card listings.
-3. Verify CardTrader buttons appear under listing titles.
+3. Verify Pokoin buttons appear on supported listing or card pages.
 
 ### Manual Check
 
 1. Open the popup.
 2. Paste a listing title.
-3. Generate a CardTrader link.
+3. Generate or save a Pokoin marketplace link.
 4. Confirm link output and click behavior.
 
 ## Troubleshooting
@@ -55,6 +55,6 @@ Glaceon ex Special Illustration Rare #150 Terastal Festival
 
 ## Security Notes
 
-- Store API tokens only in extension settings.
-- Do not commit private tokens or service-role credentials.
+- The active extension does not require CardTrader or Supabase tokens.
+- Do not commit private tokens, `.env` files, or service-role credentials.
 - Keep host permissions limited to required domains.
