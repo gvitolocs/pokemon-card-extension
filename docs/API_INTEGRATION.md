@@ -18,6 +18,7 @@ The active extension resolves cards through Pokoin/Cardvault endpoints hosted at
 - Calls `/api/extension-card-search` for structured matching
 - Falls back to `/api/marketplace-autocomplete` when needed
 - Builds the canonical side-panel state
+- Sends authenticated Cardmarket scrape observations to `/api/cardmarket-scrape-observation`
 
 ### `content.js` and processors
 
@@ -33,6 +34,18 @@ The active extension resolves cards through Pokoin/Cardvault endpoints hosted at
 3. Structured search runs first through `/api/extension-card-search`.
 4. Autocomplete is used as the fallback candidate source.
 5. Successful matches open `https://pokoin.com/marketplace/en/cards/:id` in the side panel.
+
+## Pokoin Auth Bridge
+
+The extension cannot read the Pokoin web Firebase session from Cardmarket pages. When a Cardmarket observation needs auth, the background worker opens or reuses `https://pokoin.com/extension/auth-bridge` without focusing it. The Pokoin page should call `FirebaseAuth.currentUser.getIdToken()` after receiving `POKOIN_EXTENSION_AUTH_TOKEN_REQUEST` and reply to itself with a `POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE` message containing `token` and optional `expiresAt`.
+
+`pokoin-auth-bridge.js` runs only on that Pokoin path, accepts `postMessage` events only from `https://pokoin.com`, and forwards valid token messages to the background worker. The background worker stores tokens only in `chrome.storage.session` under `pokoinAuthSession` with expiry metadata. Auth tokens are never written to `chrome.storage.local` and are not sent to marketplace content scripts.
+
+## Cardmarket Observations
+
+Cardmarket observations are posted to `https://pokoin.com/api/cardmarket-scrape-observation` with `Authorization: Bearer <Firebase ID token>`. Payloads include `structuredCard`, `cardmarketContext`, `match`, and `promoteVerifiedLink`.
+
+Automatic Cardmarket navigation/search observations use `promoteVerifiedLink: false`. Explicit Cardmarket side-panel opens with a selected or best match use `promoteVerifiedLink: true`, which lets Pokoin persist the full Cardmarket URL into `marketplace_cm_verified_links`. Missing-token observations are queued in `chrome.storage.session` and flushed after the bridge supplies a token.
 
 ## Compatibility Names
 

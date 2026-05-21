@@ -1,5 +1,13 @@
 // Background script for Pokemon Card Trader Linker
 const CARDVAULT_API_BASE_URL = 'https://pokoin.com';
+const POKOIN_AUTH_ORIGIN = 'https://pokoin.com';
+const POKOIN_AUTH_BRIDGE_URL = `${POKOIN_AUTH_ORIGIN}/extension/auth-bridge`;
+const POKOIN_AUTH_STORAGE_KEY = 'pokoinAuthSession';
+const POKOIN_AUTH_TOKEN_RESPONSE_TYPE = 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE';
+const POKOIN_TOKEN_REFRESH_SKEW_MS = 60 * 1000;
+const POKOIN_FALLBACK_TOKEN_TTL_MS = 50 * 60 * 1000;
+const CARDMARKET_OBSERVATION_ENDPOINT = `${CARDVAULT_API_BASE_URL}/api/cardmarket-scrape-observation`;
+const MAX_PENDING_CARDMARKET_OBSERVATIONS = 20;
 
 let stats = {
     cardsProcessed: 0,
@@ -1115,6 +1123,274 @@ const sidePanelRefreshTimers = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
 const pokoinPriceCache = new Map();
+const cardmarketObservationSignatures = new Set();
+const cardmarketObservationInFlight = new Map();
+let pokoinAuthBridgeInFlight = null;
+
+function normalizePokoinTokenExpiry(value, receivedAt = Date.now()) {
+    if (!value) {
+        return receivedAt + POKOIN_FALLBACK_TOKEN_TTL_MS;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value < 100000000000 ? value * 1000 : value;
+    }
+    const parsed = Date.parse(String(value));
+    return Number.isFinite(parsed) ? parsed : receivedAt + POKOIN_FALLBACK_TOKEN_TTL_MS;
+}
+
+function validatePokoinAuthTokenMessage(message = {}) {
+    if (!message || typeof message !== 'object') {
+        return { valid: false, error: 'Invalid auth message.' };
+    }
+    if (message.type !== POKOIN_AUTH_TOKEN_RESPONSE_TYPE) {
+        return { valid: false, error: 'Unexpected auth message type.' };
+    }
+    const token = typeof message.token === 'string' ? message.token.trim() : '';
+    if (token.length <= 20) {
+        return { valid: false, error: 'Missing Pokoin ID token.' };
+    }
+    const receivedAt = Date.now();
+    const expiresAt = normalizePokoinTokenExpiry(message.expiresAt || message.expirationTime, receivedAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= receivedAt) {
+        return { valid: false, error: 'Expired Pokoin ID token.' };
+    }
+    return {
+        valid: true,
+        session: {
+            token,
+            receivedAt,
+            expiresAt,
+            issuedAt: message.issuedAt || null,
+        },
+    };
+}
+
+async function storePokoinAuthToken(tokenMessage = {}) {
+    const validation = validatePokoinAuthTokenMessage(tokenMessage);
+    if (!validation.valid) {
+        return validation;
+    }
+    await chrome.storage.session.set({
+        [POKOIN_AUTH_STORAGE_KEY]: validation.session,
+    });
+    return validation;
+}
+
+async function getStoredPokoinAuthToken() {
+    const storage = await chrome.storage.session.get(POKOIN_AUTH_STORAGE_KEY);
+    const session = storage?.[POKOIN_AUTH_STORAGE_KEY];
+    if (!session?.token || !session.expiresAt || Number(session.expiresAt) <= Date.now() + POKOIN_TOKEN_REFRESH_SKEW_MS) {
+        return '';
+    }
+    return session.token;
+}
+
+async function openPokoinAuthBridge() {
+    if (pokoinAuthBridgeInFlight) {
+        return pokoinAuthBridgeInFlight;
+    }
+
+    pokoinAuthBridgeInFlight = Promise.resolve()
+        .then(async () => {
+            const existingTabs = chrome.tabs?.query
+                ? await chrome.tabs.query({ url: `${POKOIN_AUTH_BRIDGE_URL}*` }).catch(() => [])
+                : [];
+            const existingTab = existingTabs.find((tab) => tab?.id);
+            if (existingTab?.id && chrome.tabs?.update) {
+                await chrome.tabs.update(existingTab.id, { active: false }).catch(() => {});
+                return existingTab;
+            }
+            if (chrome.tabs?.create) {
+                return chrome.tabs.create({ url: POKOIN_AUTH_BRIDGE_URL, active: false });
+            }
+            return null;
+        })
+        .finally(() => {
+            pokoinAuthBridgeInFlight = null;
+        });
+
+    return pokoinAuthBridgeInFlight;
+}
+
+async function requestPokoinAuthToken() {
+    const storedToken = await getStoredPokoinAuthToken();
+    if (storedToken) {
+        return { token: storedToken, openedBridge: false };
+    }
+    await openPokoinAuthBridge();
+    return { token: '', openedBridge: true };
+}
+
+function normalizeObservationUrl(url = '') {
+    try {
+        const parsed = new URL(url);
+        parsed.hash = '';
+        return parsed.href;
+    } catch (error) {
+        return String(url || '').split('#')[0];
+    }
+}
+
+function buildCardmarketObservationSignature(payload = {}) {
+    const structuredCard = payload.structuredCard || {};
+    const match = payload.match || {};
+    return [
+        normalizeObservationUrl(payload.cardmarketContext?.url || ''),
+        compactSearchValue(structuredCard.name || ''),
+        compactSearchValue(structuredCard.collectorNumber || structuredCard.printedCollectorNumber || structuredCard.numericCollectorNumber || ''),
+        compactSetValue(structuredCard.expansion || ''),
+        String(match.cardId || match.card_id || match.blueprintId || match.blueprint_id || ''),
+        payload.promoteVerifiedLink ? 'promote' : 'observe',
+    ].join('|');
+}
+
+function cardmarketContextFromPageInfo(pageInfo = {}) {
+    const context = pageInfo.debug?.cardmarketContext || {};
+    return {
+        url: normalizeObservationUrl(pageInfo.url || ''),
+        title: pageInfo.title || '',
+        hostname: pageInfo.hostname || '',
+        expansion: context.expansion || pageInfo.structuredCard?.expansion || '',
+        subtitle: context.subtitle || '',
+        breadcrumbParts: Array.isArray(context.breadcrumbParts) ? context.breadcrumbParts : [],
+    };
+}
+
+function matchFromRow(row = null) {
+    if (!row) {
+        return null;
+    }
+    return {
+        cardId: row.card_id || row.blueprint_id || '',
+        name: row.name || row.name_en || row.pokemon_name || '',
+        expansionName: row.set_name || row.expansion_name_en || row.expansionName || '',
+        collectorNumber: row.card_number || row.collector_number || row.collectorNumber || '',
+        rarity: row.rarity || '',
+        source: row.source || '',
+        score: row.search_rank || row.search_score || row.score || null,
+        pokoinPrice: row.pokoin_price || row.pokoinPrice || row.price_formatted || row.priceFormatted || '',
+    };
+}
+
+function buildCardmarketObservationPayload({ pageInfo = {}, best = null, rows = [], promoteVerifiedLink = false } = {}) {
+    if (!isCardmarketUrl(pageInfo.url || '')) {
+        return null;
+    }
+    if (!best && (!Array.isArray(rows) || rows.length === 0)) {
+        return null;
+    }
+    const structuredCard = pageInfo.structuredCard || {};
+    if (!structuredCard.name && !structuredCard.collectorNumber && !structuredCard.printedCollectorNumber) {
+        return null;
+    }
+    const match = matchFromRow(best || rows[0] || null);
+    return {
+        structuredCard,
+        cardmarketContext: cardmarketContextFromPageInfo(pageInfo),
+        match,
+        promoteVerifiedLink: Boolean(promoteVerifiedLink && match?.cardId),
+    };
+}
+
+async function persistPendingCardmarketObservation(payload) {
+    const storage = await chrome.storage.session.get('pendingCardmarketObservations');
+    const pending = Array.isArray(storage.pendingCardmarketObservations)
+        ? storage.pendingCardmarketObservations
+        : [];
+    const signature = buildCardmarketObservationSignature(payload);
+    const nextPending = [
+        ...pending.filter((entry) => entry?.signature !== signature),
+        {
+            signature,
+            payload,
+            queuedAt: Date.now(),
+        },
+    ].slice(-MAX_PENDING_CARDMARKET_OBSERVATIONS);
+    await chrome.storage.session.set({ pendingCardmarketObservations: nextPending });
+}
+
+async function sendCardmarketObservation(payload = {}) {
+    const signature = buildCardmarketObservationSignature(payload);
+    if (!signature || cardmarketObservationInFlight.has(signature) || cardmarketObservationSignatures.has(signature)) {
+        return { success: true, deduped: true };
+    }
+
+    const token = await getStoredPokoinAuthToken();
+    if (!token) {
+        await persistPendingCardmarketObservation(payload);
+        await requestPokoinAuthToken();
+        return { success: false, queued: true, reason: 'missing_token' };
+    }
+
+    const requestPromise = fetch(CARDMARKET_OBSERVATION_ENDPOINT, {
+        method: 'POST',
+        headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+    })
+        .then(async (response) => {
+            if (response.status === 401 || response.status === 403) {
+                await chrome.storage.session.set({ [POKOIN_AUTH_STORAGE_KEY]: null });
+                await persistPendingCardmarketObservation(payload);
+                await requestPokoinAuthToken();
+                return { success: false, queued: true, status: response.status };
+            }
+            if (!response.ok) {
+                await persistPendingCardmarketObservation(payload);
+                return { success: false, queued: true, status: response.status };
+            }
+            cardmarketObservationSignatures.add(signature);
+            return { success: true };
+        })
+        .catch(async (error) => {
+            await persistPendingCardmarketObservation(payload);
+            return { success: false, queued: true, error: error.message || 'Observation request failed.' };
+        })
+        .finally(() => {
+            cardmarketObservationInFlight.delete(signature);
+        });
+
+    cardmarketObservationInFlight.set(signature, requestPromise);
+    return requestPromise;
+}
+
+async function flushPendingCardmarketObservations() {
+    const token = await getStoredPokoinAuthToken();
+    if (!token) {
+        return { success: false, flushed: 0 };
+    }
+    const storage = await chrome.storage.session.get('pendingCardmarketObservations');
+    const pending = Array.isArray(storage.pendingCardmarketObservations)
+        ? storage.pendingCardmarketObservations
+        : [];
+    if (pending.length === 0) {
+        return { success: true, flushed: 0 };
+    }
+    await chrome.storage.session.set({ pendingCardmarketObservations: [] });
+    let flushed = 0;
+    for (const entry of pending) {
+        const result = await sendCardmarketObservation(entry.payload);
+        if (result.success) {
+            flushed += 1;
+        }
+    }
+    return { success: true, flushed };
+}
+
+async function observeCardmarketScrape(result = {}, options = {}) {
+    const payload = buildCardmarketObservationPayload({
+        pageInfo: result.pageInfo,
+        best: result.best,
+        rows: result.rows,
+        promoteVerifiedLink: options.promoteVerifiedLink,
+    });
+    if (!payload) {
+        return { success: true, skipped: true };
+    }
+    return sendCardmarketObservation(payload);
+}
 
 function extractPokoinListingPrice(payload = {}) {
     const products = Array.isArray(payload.products) ? payload.products : [];
@@ -1419,6 +1695,10 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         },
     });
 
+    await observeCardmarketScrape({ pageInfo, rows, best, blueprintId, pokoinUrl, error, debug }, {
+        promoteVerifiedLink: Boolean(requestContext.promoteVerifiedLink),
+    });
+
     return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug };
 }
 
@@ -1438,6 +1718,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     } else if (request.action === 'toggleExtension') {
         // Implement extension enable/disable logic
         sendResponse({ success: true });
+    } else if (request.action === 'pokoinAuthTokenReceived') {
+        storePokoinAuthToken(request.tokenMessage)
+            .then(async (result) => {
+                if (result.valid) {
+                    await flushPendingCardmarketObservations();
+                    sendResponse({ success: true });
+                    return;
+                }
+                sendResponse({ success: false, error: result.error || 'Invalid Pokoin auth token.' });
+            })
+            .catch((error) => {
+                sendResponse({ success: false, error: error.message || 'Unable to store Pokoin auth token.' });
+            });
+    } else if (request.action === 'requestPokoinAuthToken') {
+        requestPokoinAuthToken()
+            .then((result) => sendResponse({ success: true, ...result }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to request Pokoin auth token.' }));
     } else if (request.action === 'resolveActiveTabForSidePanel') {
         getActiveTab()
             .then((tab) => {
@@ -1501,6 +1798,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const searchResult = await searchExtensionCard(structuredCard);
                     if (searchResult.rows.length > 0) {
                         await enrichRowsWithPokoinPrices(searchResult.rows);
+                        if (isCardmarketUrl(requestUrl)) {
+                            const legacyRows = searchResult.rows.map(legacyResultFromRow);
+                            await sendCardmarketObservation({
+                                structuredCard,
+                                cardmarketContext: {
+                                    url: normalizeObservationUrl(requestUrl),
+                                    title,
+                                    hostname: requestUrl ? new URL(requestUrl).hostname : '',
+                                    expansion: structuredCard.expansion || '',
+                                    subtitle: '',
+                                    breadcrumbParts: [],
+                                },
+                                match: matchFromRow(legacyRows[0]),
+                                promoteVerifiedLink: false,
+                            });
+                            return legacyRows;
+                        }
                         return searchResult.rows.map(legacyResultFromRow);
                     }
                     const fallbackSearch = await searchCardvault(title, structuredCard?.name || '');
@@ -1632,6 +1946,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             ...selectedResult,
                         },
                     });
+                    await observeCardmarketScrape(selectedResult, { promoteVerifiedLink: isCardmarketUrl(currentUrl) });
                     return selectedResult;
                 }
                 await chrome.storage.session.set({
@@ -1661,6 +1976,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     originalTitle: request.originalTitle || currentTitle,
                     clues: requestClues,
                     primaryClues: requestPrimaryClues,
+                    promoteVerifiedLink: isCardmarketUrl(currentUrl),
                 });
             })
             .then((result) => sendResponse({ success: true, result }))

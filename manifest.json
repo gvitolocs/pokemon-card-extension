@@ -29,6 +29,14 @@
   "content_scripts": [
     {
       "matches": [
+        "https://pokoin.com/extension/auth-bridge*"
+      ],
+      "js": [
+        "pokoin-auth-bridge.js"
+      ]
+    },
+    {
+      "matches": [
         "https://www.ebay.it/*",
         "https://ebay.it/*",
         "https://www.ebay.com/*",

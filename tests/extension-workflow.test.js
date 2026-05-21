@@ -4448,3 +4448,270 @@ test('all marketplace buttons use the side panel message workflow', () => {
         assert.doesNotMatch(source, /window\.open\(/, `${relativePath} should not open marketplace cards in a new tab`);
     }
 });
+
+test('Pokoin auth bridge forwards only same-origin token messages', async () => {
+    const source = readRepoFile('pokoin-auth-bridge.js');
+    const messages = [];
+    const postedMessages = [];
+    let messageListener = null;
+    const sandbox = {
+        window: {
+            location: {
+                origin: 'https://pokoin.com',
+                pathname: '/extension/auth-bridge',
+            },
+            addEventListener(type, listener) {
+                if (type === 'message') {
+                    messageListener = listener;
+                }
+            },
+            postMessage(message, targetOrigin) {
+                postedMessages.push({ message, targetOrigin });
+            },
+        },
+        chrome: {
+            runtime: {
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+    };
+    sandbox.window.window = sandbox.window;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'pokoin-auth-bridge.js' });
+
+    assert.equal(postedMessages[0].targetOrigin, 'https://pokoin.com');
+    assert.equal(postedMessages[0].message.type, 'POKOIN_EXTENSION_AUTH_TOKEN_REQUEST');
+
+    await messageListener({
+        origin: 'https://evil.example',
+        source: sandbox.window,
+        data: {
+            type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+            token: 'x'.repeat(40),
+        },
+    });
+    await messageListener({
+        origin: 'https://pokoin.com',
+        source: {},
+        data: {
+            type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+            token: 'x'.repeat(40),
+        },
+    });
+    await messageListener({
+        origin: 'https://pokoin.com',
+        source: sandbox.window,
+        data: {
+            type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+            token: 'firebase-token-from-pokoin-bridge',
+            expiresAt: Date.now() + 600000,
+        },
+    });
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].action, 'pokoinAuthTokenReceived');
+    assert.equal(messages[0].tokenMessage.token, 'firebase-token-from-pokoin-bridge');
+});
+
+test('Pokoin auth token validation stores session token only', async () => {
+    const sessionWrites = [];
+    const localWrites = [];
+    const sandbox = loadBackgroundHelpers(['storePokoinAuthToken']);
+    sandbox.chrome.storage.session.set = async (payload) => {
+        sessionWrites.push(payload);
+    };
+    sandbox.chrome.storage.local.set = async (payload) => {
+        localWrites.push(payload);
+    };
+
+    const invalid = await sandbox.storePokoinAuthToken({
+        type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+        token: 'short',
+    });
+    const valid = await sandbox.storePokoinAuthToken({
+        type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+        token: 'firebase-id-token-from-pokoin-current-user',
+        expiresAt: Date.now() + 600000,
+    });
+
+    assert.equal(invalid.valid, false);
+    assert.equal(valid.valid, true);
+    assert.equal(sessionWrites.length, 1);
+    assert.ok(sessionWrites[0].pokoinAuthSession.token);
+    assert.equal(localWrites.length, 0, 'auth token must never be written to local storage');
+});
+
+test('Cardmarket observation queues and opens auth bridge when token is missing', async () => {
+    const sessionState = {};
+    const createdTabs = [];
+    const sandbox = loadBackgroundHelpers(['sendCardmarketObservation']);
+    sandbox.fetch = async () => {
+        throw new Error('request should wait for auth token');
+    };
+    sandbox.chrome.storage.session.get = async (key) => {
+        if (key === 'pokoinAuthSession') {
+            return { pokoinAuthSession: sessionState.pokoinAuthSession };
+        }
+        if (key === 'pendingCardmarketObservations') {
+            return { pendingCardmarketObservations: sessionState.pendingCardmarketObservations || [] };
+        }
+        return {};
+    };
+    sandbox.chrome.storage.session.set = async (payload) => {
+        Object.assign(sessionState, payload);
+    };
+    sandbox.chrome.tabs.query = async () => [];
+    sandbox.chrome.tabs.create = async (payload) => {
+        createdTabs.push(payload);
+        return { id: 99, ...payload };
+    };
+
+    const result = await sandbox.sendCardmarketObservation({
+        structuredCard: { name: 'Piplup', collectorNumber: 'MEP 042', expansion: 'MEP Black Star Promos' },
+        cardmarketContext: { url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042' },
+        match: { cardId: 'mep-042', name: 'Piplup' },
+        promoteVerifiedLink: false,
+    });
+
+    assert.equal(result.queued, true);
+    assert.equal(result.reason, 'missing_token');
+    assert.equal(createdTabs.length, 1);
+    assert.equal(createdTabs[0].url, 'https://pokoin.com/extension/auth-bridge');
+    assert.equal(createdTabs[0].active, false);
+    assert.equal(sessionState.pendingCardmarketObservations.length, 1);
+});
+
+test('Cardmarket observation POST uses bearer auth payload and de-dupes signature', async () => {
+    const fetchCalls = [];
+    const sandbox = loadBackgroundHelpers(['sendCardmarketObservation']);
+    sandbox.chrome.storage.session.get = async (key) => {
+        if (key === 'pokoinAuthSession') {
+            return {
+                pokoinAuthSession: {
+                    token: 'valid-firebase-id-token-from-session',
+                    expiresAt: Date.now() + 600000,
+                },
+            };
+        }
+        return {};
+    };
+    sandbox.chrome.storage.session.set = async () => {};
+    sandbox.fetch = async (url, options = {}) => {
+        fetchCalls.push({ url, options, body: JSON.parse(options.body || '{}') });
+        return { ok: true, status: 200, json: async () => ({ ok: true }) };
+    };
+
+    const payload = {
+        structuredCard: { name: 'Piplup', collectorNumber: 'MEP 042', expansion: 'MEP Black Star Promos' },
+        cardmarketContext: {
+            url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            title: 'Piplup (MEP 042)',
+        },
+        match: { cardId: 'mep-042', name: 'Piplup', expansionName: 'MEP Black Star Promos', collectorNumber: 'MEP 042' },
+        promoteVerifiedLink: false,
+    };
+
+    const first = await sandbox.sendCardmarketObservation(payload);
+    const second = await sandbox.sendCardmarketObservation({ ...payload });
+
+    assert.equal(first.success, true);
+    assert.equal(second.deduped, true);
+    assert.equal(fetchCalls.length, 1);
+    assert.equal(fetchCalls[0].url, 'https://pokoin.com/api/cardmarket-scrape-observation');
+    assert.equal(fetchCalls[0].options.headers.authorization, 'Bearer valid-firebase-id-token-from-session');
+    assert.equal(fetchCalls[0].body.structuredCard.name, 'Piplup');
+    assert.equal(fetchCalls[0].body.cardmarketContext.url, payload.cardmarketContext.url);
+    assert.equal(fetchCalls[0].body.match.cardId, 'mep-042');
+    assert.equal(fetchCalls[0].body.promoteVerifiedLink, false);
+});
+
+test('Cardmarket selected side-panel candidate promotes verified link', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchCalls = [];
+    const storageState = {
+        pokoinAuthSession: {
+            token: 'valid-firebase-id-token-from-session',
+            expiresAt: Date.now() + 600000,
+        },
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            fetchCalls.push({ url, options, body: JSON.parse(options.body || '{}') });
+            return { ok: true, status: 200, json: async () => ({ ok: true }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({
+                    id: 8,
+                    title: 'Piplup (MEP 042)',
+                    url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (key === 'pokoinAuthSession') return { pokoinAuthSession: storageState.pokoinAuthSession };
+                        return {};
+                    },
+                    set: async (payload) => Object.assign(storageState, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                title: 'Piplup (MEP 042)',
+                selectedCandidateId: 'mep-042',
+                selectedCandidate: {
+                    card_id: 'mep-042',
+                    name: 'Piplup',
+                    set_name: 'MEP Black Star Promos',
+                    card_number: 'MEP 042',
+                    search_rank: 99,
+                },
+            },
+            { tab: { id: 8 } },
+            resolve
+        );
+    });
+
+    const observation = fetchCalls.find((call) => call.url.includes('/api/cardmarket-scrape-observation'));
+    assert.equal(response.success, true);
+    assert.ok(observation);
+    assert.equal(observation.body.promoteVerifiedLink, true);
+    assert.equal(observation.body.cardmarketContext.url, 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042');
+    assert.equal(observation.body.match.cardId, 'mep-042');
+});
