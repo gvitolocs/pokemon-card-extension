@@ -497,13 +497,15 @@ function resolvedCardNameFromRow(row, term = '') {
 }
 
 function candidateNameTermsFromTitle(title = '', structuredCard = null) {
+    const terms = [];
     if (structuredCard?.name) {
-        return [structuredCard.name];
+        terms.push(structuredCard.name);
     }
 
     const cleaned = removeMarketplaceSearchNoise(String(title || '')
         .replace(/\s*\|\s*(?:Vinted|Cardmarket)\s*$/i, '')
-        .replace(/[()"'’`.,:;!?/\\[\]{}|]+/g, ' ')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/["’`.,:;!?/\\[\]{}|]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim());
     const stopWords = new Set([
@@ -516,15 +518,27 @@ function candidateNameTermsFromTitle(title = '', structuredCard = null) {
         .split(/\s+/)
         .map((word) => word.trim())
         .filter((word) => word && !stopWords.has(word.toLowerCase()));
-    const terms = [];
-
-    for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
+    for (let size = Math.min(4, words.length); size >= 1; size -= 1) {
         for (let index = 0; index <= words.length - size; index += 1) {
             terms.push(words.slice(index, index + size).join(' '));
         }
     }
 
     return [...new Set(terms)].slice(0, 18);
+}
+
+function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    if (!resolvedName) {
+        return false;
+    }
+    if (!requestedName) {
+        return true;
+    }
+
+    const resolvedCompact = compactSearchValue(resolvedName);
+    return resolvedCompact === requestedName ||
+        resolvedCompact.includes(requestedName);
 }
 
 async function resolveNameFromCardvaultTitle(title = '', structuredCard = null) {
@@ -744,8 +758,7 @@ function rowMatchesStructuredName(row, structuredCard) {
     }
 
     return rowName === requestedName ||
-        rowName.includes(requestedName) ||
-        requestedName.includes(rowName);
+        rowName.includes(requestedName);
 }
 
 function isAllowedBaseSetFamily(row) {
@@ -923,6 +936,24 @@ function sameUrlWithoutHash(a = '', b = '') {
     }
 }
 
+function sameCardTraderDirectBlueprint(a = '', b = '') {
+    const leftBlueprintId = cardtraderBlueprintIdFromUrl(a);
+    const rightBlueprintId = cardtraderBlueprintIdFromUrl(b);
+    return Boolean(leftBlueprintId && rightBlueprintId && leftBlueprintId === rightBlueprintId);
+}
+
+function isLockedCardTraderDirectState(state = {}, url = '') {
+    const stateUrl = state?.pageInfo?.url || '';
+    const stateBlueprintId = state?.pageInfo?.cardtraderBlueprintId || state?.debug?.cardtraderBlueprintId || state?.blueprintId || '';
+    const urlBlueprintId = cardtraderBlueprintIdFromUrl(url);
+    return Boolean(
+        urlBlueprintId &&
+        stateBlueprintId &&
+        String(stateBlueprintId) === String(urlBlueprintId) &&
+        sameUrlWithoutHash(stateUrl, url)
+    );
+}
+
 const sidePanelRefreshTimers = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
@@ -1031,29 +1062,46 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 
     const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
     const currentStateUrl = sidePanelState?.pageInfo?.url || '';
+    if (isLockedCardTraderDirectState(sidePanelState, tab.url)) {
+        clearTimeout(sidePanelRefreshTimers.get(tab.id));
+        sidePanelRefreshTimers.delete(tab.id);
+        return;
+    }
     if (currentStateUrl && sameUrlWithoutHash(currentStateUrl, tab.url) && reason !== 'activated') {
         return;
     }
 
+    const scheduledUrl = tab.url || '';
     clearTimeout(sidePanelRefreshTimers.get(tab.id));
     sidePanelRefreshTimers.set(tab.id, setTimeout(async () => {
         sidePanelRefreshTimers.delete(tab.id);
         try {
+            const latestTab = chrome.tabs?.get ? await chrome.tabs.get(tab.id).catch(() => tab) : tab;
+            const refreshTab = latestTab?.id ? latestTab : tab;
+            if (!sameUrlWithoutHash(scheduledUrl, refreshTab.url || '')) {
+                return;
+            }
+
+            const { sidePanelState: latestSidePanelState } = await chrome.storage.session.get('sidePanelState');
+            if (isLockedCardTraderDirectState(latestSidePanelState, refreshTab.url || scheduledUrl)) {
+                return;
+            }
+
             await chrome.storage.session.set({
                 sidePanelState: {
-                    ...(sidePanelState || {}),
+                    ...(latestSidePanelState || {}),
                     updatedAt: Date.now(),
                     loading: true,
                     pageInfo: {
-                        ...(sidePanelState?.pageInfo || {}),
-                        title: tab.title || '',
-                        url: tab.url || '',
-                        hostname: tab.url ? new URL(tab.url).hostname : '',
+                        ...(latestSidePanelState?.pageInfo || {}),
+                        title: refreshTab.title || '',
+                        url: refreshTab.url || '',
+                        hostname: refreshTab.url ? new URL(refreshTab.url).hostname : '',
                     },
                     error: '',
                 },
             });
-            await resolveActiveTabForSidePanel(tab);
+            await resolveActiveTabForSidePanel(refreshTab, { expectedUrl: scheduledUrl });
             console.log(`✅ [Background] Side panel refreshed after ${reason}`);
         } catch (error) {
             console.warn(`⚠️ [Background] Side panel refresh failed after ${reason}:`, error);
@@ -1134,10 +1182,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                         isCardmarketUrl(pageInfo.url) ? pageInfo.structuredCard : null
                     );
                     debug.nameResolution = nameResolution;
-                    if (nameResolution.name && (
-                        !pageInfo.structuredCard?.name ||
-                        compactSearchValue(nameResolution.name) === compactSearchValue(pageInfo.structuredCard.name)
-                    )) {
+                    if (shouldUseResolvedCardName(nameResolution.name, pageInfo.structuredCard)) {
                         pageInfo.structuredCard = {
                             ...(pageInfo.structuredCard || {}),
                             name: nameResolution.name,
@@ -1185,6 +1230,21 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     const pokoinUrl = blueprintId ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${blueprintId}` : '';
     debug.rowCount = rows.length;
     debug.bestId = blueprintId;
+
+    if (requestContext.expectedUrl && !sameUrlWithoutHash(requestContext.expectedUrl, pageInfo.url || tab?.url || '')) {
+        console.log('ℹ️ [Background] Ignored stale side panel refresh for changed tab URL');
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+
+    const { sidePanelState: latestSidePanelState } = await chrome.storage.session.get('sidePanelState');
+    if (
+        isLockedCardTraderDirectState(latestSidePanelState, latestSidePanelState?.pageInfo?.url || '') &&
+        !pageInfo.cardtraderBlueprintId &&
+        !sameCardTraderDirectBlueprint(latestSidePanelState?.pageInfo?.url || '', pageInfo.url || tab?.url || '')
+    ) {
+        console.log('ℹ️ [Background] Ignored stale refresh behind CardTrader direct state');
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
 
     await chrome.storage.session.set({
         sidePanelState: {
@@ -1265,10 +1325,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const structuredCard = scrapeStructuredCardFields(title);
                     const structuredContext = isCardmarketUrl(request.url || tab?.url || '') ? structuredCard : null;
                     const nameResolution = await resolveNameFromCardvaultTitle(title, structuredContext);
-                    if (nameResolution.name && (
-                        !structuredCard.name ||
-                        compactSearchValue(nameResolution.name) === compactSearchValue(structuredCard.name)
-                    )) {
+                    if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
                         structuredCard.name = nameResolution.name;
                         if (structuredCard.variation) {
                             structuredCard.searchName = [nameResolution.name, structuredCard.variation]
