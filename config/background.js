@@ -1529,12 +1529,103 @@ function shouldKeepExistingExactCardmarketState(existingState = {}, nextState = 
     return !isExactCardmarketState(nextState);
 }
 
-async function setSidePanelState(nextState = {}) {
+function safeUrlHostname(url = '') {
+    try {
+        return url ? new URL(url).hostname : '';
+    } catch (error) {
+        return '';
+    }
+}
+
+function sidePanelOwnerDebug(owner = null, extra = {}) {
+    return runtimeDebugMetadata({
+        ...(owner ? {
+            sidePanelRequestId: owner.requestId,
+            sidePanelReason: owner.reason,
+            sidePanelTabId: owner.tabId || null,
+            sidePanelUrl: owner.url || '',
+        } : {}),
+        staleIgnoredCount: sidePanelStaleIgnoredCount,
+        ...extra,
+    });
+}
+
+function markStaleSidePanelOwner(owner = null, reason = 'stale') {
+    sidePanelStaleIgnoredCount += 1;
+    if (owner) {
+        owner.stale = true;
+        owner.staleReason = reason;
+    }
+    console.log(`ℹ️ [Background] Ignored stale side panel request${owner?.requestId ? ` #${owner.requestId}` : ''}: ${reason}`);
+}
+
+function isSidePanelOwnerCurrent(owner = null, url = '') {
+    if (!owner) {
+        return true;
+    }
+    const currentOwner = sidePanelCurrentOwner;
+    const currentUrl = url || owner.url || '';
+    return Boolean(
+        currentOwner &&
+        currentOwner.requestId === owner.requestId &&
+        currentOwner.tabId === owner.tabId &&
+        sameUrlWithoutHash(currentOwner.url || '', currentUrl) &&
+        sameUrlWithoutHash(owner.url || '', currentUrl)
+    );
+}
+
+function createSidePanelRequestOwner(tab = {}, reason = 'refresh') {
+    const previousOwner = sidePanelCurrentOwner;
+    if (previousOwner?.tabId && (previousOwner.tabId !== tab?.id || !sameUrlWithoutHash(previousOwner.url || '', tab?.url || ''))) {
+        clearTimeout(sidePanelRefreshTimers.get(previousOwner.tabId));
+        sidePanelRefreshTimers.delete(previousOwner.tabId);
+    }
+
+    const requestId = sidePanelRequestSequence + 1;
+    sidePanelRequestSequence = requestId;
+    const abortController = typeof AbortController !== 'undefined'
+        ? new AbortController()
+        : null;
+    const owner = {
+        requestId,
+        tabId: tab?.id || null,
+        url: tab?.url || '',
+        reason,
+        startedAt: Date.now(),
+        abortController,
+    };
+    if (owner.tabId) {
+        sidePanelOwnersByTab.set(owner.tabId, owner);
+    }
+    sidePanelCurrentOwner = owner;
+    if (owner.tabId) {
+        clearTimeout(sidePanelRefreshTimers.get(owner.tabId));
+        sidePanelRefreshTimers.delete(owner.tabId);
+    }
+    if (previousOwner?.abortController && previousOwner.requestId !== owner.requestId) {
+        try {
+            previousOwner.abortController.abort();
+        } catch (error) {
+            // Older requests are also gated by request id before writing.
+        }
+    }
+    return owner;
+}
+
+async function setSidePanelState(nextState = {}, owner = null) {
+    if (owner && !isSidePanelOwnerCurrent(owner, nextState?.pageInfo?.url || owner.url || '')) {
+        markStaleSidePanelOwner(owner, 'write owner no longer current');
+        return null;
+    }
     const state = {
         ...nextState,
-        debug: runtimeDebugMetadata(nextState.debug || {}),
+        debug: sidePanelOwnerDebug(owner, nextState.debug || {}),
     };
     const { sidePanelState: currentState } = await chrome.storage.session.get('sidePanelState');
+    if (owner && !isSidePanelOwnerCurrent(owner, state?.pageInfo?.url || owner.url || '')) {
+        markStaleSidePanelOwner(owner, 'write owner changed during storage read');
+        return null;
+    }
     if (shouldKeepExistingExactCardmarketState(currentState, state)) {
         console.log('ℹ️ [Background] Kept exact Cardmarket state over weaker same-URL update');
         return currentState;
@@ -1569,6 +1660,10 @@ function clearBackgroundSearchCachesForUrl(url = '') {
 }
 
 const sidePanelRefreshTimers = new Map();
+let sidePanelRequestSequence = 0;
+let sidePanelCurrentOwner = null;
+let sidePanelStaleIgnoredCount = 0;
+const sidePanelOwnersByTab = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
 const cardvaultNameResolutionCache = new Map();
@@ -1591,9 +1686,6 @@ async function ensureRuntimeStorageCurrent() {
     if (runtime.buildMarker === EXTENSION_BUILD_MARKER) {
         return;
     }
-    backgroundSearchInFlight.clear();
-    backgroundSearchResultCache.clear();
-    cardvaultNameResolutionCache.clear();
     if (!runtime.buildMarker) {
         await chrome.storage.session.set({
             [EXTENSION_RUNTIME_STORAGE_KEY]: {
@@ -1604,6 +1696,11 @@ async function ensureRuntimeStorageCurrent() {
         });
         return;
     }
+    backgroundSearchInFlight.clear();
+    backgroundSearchResultCache.clear();
+    cardvaultNameResolutionCache.clear();
+    sidePanelCurrentOwner = null;
+    sidePanelOwnersByTab.clear();
     await chrome.storage.session.set({
         [EXTENSION_RUNTIME_STORAGE_KEY]: {
             extensionVersion: EXTENSION_VERSION,
@@ -2031,18 +2128,19 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
         sidePanelRefreshTimers.delete(tab.id);
         return;
     }
-    if (currentStateUrl && sameUrlWithoutHash(currentStateUrl, tab.url) && reason !== 'activated') {
+    if (currentStateUrl && sameUrlWithoutHash(currentStateUrl, tab.url)) {
         return;
     }
 
+    const owner = createSidePanelRequestOwner(tab, reason);
     const scheduledUrl = tab.url || '';
-    clearTimeout(sidePanelRefreshTimers.get(tab.id));
     sidePanelRefreshTimers.set(tab.id, setTimeout(async () => {
         sidePanelRefreshTimers.delete(tab.id);
         try {
             const latestTab = chrome.tabs?.get ? await chrome.tabs.get(tab.id).catch(() => tab) : tab;
             const refreshTab = latestTab?.id ? latestTab : tab;
-            if (!sameUrlWithoutHash(scheduledUrl, refreshTab.url || '')) {
+            if (!sameUrlWithoutHash(scheduledUrl, refreshTab.url || '') || !isSidePanelOwnerCurrent(owner, refreshTab.url || scheduledUrl)) {
+                markStaleSidePanelOwner(owner, 'scheduled tab URL changed');
                 return;
             }
 
@@ -2059,12 +2157,19 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
                     ...(latestSidePanelState?.pageInfo || {}),
                     title: refreshTab.title || '',
                     url: refreshTab.url || '',
-                    hostname: refreshTab.url ? new URL(refreshTab.url).hostname : '',
+                    hostname: safeUrlHostname(refreshTab.url),
                 },
                 error: '',
-            });
-            await resolveActiveTabForSidePanel(refreshTab, { expectedUrl: scheduledUrl });
-            console.log(`✅ [Background] Side panel refreshed after ${reason}`);
+                rows: [],
+                best: null,
+                blueprintId: '',
+                pokoinUrl: '',
+                debug: {
+                    loading: true,
+                },
+            }, owner);
+            await resolveActiveTabForSidePanel(refreshTab, { expectedUrl: scheduledUrl, owner });
+            console.log(`✅ [Background] Side panel refreshed after ${reason} #${owner.requestId}`);
         } catch (error) {
             console.warn(`⚠️ [Background] Side panel refresh failed after ${reason}:`, error);
         }
@@ -2074,6 +2179,7 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     await ensureRuntimeStorageCurrent();
     const resolveStartedAt = Date.now();
+    const owner = requestContext.owner || null;
     const phaseTimings = {};
     let phaseStartedAt = resolveStartedAt;
     const markPhase = (name) => {
@@ -2094,6 +2200,10 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         };
     }
     markPhase('pageInfoMs');
+    if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
+        markStaleSidePanelOwner(owner, 'page info behind current side panel owner');
+        return { pageInfo, rows: [], best: null, blueprintId: '', pokoinUrl: '', error: pageInfoError, debug: sidePanelOwnerDebug(owner), stale: true };
+    }
     const requestClues = normalizeRequestClues(requestContext.clues);
     const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
     if (requestClues.length > 0) {
@@ -2231,9 +2341,19 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     debug.rowCount = rows.length;
     debug.bestId = blueprintId;
     debug.phaseTimings.totalMs = Date.now() - resolveStartedAt;
+    debug.sidePanelRequestId = owner?.requestId || null;
+    debug.sidePanelReason = owner?.reason || '';
 
     if (requestContext.expectedUrl && !sameUrlWithoutHash(requestContext.expectedUrl, pageInfo.url || tab?.url || '')) {
         console.log('ℹ️ [Background] Ignored stale side panel refresh for changed tab URL');
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'expected URL changed');
+        }
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+
+    if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
+        markStaleSidePanelOwner(owner, 'result behind current side panel owner');
         return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
     }
 
@@ -2246,6 +2366,9 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         isSupportedMarketplaceUrl(latestStateUrl)
     ) {
         console.log('ℹ️ [Background] Ignored stale side panel result behind newer page state');
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'newer page state exists');
+        }
         return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
     }
     if (
@@ -2254,6 +2377,9 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         !sameCardTraderDirectBlueprint(latestStateUrl, pageInfo.url || tab?.url || '')
     ) {
         console.log('ℹ️ [Background] Ignored stale refresh behind CardTrader direct state');
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'CardTrader direct state owns panel');
+        }
         return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
     }
 
@@ -2266,9 +2392,13 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         pokoinUrl,
         error,
         debug,
-    });
+    }, owner);
 
     void schedulePriceEnrichment(rows, async (enrichedRows) => {
+        if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
+            markStaleSidePanelOwner(owner, 'price enrichment owner no longer current');
+            return enrichedRows;
+        }
         const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
         const currentUrl = currentSidePanelState?.pageInfo?.url || '';
         const currentBlueprintId = currentSidePanelState?.blueprintId || currentSidePanelState?.best?.card_id || '';
@@ -2291,7 +2421,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 ...debug,
                 priceEnriched: true,
             },
-        });
+        }, owner);
     });
 
     observeCardmarketScrapeSoon({ pageInfo, rows, best, blueprintId, pokoinUrl, error, debug }, {
@@ -2475,6 +2605,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const currentTitle = request.title || tab.title || senderTab.title || '';
                 const directCardTraderBlueprintId = request.cardtraderBlueprintId || cardtraderBlueprintIdFromUrl(currentUrl);
                 clearTimeout(sidePanelRefreshTimers.get(tab.id));
+                const owner = createSidePanelRequestOwner({
+                    ...tab,
+                    id: senderTab.id,
+                    url: currentUrl || tab.url || senderTab.url || '',
+                    title: currentTitle || tab.title || senderTab.title || '',
+                }, 'open');
                 await openSidePanelPromise;
                 const requestClues = normalizeRequestClues(request.clues);
                 const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
@@ -2528,7 +2664,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     await setSidePanelState({
                         updatedAt: Date.now(),
                         ...directResult,
-                    });
+                    }, owner);
                     return directResult;
                 }
                 if (selectedCandidateRow && previewRows.length === 0) {
@@ -2568,7 +2704,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     await setSidePanelState({
                         updatedAt: Date.now(),
                         ...selectedResult,
-                    });
+                    }, owner);
                     observeCardmarketScrapeSoon(selectedResult, { promoteVerifiedLink: isCardmarketUrl(currentUrl) });
                     return selectedResult;
                 }
@@ -2614,14 +2750,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             pinnedPreviewRows: true,
                             pinnedVintedPreview: /^vinted\|/.test(request.previewSignature || ''),
                             previewSignature: request.previewSignature || '',
+                            previewSource: request.previewSource || '',
                             error: '',
                         },
                     };
                     await setSidePanelState({
                         updatedAt: Date.now(),
                         ...previewResult,
-                    });
+                    }, owner);
                     void schedulePriceEnrichment(orderedPreviewRows, async (enrichedRows) => {
+                        if (!isSidePanelOwnerCurrent(owner, currentUrl)) {
+                            markStaleSidePanelOwner(owner, 'preview price enrichment owner no longer current');
+                            return enrichedRows;
+                        }
                         const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
                         if (
                             !currentSidePanelState?.debug?.pinnedPreviewRows ||
@@ -2642,7 +2783,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                                 ...previewResult.debug,
                                 priceEnriched: true,
                             },
-                        });
+                        }, owner);
                         return enrichedRows;
                     });
                     return previewResult;
@@ -2664,8 +2805,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     blueprintId: '',
                     pokoinUrl: '',
                     error: '',
-                    debug: runtimeDebugMetadata({ loading: true }),
-                });
+                    debug: {
+                        loading: true,
+                    },
+                }, owner);
                 return resolveActiveTabForSidePanel({
                     ...tab,
                     url: currentUrl || tab.url,
@@ -2676,6 +2819,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     clues: requestClues,
                     primaryClues: requestPrimaryClues,
                     promoteVerifiedLink: isCardmarketUrl(currentUrl),
+                    owner,
                 });
             })
             .then((result) => sendResponse({ success: true, result }))
@@ -2708,6 +2852,7 @@ chrome.tabs.onActivated.addListener(async ({ tabId }) => {
 });
 
 chrome.action.onClicked.addListener(async (tab) => {
+    const owner = createSidePanelRequestOwner(tab, 'action-click');
     try {
         if (chrome.sidePanel?.setOptions && tab?.id) {
             await chrome.sidePanel.setOptions({
@@ -2726,7 +2871,7 @@ chrome.action.onClicked.addListener(async (tab) => {
             pageInfo: {
                 title: tab?.title || '',
                 url: tab?.url || '',
-                hostname: tab?.url ? new URL(tab.url).hostname : '',
+                hostname: safeUrlHostname(tab?.url),
             },
             rows: [],
             best: null,
@@ -2734,10 +2879,12 @@ chrome.action.onClicked.addListener(async (tab) => {
             pokoinUrl: '',
             error: '',
             loading: true,
-            debug: runtimeDebugMetadata({ loading: true }),
-        });
+            debug: {
+                loading: true,
+            },
+        }, owner);
 
-        await resolveActiveTabForSidePanel(tab);
+        await resolveActiveTabForSidePanel(tab, { expectedUrl: tab?.url || '', owner });
     } catch (error) {
         console.error('❌ Failed to open CardTrader side panel:', error);
         await setSidePanelState({
@@ -2745,15 +2892,17 @@ chrome.action.onClicked.addListener(async (tab) => {
             pageInfo: {
                 title: tab?.title || '',
                 url: tab?.url || '',
-                hostname: tab?.url ? new URL(tab.url).hostname : '',
+                hostname: safeUrlHostname(tab?.url),
             },
             rows: [],
             best: null,
             blueprintId: '',
             pokoinUrl: '',
             error: error.message || 'Unable to open side panel.',
-            debug: runtimeDebugMetadata({ error: true }),
-        });
+            debug: {
+                error: true,
+            },
+        }, owner);
 
         if (chrome.sidePanel?.open && tab?.id) {
             await chrome.sidePanel.open({ tabId: tab.id });

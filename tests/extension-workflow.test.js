@@ -49,7 +49,37 @@ function loadBackgroundHelpers(helperNames = []) {
                 onUpdated: { addListener() {} },
                 onActivated: { addListener() {} },
             },
-            scripting: { executeScript: async () => [] },
+            scripting: {
+                executeScript: async (options) => {
+                    const oldUrl = 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Ascended-Heroes/Camerupt-ASC028';
+                    const tab = options?.target?.tabId === 8 && extensionCalls === 0
+                        ? {
+                            title: 'Camerupt (ASC 028)',
+                            url: oldUrl,
+                            structuredCard: {
+                                rawTitle: 'Camerupt (ASC 028)',
+                                name: 'Camerupt',
+                                searchName: 'Camerupt',
+                                collectorNumber: 'ASC 028',
+                                numericCollectorNumber: '028',
+                                expansion: 'Ascended Heroes',
+                            },
+                        }
+                        : {
+                            title: 'Piplup (MEP 042)',
+                            url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                            structuredCard: {
+                                rawTitle: 'Piplup (MEP 042)',
+                                name: 'Piplup',
+                                searchName: 'Piplup',
+                                collectorNumber: 'MEP 042',
+                                numericCollectorNumber: '042',
+                                expansion: 'MEP Black Star Promos',
+                            },
+                        };
+                    return [{ result: { ...tab, hostname: 'www.cardmarket.com' } }];
+                },
+            },
             storage: {
                 session: { get: async () => ({}), set: async () => {} },
                 local: { set: async () => {} },
@@ -320,6 +350,9 @@ function createDomElement(tagName = 'div', attributes = {}) {
             }
             if (selector.startsWith('[data-pokoin-vinted-collapse-toggle]')) {
                 return this.attributes['data-pokoin-vinted-collapse-toggle'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-vinted-header-row]')) {
+                return this.attributes['data-pokoin-vinted-header-row'] !== undefined;
             }
             if (selector.startsWith('[data-pokemon-linker-button]')) {
                 return this.attributes['data-pokemon-linker-button'] !== undefined;
@@ -1549,21 +1582,35 @@ test('Vinted overlay collapse toggles chips and candidate preview', () => {
     processor.renderCandidatePreview([{ blueprint_id: '96', expansion_name_en: 'BW Black Star Promos', collector_number: '96' }]);
 
     const root = processor.vintedPanelRoot();
+    const header = root.querySelector('[data-pokoin-vinted-header-row]');
     const toggle = root.querySelector('[data-pokoin-vinted-collapse-toggle]');
     const keywords = root.querySelector('[data-pokoin-vinted-keywords]');
     const preview = root.querySelector('[data-pokoin-candidate-preview]');
+
+    assert.ok(header, 'header row should contain the Pokoin and collapse buttons');
+    assert.deepEqual(header.children.map((child) => child.attributes['data-pokemon-linker-button'] ? 'button' : 'toggle'), ['button', 'toggle']);
+    assert.match(toggle.style.cssText, /width:\s*40px/);
+    assert.match(toggle.style.cssText, /height:\s*40px/);
+    assert.match(processor.currentButton.style.cssText, /flex:\s*1 1 auto/i);
+    assert.match(processor.currentButton.innerHTML, /Pokoin\.com/);
+    assert.doesNotMatch(processor.currentButton.innerHTML, /\(\d+\)/);
 
     processor.setVintedOverlayCollapsed(true);
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'true');
     assert.equal(keywords.style.display, 'none');
     assert.equal(preview.style.display, 'none');
     assert.equal(toggle.attributes['aria-expanded'], 'false');
+    assert.equal(toggle.textContent, '+');
+    assert.match(processor.currentButton.innerHTML, /1 match/);
 
     processor.setVintedOverlayCollapsed(false);
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'false');
     assert.equal(keywords.style.display, '');
     assert.equal(preview.style.display, '');
     assert.equal(toggle.attributes['aria-expanded'], 'true');
+    assert.equal(toggle.textContent, 'X');
+    assert.match(processor.currentButton.innerHTML, /Pokoin\.com/);
+    assert.doesNotMatch(processor.currentButton.innerHTML, /1 match/);
 });
 
 test('Vinted candidate preview uses viewport height and remains scrollable', () => {
@@ -1587,6 +1634,62 @@ test('Vinted candidate preview uses viewport height and remains scrollable', () 
     const preview = processor.vintedPanelRoot().querySelector('[data-pokoin-candidate-preview]');
     assert.equal(preview.style.maxHeight, 'calc(100vh - 220px)');
     assert.equal(preview.style.overflowY, 'auto');
+});
+
+test('Vinted side-panel open sends overlay preview rows and selected clues', async () => {
+    const sentMessages = [];
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/91-tornadus-ex-full-art',
+                hostname: 'www.vinted.it',
+                pathname: '/items/91-tornadus-ex-full-art',
+            },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    sentMessages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body,
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Tornadus EX Full Art';
+    processor.currentKeywords = [
+        { label: 'Tornadus ex', value: 'Tornadus ex', compact: 'tornadusex', nameLike: true, attachedNamePhrase: true, attachedVariation: false },
+        { label: 'ex', value: 'ex', compact: 'ex', nameLike: false, attachedNamePhrase: false, attachedVariation: true },
+        { label: 'illustration', value: 'illustration', compact: 'illustration', nameLike: false, attachedNamePhrase: false, attachedVariation: false },
+    ];
+    processor.selectedKeywordValues = new Set(['tornadusex', 'ex', 'illustration']);
+    const signature = processor.buildVintedSearchSignature(processor.currentTitle, processor.selectedKeywordLabels());
+    processor.searchResultsBySignature.set(signature, [
+        { card_id: '96', name: 'Tornadus EX', set_name: 'BW Black Star Promos', card_number: '96', search_rank: 99 },
+        { card_id: '90', name: 'Tornadus EX', set_name: 'Dark Explorers', card_number: '90', search_rank: 95 },
+    ]);
+    processor.createVintedPanelButton();
+
+    await processor.openPokoinSidePanel();
+
+    const message = sentMessages.at(-1);
+    assert.equal(message.action, 'openSidePanelForCurrentTab');
+    assert.equal(message.previewSource, 'vinted_overlay');
+    assert.equal(message.previewSignature, signature);
+    assert.deepEqual(message.previewRows.map((row) => row.card_id), ['96', '90']);
+    assert.deepEqual(message.previewRows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
+    assert.deepEqual(message.clues, ['Tornadus ex', 'ex', 'illustration']);
+    assert.deepEqual(message.primaryClues, ['Tornadus ex', 'ex']);
 });
 
 test('Vinted chip and button share overlay panel', () => {
@@ -1622,7 +1725,8 @@ test('Vinted chip and button share overlay panel', () => {
     assert.equal(host.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(host.style.position, 'fixed');
     assert.equal(details.children.includes(host), false);
-    assert.ok(panel.children.some((child) => child.attributes['data-pokemon-linker-button'] === 'true'));
+    const header = panel.querySelector('[data-pokoin-vinted-header-row]');
+    assert.ok(header.children.some((child) => child.attributes['data-pokemon-linker-button'] === 'true'));
     assert.ok(panel.children.some((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true'));
     assert.match(
         panel.children.find((child) => child.attributes['data-pokoin-vinted-keywords'] === 'true').style.cssText,
@@ -1859,7 +1963,8 @@ test('Vinted background candidates use active blue styling and render preview', 
 
     assert.equal(processor.currentButton.style.background, '#0ea5e9');
     assert.equal(processor.currentButton.style.border, '2px solid #38bdf8');
-    assert.equal(processor.currentButton.innerHTML.includes('(1)'), true);
+    assert.equal(processor.currentButton.innerHTML.includes('Pokoin.com'), true);
+    assert.equal(processor.currentButton.innerHTML.includes('(1)'), false);
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], undefined);
     assert.equal(appended.at(-1).previewResults[0].name_en, 'Dragonite V');
 });
@@ -3983,6 +4088,526 @@ test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state
     assert.equal(result.stale, true);
     assert.equal(result.pageInfo.structuredCard.name, 'Red Card');
     assert.equal(storageWrites.length, 0, 'stale Red Card result must not write sidePanelState over Piplup');
+});
+
+test('background side panel owner prevents slow old tab search overwriting newer active tab', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    let redSearchRelease;
+    const redSearchStarted = new Promise((resolve) => {
+        redSearchRelease = () => resolve({
+            ok: true,
+            json: async () => ({
+                matches: [{ cardId: 'red-card', name: 'Red Card', expansionName: 'Holo McDonalds', collectorNumber: '012', score: 99 }],
+            }),
+        });
+    });
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                const body = JSON.parse(options.body || '{}');
+                if (/red card/i.test(body.name || '')) {
+                    return redSearchStarted;
+                }
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{ cardId: 'piplup', name: 'Piplup', expansionName: 'MEP Black Star Promos', collectorNumber: 'MEP 042', score: 100 }],
+                    }),
+                };
+            }
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async (options) => {
+                    const tabId = options?.target?.tabId;
+                    const tab = tabId === 1
+                        ? {
+                            title: 'Red Card (HMD 012)',
+                            url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Holo-McDonalds/Red-Card-HMD012',
+                            structuredCard: {
+                                rawTitle: 'Red Card (HMD 012)',
+                                name: 'Red Card',
+                                searchName: 'Red Card',
+                                collectorNumber: 'HMD 012',
+                                numericCollectorNumber: '012',
+                                expansion: 'Holo McDonalds',
+                            },
+                        }
+                        : {
+                            title: 'Piplup (MEP 042)',
+                            url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                            structuredCard: {
+                                rawTitle: 'Piplup (MEP 042)',
+                                name: 'Piplup',
+                                searchName: 'Piplup',
+                                collectorNumber: 'MEP 042',
+                                numericCollectorNumber: '042',
+                                expansion: 'MEP Black Star Promos',
+                            },
+                        };
+                    return [{
+                        result: {
+                            ...tab,
+                            hostname: 'www.cardmarket.com',
+                        },
+                    }];
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (Array.isArray(key)) {
+                            return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        }
+                        if (typeof key === 'string') {
+                            return { [key]: storage[key] };
+                        }
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) {
+                            storageWrites.push(payload.sidePanelState);
+                        }
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel; this.createSidePanelRequestOwner = createSidePanelRequestOwner;`, sandbox, { filename: 'config/background.js' });
+
+    const redTab = {
+        id: 1,
+        title: 'Red Card (HMD 012)',
+        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/Holo-McDonalds/Red-Card-HMD012',
+    };
+    const piplupTab = {
+        id: 2,
+        title: 'Piplup (MEP 042)',
+        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+    };
+    const redOwner = sandbox.createSidePanelRequestOwner(redTab, 'activated');
+    const slowRed = sandbox.resolveActiveTabForSidePanel(redTab, { expectedUrl: redTab.url, owner: redOwner });
+    await Promise.resolve();
+    const piplupOwner = sandbox.createSidePanelRequestOwner(piplupTab, 'activated');
+    const piplupResult = await sandbox.resolveActiveTabForSidePanel(piplupTab, { expectedUrl: piplupTab.url, owner: piplupOwner });
+    redSearchRelease();
+    const redResult = await slowRed;
+
+    assert.equal(piplupResult.blueprintId, 'piplup');
+    assert.equal(redResult.stale, true);
+    assert.equal(storage.sidePanelState.blueprintId, 'piplup');
+    assert.equal(storage.sidePanelState.pageInfo.title, 'Piplup (MEP 042)');
+    assert.ok(storage.sidePanelState.debug.sidePanelRequestId > 0);
+    assert.equal(storageWrites.at(-1).blueprintId, 'piplup');
+});
+
+test('background URL change owner prevents prior same-tab URL search overwrite', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    let firstSearchRelease;
+    const firstSearch = new Promise((resolve) => {
+        firstSearchRelease = () => resolve({
+            ok: true,
+            json: async () => ({
+                matches: [{ cardId: 'old-url', name: 'Camerupt', expansionName: 'Ascended Heroes', collectorNumber: '028', score: 95 }],
+            }),
+        });
+    });
+    const oldUrl = 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Ascended-Heroes/Camerupt-ASC028';
+    const newUrl = 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        currentScrapeUrl: oldUrl,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                const body = JSON.parse(options.body || '{}');
+                if (/camerupt/i.test(body.name || '')) return firstSearch;
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{ cardId: 'new-url', name: 'Piplup', expansionName: 'MEP Black Star Promos', collectorNumber: 'MEP 042', score: 100 }],
+                    }),
+                };
+            }
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: sandbox.currentScrapeUrl === oldUrl
+                        ? {
+                            title: 'Camerupt (ASC 028)',
+                            url: oldUrl,
+                            hostname: 'www.cardmarket.com',
+                            structuredCard: {
+                                rawTitle: 'Camerupt (ASC 028)',
+                                name: 'Camerupt',
+                                searchName: 'Camerupt',
+                                collectorNumber: 'ASC 028',
+                                numericCollectorNumber: '028',
+                                expansion: 'Ascended Heroes',
+                            },
+                        }
+                        : {
+                            title: 'Piplup (MEP 042)',
+                            url: newUrl,
+                            hostname: 'www.cardmarket.com',
+                            structuredCard: {
+                                rawTitle: 'Piplup (MEP 042)',
+                                name: 'Piplup',
+                                searchName: 'Piplup',
+                                collectorNumber: 'MEP 042',
+                                numericCollectorNumber: '042',
+                                expansion: 'MEP Black Star Promos',
+                            },
+                        },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel; this.createSidePanelRequestOwner = createSidePanelRequestOwner;`, sandbox, { filename: 'config/background.js' });
+
+    const oldTab = { id: 8, title: 'Camerupt (ASC 028)', url: oldUrl };
+    const newTab = { id: 8, title: 'Piplup (MEP 042)', url: newUrl };
+    const oldOwner = sandbox.createSidePanelRequestOwner(oldTab, 'tab-url');
+    const oldResultPromise = sandbox.resolveActiveTabForSidePanel(oldTab, { expectedUrl: oldTab.url, owner: oldOwner });
+    await Promise.resolve();
+    sandbox.currentScrapeUrl = newUrl;
+    const newOwner = sandbox.createSidePanelRequestOwner(newTab, 'tab-url');
+    await sandbox.resolveActiveTabForSidePanel(newTab, { expectedUrl: newTab.url, owner: newOwner });
+    firstSearchRelease();
+    const oldResult = await oldResultPromise;
+
+    assert.equal(oldResult.stale, true);
+    assert.equal(storage.sidePanelState.blueprintId, 'new-url');
+    assert.equal(storage.sidePanelState.pageInfo.url, newTab.url);
+    assert.equal(storageWrites.at(-1).blueprintId, 'new-url');
+});
+
+test('background latest same-tab side panel request writes when current', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async (url) => {
+            if (url.includes('/api/cardtrader-redirect')) return { ok: true, json: async () => ({ products: [] }) };
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{ cardId: 'latest', name: 'Piplup', expansionName: 'MEP Black Star Promos', collectorNumber: 'MEP 042', score: 100 }],
+                    }),
+                };
+            }
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Piplup (MEP 042)',
+                        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: {
+                            rawTitle: 'Piplup (MEP 042)',
+                            name: 'Piplup',
+                            searchName: 'Piplup',
+                            collectorNumber: 'MEP 042',
+                            numericCollectorNumber: '042',
+                            expansion: 'MEP Black Star Promos',
+                        },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel; this.createSidePanelRequestOwner = createSidePanelRequestOwner;`, sandbox, { filename: 'config/background.js' });
+
+    const tab = {
+        id: 8,
+        title: 'Piplup (MEP 042)',
+        url: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+    };
+    const owner = sandbox.createSidePanelRequestOwner(tab, 'open');
+    const result = await sandbox.resolveActiveTabForSidePanel(tab, { expectedUrl: tab.url, owner });
+
+    assert.notEqual(result.stale, true);
+    assert.equal(storage.sidePanelState.blueprintId, 'latest');
+    assert.equal(storage.sidePanelState.debug.sidePanelRequestId, owner.requestId);
+    assert.equal(storageWrites.length, 1);
+});
+
+test('CardTrader direct side-panel open remains immediate with request owner', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const storageWrites = [];
+    const openedPanels = [];
+    const cardTraderUrl = 'https://www.cardtrader.com/cards/12345-hypno';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new Error('CardTrader direct open should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 55, title: 'Hypno | CardTrader', url: cardTraderUrl }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct open should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async (payload) => openedPanels.push(payload),
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            { action: 'openSidePanelForCurrentTab', url: cardTraderUrl, title: 'Hypno | CardTrader' },
+            { tab: { id: 55, title: 'Hypno | CardTrader', url: cardTraderUrl } },
+            resolve
+        );
+    });
+
+    const finalState = storageWrites.at(-1);
+    assert.equal(response.success, true);
+    assert.equal(fetchCalls, 0);
+    assert.equal(openedPanels.length, 1);
+    assert.equal(openedPanels[0].tabId, 55);
+    assert.equal(finalState.blueprintId, '12345');
+    assert.equal(finalState.debug.directCardTrader, true);
+    assert.equal(finalState.debug.sidePanelReason, 'open');
+});
+
+test('stale broad refresh cannot overwrite Vinted pinned preview rows', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    let messageListener = null;
+    const vintedUrl = 'https://www.vinted.it/items/91-tornadus';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async (url) => {
+            if (url.includes('/api/cardtrader-redirect')) return { ok: true, json: async () => ({ products: [] }) };
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{ cardId: 'broad', name: 'Tornadus', expansionName: 'Generic Set', collectorNumber: '1', score: 90 }],
+                    }),
+                };
+            }
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 9, title: 'Tornadus EX Full Art', url: vintedUrl }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Tornadus',
+                        url: vintedUrl,
+                        hostname: 'www.vinted.it',
+                        structuredCard: { rawTitle: 'Tornadus', name: 'Tornadus', searchName: 'Tornadus' },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel; this.createSidePanelRequestOwner = createSidePanelRequestOwner;`, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: vintedUrl,
+                title: 'Tornadus ex illustration',
+                originalTitle: 'Tornadus EX Full Art',
+                clues: ['Tornadus ex', 'ex', 'illustration'],
+                primaryClues: ['Tornadus ex', 'ex'],
+                previewSignature: 'vinted|tornadusexillustration',
+                previewSource: 'vinted_overlay',
+                previewRows: [
+                    { card_id: '96', name: 'Tornadus EX', set_name: 'BW Black Star Promos', card_number: '96', search_rank: 99 },
+                    { card_id: '90', name: 'Tornadus EX', set_name: 'Dark Explorers', card_number: '90', search_rank: 95 },
+                ],
+            },
+            { tab: { id: 9, title: 'Tornadus EX Full Art', url: vintedUrl } },
+            resolve
+        );
+    });
+
+    const broadOwner = sandbox.createSidePanelRequestOwner({ id: 9, title: 'Tornadus EX Full Art', url: vintedUrl }, 'tab-complete');
+    const broadResult = await sandbox.resolveActiveTabForSidePanel({ id: 9, title: 'Tornadus EX Full Art', url: vintedUrl }, { expectedUrl: vintedUrl, owner: broadOwner });
+
+    assert.equal(broadResult.blueprintId, 'broad');
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['96', '90']);
+    assert.equal(storage.sidePanelState.debug.pinnedPreviewRows, true);
+    assert.equal(storage.sidePanelState.debug.previewSource, 'vinted_overlay');
+    assert.deepEqual(storageWrites.at(-1).rows.map((row) => row.card_id), ['96', '90']);
 });
 
 test('background clue helpers remove generic card words from request titles', () => {

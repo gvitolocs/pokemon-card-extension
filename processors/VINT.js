@@ -31,6 +31,7 @@ class VintedProcessor {
         this.vintedSequenceId = 0;
         this.vintedDiagnostics = [];
         this.vintedOverlayCollapsed = false;
+        this.currentMatchCount = 0;
     }
 
     pokoinIconUrl() {
@@ -38,10 +39,15 @@ class VintedProcessor {
     }
 
     setPokoinButtonLabel(button, matchCount = null) {
-        const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
+        if (Number.isFinite(matchCount)) {
+            button?.setAttribute?.('data-pokoin-match-count', String(matchCount));
+        }
+        const label = this.vintedOverlayCollapsed && Number(this.currentMatchCount) > 0
+            ? `${this.currentMatchCount} ${this.currentMatchCount === 1 ? 'match' : 'matches'}`
+            : 'Pokoin.com';
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
-            <span>Pokoin.com${suffix}</span>
+            <span>${label}</span>
         `;
     }
 
@@ -528,6 +534,7 @@ class VintedProcessor {
         this.currentButton = null;
         this.currentKeywords = [];
         this.selectedKeywordValues = new Set();
+        this.currentMatchCount = 0;
         this.latestSearchToken += 1;
         this.lastAppliedSearchSignature = '';
         this.searchResultsBySignature.clear();
@@ -592,13 +599,17 @@ class VintedProcessor {
     }
 
     currentPreviewResults() {
-        const signature = this.buildVintedSearchSignature(this.currentTitle);
+        const signature = this.buildVintedSearchSignature(this.currentTitle, this.selectedKeywordLabels());
         const results = this.searchResultsBySignature.get(signature) || this.pendingSearchApplications.get(signature) || [];
         return Array.isArray(results) ? results : [];
     }
 
     vintedPanelRoot(panel = this.currentPanel) {
         return panel?.shadowRoot || panel;
+    }
+
+    vintedHeaderRow() {
+        return this.vintedPanelRoot()?.querySelector?.('[data-pokoin-vinted-header-row]') || null;
     }
 
     applyVintedOverlayCollapsedState() {
@@ -612,9 +623,13 @@ class VintedProcessor {
             });
         const toggle = this.vintedPanelRoot()?.querySelector?.('[data-pokoin-vinted-collapse-toggle]');
         if (toggle) {
-            toggle.textContent = collapsed ? 'Show' : 'Hide';
+            toggle.textContent = collapsed ? '+' : 'X';
             toggle.setAttribute?.('aria-expanded', collapsed ? 'false' : 'true');
             toggle.setAttribute?.('aria-label', collapsed ? 'Expand Pokoin Vinted overlay' : 'Collapse Pokoin Vinted overlay');
+            toggle.setAttribute?.('title', collapsed ? 'Show Pokoin results' : 'Hide Pokoin results');
+        }
+        if (this.currentButton) {
+            this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
         }
     }
 
@@ -623,9 +638,38 @@ class VintedProcessor {
         this.applyVintedOverlayCollapsedState();
     }
 
-    renderVintedCollapseToggle() {
+    ensureVintedHeaderRow() {
         const root = this.vintedPanelRoot();
-        if (!root || root.querySelector?.('[data-pokoin-vinted-collapse-toggle]')) {
+        if (!root) {
+            return null;
+        }
+        let header = root.querySelector?.('[data-pokoin-vinted-header-row]');
+        if (header && typeof header.appendChild === 'function') {
+            return header;
+        }
+        header = document.createElement('div');
+        header.setAttribute('data-pokoin-vinted-header-row', 'true');
+        header.style.cssText = `
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
+            width: 100%;
+        `;
+        const panel = this.currentPanel;
+        if (typeof panel?.prepend === 'function') {
+            panel.prepend(header);
+        } else {
+            panel?.appendChild(header);
+        }
+        return header;
+    }
+
+    renderVintedCollapseToggle() {
+        const header = this.ensureVintedHeaderRow();
+        if (!header) {
+            return;
+        }
+        if (header.querySelector?.('[data-pokoin-vinted-collapse-toggle]')) {
             this.applyVintedOverlayCollapsedState();
             return;
         }
@@ -634,13 +678,16 @@ class VintedProcessor {
         toggle.type = 'button';
         toggle.setAttribute('data-pokoin-vinted-collapse-toggle', 'true');
         toggle.style.cssText = `
-            align-self: flex-end;
-            padding: 5px 9px;
+            flex: 0 0 40px;
+            width: 40px;
+            min-width: 40px;
+            height: 40px;
+            padding: 0;
             border: 1px solid rgba(148, 163, 184, 0.45);
-            border-radius: 999px;
+            border-radius: 10px;
             background: rgba(15, 23, 42, 0.72);
             color: #e0f2fe;
-            font-size: 11px;
+            font-size: 14px;
             font-weight: 700;
             line-height: 1;
             cursor: pointer;
@@ -653,12 +700,7 @@ class VintedProcessor {
             this.setVintedOverlayCollapsed(!this.vintedOverlayCollapsed);
         }, true);
 
-        const panel = this.currentPanel;
-        if (typeof panel?.prepend === 'function') {
-            panel.prepend(toggle);
-        } else {
-            panel?.appendChild(toggle);
-        }
+        header.appendChild(toggle);
         this.applyVintedOverlayCollapsedState();
     }
 
@@ -712,6 +754,10 @@ class VintedProcessor {
 
     renderCandidatePreview(results = []) {
         this.removeOwnedPanelChildren('[data-pokoin-candidate-preview]');
+        this.currentMatchCount = Array.isArray(results) ? results.slice(0, 8).length : 0;
+        if (this.currentButton) {
+            this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+        }
         if (!this.isVintedOwnedNodeConnected(this.currentButton) || results.length === 0) {
             return;
         }
@@ -833,6 +879,7 @@ class VintedProcessor {
             clues,
             primaryClues,
             previewSignature: this.buildVintedSearchSignature(this.currentTitle || document.title, clues),
+            previewSource: 'vinted_overlay',
             ...this.buildSidePanelPreviewRowsPayload(),
             ...this.buildSidePanelCandidatePayload(candidate || {}),
         };
@@ -1627,6 +1674,7 @@ class VintedProcessor {
         if (!this.isVintedOwnedNodeConnected(this.currentButton)) {
             return;
         }
+        this.currentMatchCount = 0;
         this.setPokoinButtonLabel(this.currentButton);
         this.currentButton.setAttribute('data-pokemon-linker-fallback', 'true');
         this.applyPokoinButtonStyles(this.currentButton, {
@@ -1654,6 +1702,7 @@ class VintedProcessor {
         console.log('🔄 [VINT] Creating compact Vinted action panel...');
         const panel = this.ensureVintedPanel(titleElement);
         this.removeOwnedPanelChildren('[data-pokemon-linker-button]');
+        const header = this.ensureVintedHeaderRow();
         
         // Create gray fixed-position button
         const button = document.createElement('button');
@@ -1661,7 +1710,8 @@ class VintedProcessor {
         button.setAttribute('data-pokemon-linker-fallback', 'true');
         this.setPokoinButtonLabel(button);
         button.style.cssText = `
-            width: 100%;
+            flex: 1 1 auto;
+            width: auto;
             padding: 10px 14px;
             font-size: 14px;
             min-width: 0;
@@ -1687,7 +1737,10 @@ class VintedProcessor {
             button.style.boxShadow = '0 4px 12px rgba(2, 132, 199, 0.18)';
         });
         
-        if (typeof panel.prepend === 'function') {
+        if (header) {
+            header.insertBefore(button, header.children?.[0] || null);
+            this.renderVintedCollapseToggle();
+        } else if (typeof panel.prepend === 'function') {
             panel.prepend(button);
         } else {
             panel.appendChild(button);
@@ -1800,7 +1853,8 @@ class VintedProcessor {
 
         const applyResolvedButtonState = (button) => {
             button.removeAttribute('data-pokemon-linker-fallback');
-            this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
+            this.currentMatchCount = results.slice(0, 8).length;
+            this.setPokoinButtonLabel(button, this.currentMatchCount);
             this.applyPokoinButtonStyles(button, {
                 background: this.pokoinBlue(),
                 color: '#ffffff',
@@ -1816,7 +1870,7 @@ class VintedProcessor {
                 <span class="web_ui__Button__content">
                     <span class="web_ui__Button__label">
                         <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:22px;height:22px;border-radius:50%;object-fit:cover;margin-right:8px;vertical-align:middle;">
-                        Pokoin.com (${this.countHighConfidenceMatches(results)})
+                        ${this.vintedOverlayCollapsed && this.currentMatchCount > 0 ? `${this.currentMatchCount} ${this.currentMatchCount === 1 ? 'match' : 'matches'}` : 'Pokoin.com'}
                     </span>
                 </span>
             `;
@@ -1845,6 +1899,7 @@ class VintedProcessor {
         });
 
         this.renderCandidatePreview(results);
+        this.applyVintedOverlayCollapsedState();
         
         console.log(`✅ [VINT] Button updated successfully for: ${bestResult.name_en || bestResult.pokemon_name}`);
     }
