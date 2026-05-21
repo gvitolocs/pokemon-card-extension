@@ -318,6 +318,9 @@ function createDomElement(tagName = 'div', attributes = {}) {
             if (selector.startsWith('[data-pokoin-candidate-preview]')) {
                 return this.attributes['data-pokoin-candidate-preview'] !== undefined;
             }
+            if (selector.startsWith('[data-pokoin-vinted-collapse-toggle]')) {
+                return this.attributes['data-pokoin-vinted-collapse-toggle'] !== undefined;
+            }
             if (selector.startsWith('[data-pokemon-linker-button]')) {
                 return this.attributes['data-pokemon-linker-button'] !== undefined;
             }
@@ -1402,6 +1405,54 @@ test('Vinted collector chip toggle changes signature and ignores stale results',
     assert.equal(processor.previewResults[0].collector_number, '35/108', 'stale earlier results should not replace toggled results');
 });
 
+test('Vinted side panel payload includes selected clues and preview rows', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/90-tornadus-ex', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /tornadus/i.test(String(title || '')) ? 'Tornadus' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return {
+                        success: true,
+                        results: [
+                            { blueprint_id: '96', name_en: 'Tornadus EX', expansion_name_en: 'BW Black Star Promos', collector_number: '96', search_score: 99 },
+                            { blueprint_id: '90', name_en: 'Tornadus EX', expansion_name_en: 'Dark Explorers', collector_number: '90', search_score: 95 },
+                        ],
+                    };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Tornadus EX Full Art';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Carta Tornadus EX Full Art');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault || keyword.compact === 'illustration')
+            .map((keyword) => keyword.compact)
+    );
+    processor.currentButton = createButtonStub();
+    processor.renderCandidatePreview = () => {};
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+    await processor.openPokoinSidePanel();
+
+    const sidePanelMessage = messages.at(-1);
+    assert.equal(sidePanelMessage.action, 'openSidePanelForCurrentTab');
+    assert.deepEqual(sidePanelMessage.previewRows.map((row) => row.card_id), ['96', '90']);
+    assert.deepEqual(sidePanelMessage.previewRows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
+    assert.ok(sidePanelMessage.clues.some((clue) => /^illustration$/i.test(clue)));
+    assert.ok(sidePanelMessage.primaryClues.some((clue) => /^Tornadus ex$/i.test(clue)));
+    assert.match(sidePanelMessage.previewSignature, /tornadusex/);
+});
+
 test('Vinted placement uses transparent overlay outside product details', () => {
     const bodyAppends = [];
     const body = documentStubBody(bodyAppends);
@@ -1450,6 +1501,11 @@ test('Vinted overlay panel is fixed without a safe anchor', () => {
     const bodyAppends = [];
     const body = documentStubBody(bodyAppends);
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: (title) => ({
+                pokemonName: /tornadus/i.test(String(title || '')) ? 'Tornadus' : null,
+            }),
+        },
         document: {
             querySelector: () => null,
             querySelectorAll: () => [],
@@ -1465,10 +1521,72 @@ test('Vinted overlay panel is fixed without a safe anchor', () => {
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(processor.currentPanelHost.style.position, 'fixed');
     assert.equal(processor.currentPanelHost.style.left, '16px');
-    assert.equal(processor.currentPanelHost.style.bottom, '16px');
+    assert.equal(processor.currentPanelHost.style.top, '48px');
+    assert.equal(processor.currentPanelHost.style.bottom, '24px');
     assert.equal(processor.currentPanelHost.style.right, 'auto');
-    assert.equal(processor.currentPanelHost.style.top, 'auto');
+    assert.equal(processor.currentPanelHost.style.maxHeight, 'calc(100vh - 72px)');
     assert.equal(bodyAppends[0], processor.currentPanelHost);
+});
+
+test('Vinted overlay collapse toggles chips and candidate preview', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body,
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Tornadus EX';
+    processor.currentKeywords = [{ label: 'Tornadus ex', value: 'Tornadus ex', compact: 'tornadusex', selectedByDefault: true }];
+    processor.selectedKeywordValues = new Set(['tornadusex']);
+    processor.createVintedPanelButton();
+    processor.renderKeywordToggles('Tornadus EX', '');
+    processor.renderCandidatePreview([{ blueprint_id: '96', expansion_name_en: 'BW Black Star Promos', collector_number: '96' }]);
+
+    const root = processor.vintedPanelRoot();
+    const toggle = root.querySelector('[data-pokoin-vinted-collapse-toggle]');
+    const keywords = root.querySelector('[data-pokoin-vinted-keywords]');
+    const preview = root.querySelector('[data-pokoin-candidate-preview]');
+
+    processor.setVintedOverlayCollapsed(true);
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'true');
+    assert.equal(keywords.style.display, 'none');
+    assert.equal(preview.style.display, 'none');
+    assert.equal(toggle.attributes['aria-expanded'], 'false');
+
+    processor.setVintedOverlayCollapsed(false);
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'false');
+    assert.equal(keywords.style.display, '');
+    assert.equal(preview.style.display, '');
+    assert.equal(toggle.attributes['aria-expanded'], 'true');
+});
+
+test('Vinted candidate preview uses viewport height and remains scrollable', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body,
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Tornadus EX';
+    processor.createVintedPanelButton();
+
+    processor.renderCandidatePreview([{ blueprint_id: '96', expansion_name_en: 'BW Black Star Promos', collector_number: '96' }]);
+
+    const preview = processor.vintedPanelRoot().querySelector('[data-pokoin-candidate-preview]');
+    assert.equal(preview.style.maxHeight, 'calc(100vh - 220px)');
+    assert.equal(preview.style.overflowY, 'auto');
 });
 
 test('Vinted chip and button share overlay panel', () => {
@@ -1834,7 +1952,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
 
     const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
     const rows = preview.children;
-    assert.equal(preview.style.maxHeight, '320px');
+    assert.equal(preview.style.maxHeight, 'calc(100vh - 220px)');
     assert.equal(preview.style.overflowY, 'auto');
     assert.equal(rows.length, 8);
     assert.equal(rows[0].tagName, 'BUTTON');
@@ -3436,6 +3554,175 @@ test('background side panel open honors selected Vinted candidate without reorde
     assert.equal(finalState.best.name, 'Regigigas VSTAR');
     assert.deepEqual(finalState.pageInfo.clues, ['Regigigas', 'vstar']);
     assert.equal(finalState.debug.selectedCandidateId, '9876');
+});
+
+test('background side panel open pins Vinted preview rows and clues', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const storageWrites = [];
+    const openedPanels = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new Error('preview row path should not search before painting side panel');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 9, title: 'Tornadus EX Full Art', url: 'https://www.vinted.it/items/91-tornadus' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('preview row path should not scrape before painting side panel');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async (payload) => openedPanels.push(payload),
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.vinted.it/items/91-tornadus',
+                title: 'Tornadus ex illustration',
+                originalTitle: 'Tornadus EX Full Art',
+                clues: ['Tornadus ex', 'ex', 'illustration'],
+                primaryClues: ['Tornadus ex', 'ex'],
+                previewSignature: 'vinted|tornadusexillustration',
+                previewRows: [
+                    { card_id: '96', name: 'Tornadus EX', set_name: 'BW Black Star Promos', card_number: '96', search_rank: 99, pokoin_price: '$1.00' },
+                    { card_id: '90', name: 'Tornadus EX', set_name: 'Dark Explorers', card_number: '90', search_rank: 95, pokoin_price: '$2.00' },
+                ],
+            },
+            { tab: { id: 9, title: 'Tornadus EX Full Art', url: 'https://www.vinted.it/items/91-tornadus' } },
+            resolve
+        );
+    });
+
+    const finalState = storageWrites.at(-1).sidePanelState;
+    assert.equal(response.success, true);
+    assert.deepEqual(openedPanels.map((panel) => panel.tabId), [9]);
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(finalState.rows.map((row) => row.card_id), ['96', '90']);
+    assert.deepEqual(finalState.rows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
+    assert.equal(finalState.blueprintId, '96');
+    assert.deepEqual(finalState.pageInfo.clues, ['Tornadus ex', 'ex', 'illustration']);
+    assert.deepEqual(finalState.pageInfo.primaryClues, ['Tornadus ex', 'ex']);
+    assert.equal(finalState.debug.pinnedVintedPreview, true);
+});
+
+test('background side panel open pins eBay preview rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const storageWrites = [];
+    const openedPanels = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new Error('eBay preview row path should not search before painting side panel');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 10, title: 'Tornadus EX Full Art Pokemon', url: 'https://www.ebay.com/itm/555-tornadus-ex' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('eBay preview row path should not scrape before painting side panel');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async (payload) => openedPanels.push(payload),
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.ebay.com/itm/555-tornadus-ex',
+                title: 'Tornadus EX Full Art Pokemon',
+                previewSignature: 'ebay|https://www.ebay.com/itm/555-tornadus-ex',
+                previewRows: [
+                    { card_id: '96', name: 'Tornadus EX', set_name: 'BW Black Star Promos', card_number: '96', search_rank: 99, pokoin_price: '$1.00' },
+                    { card_id: '90', name: 'Tornadus EX', set_name: 'Dark Explorers', card_number: '90', search_rank: 95, pokoin_price: '$2.00' },
+                ],
+            },
+            { tab: { id: 10, title: 'Tornadus EX Full Art Pokemon', url: 'https://www.ebay.com/itm/555-tornadus-ex' } },
+            resolve
+        );
+    });
+
+    const finalState = storageWrites.at(-1).sidePanelState;
+    assert.equal(response.success, true);
+    assert.deepEqual(openedPanels.map((panel) => panel.tabId), [10]);
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(finalState.rows.map((row) => row.card_id), ['96', '90']);
+    assert.equal(finalState.blueprintId, '96');
+    assert.equal(finalState.debug.pinnedPreviewRows, true);
+    assert.equal(finalState.debug.previewSignature, 'ebay|https://www.ebay.com/itm/555-tornadus-ex');
 });
 
 test('Cardmarket side panel refresh clears loading after search failure', async () => {
@@ -5207,6 +5494,51 @@ test('site processors use background fallback and side-panel opening', async () 
         assert.equal(messages[0].action, 'searchCardForTitle');
         assert.equal(messages.at(-1).action, 'openSidePanelForCurrentTab');
     }
+});
+
+test('eBay side-panel open passes button preview rows', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.com/itm/555-tornadus-ex', hostname: 'www.ebay.com' },
+        },
+        document: {
+            title: 'Tornadus EX Full Art Pokemon',
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action === 'searchCardForTitle') {
+                        return {
+                            success: true,
+                            results: [
+                                { blueprint_id: '96', name_en: 'Tornadus EX', expansion_name_en: 'BW Black Star Promos', collector_number: '96', search_score: 99 },
+                                { blueprint_id: '90', name_en: 'Tornadus EX', expansion_name_en: 'Dark Explorers', collector_number: '90', search_score: 95 },
+                            ],
+                        };
+                    }
+                    return { success: true };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+
+    await processor.searchCardInDatabase({}, 'Tornadus EX Full Art Pokemon');
+    await processor.openPokoinSidePanel();
+
+    const openMessage = messages.at(-1);
+    assert.equal(openMessage.action, 'openSidePanelForCurrentTab');
+    assert.equal(openMessage.title, 'Tornadus EX Full Art Pokemon');
+    assert.deepEqual(openMessage.previewRows.map((row) => row.card_id), ['96', '90']);
+    assert.deepEqual(openMessage.previewRows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
+    assert.match(openMessage.previewSignature, /^ebay\|https:\/\/www\.ebay\.com\/itm\/555-tornadus-ex$/);
 });
 
 test('eBay and Cardmarket gray buttons open the side panel before matches resolve', () => {

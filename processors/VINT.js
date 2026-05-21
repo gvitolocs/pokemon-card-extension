@@ -30,6 +30,7 @@ class VintedProcessor {
         this.vintedSessionId = `vinted-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         this.vintedSequenceId = 0;
         this.vintedDiagnostics = [];
+        this.vintedOverlayCollapsed = false;
     }
 
     pokoinIconUrl() {
@@ -590,8 +591,75 @@ class VintedProcessor {
         return [number || rawNumber, setName, price].filter(Boolean).join(' · ');
     }
 
+    currentPreviewResults() {
+        const signature = this.buildVintedSearchSignature(this.currentTitle);
+        const results = this.searchResultsBySignature.get(signature) || this.pendingSearchApplications.get(signature) || [];
+        return Array.isArray(results) ? results : [];
+    }
+
     vintedPanelRoot(panel = this.currentPanel) {
         return panel?.shadowRoot || panel;
+    }
+
+    applyVintedOverlayCollapsedState() {
+        const collapsed = Boolean(this.vintedOverlayCollapsed);
+        this.currentPanelHost?.setAttribute('data-pokoin-vinted-collapsed', collapsed ? 'true' : 'false');
+        this.currentPanel?.setAttribute('data-pokoin-vinted-collapsed', collapsed ? 'true' : 'false');
+        this.vintedPanelRoot()?.querySelectorAll?.('[data-pokoin-vinted-keywords], [data-pokoin-candidate-preview]')
+            .forEach((element) => {
+                element.style.display = collapsed ? 'none' : '';
+                element.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+            });
+        const toggle = this.vintedPanelRoot()?.querySelector?.('[data-pokoin-vinted-collapse-toggle]');
+        if (toggle) {
+            toggle.textContent = collapsed ? 'Show' : 'Hide';
+            toggle.setAttribute?.('aria-expanded', collapsed ? 'false' : 'true');
+            toggle.setAttribute?.('aria-label', collapsed ? 'Expand Pokoin Vinted overlay' : 'Collapse Pokoin Vinted overlay');
+        }
+    }
+
+    setVintedOverlayCollapsed(collapsed) {
+        this.vintedOverlayCollapsed = Boolean(collapsed);
+        this.applyVintedOverlayCollapsedState();
+    }
+
+    renderVintedCollapseToggle() {
+        const root = this.vintedPanelRoot();
+        if (!root || root.querySelector?.('[data-pokoin-vinted-collapse-toggle]')) {
+            this.applyVintedOverlayCollapsedState();
+            return;
+        }
+
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.setAttribute('data-pokoin-vinted-collapse-toggle', 'true');
+        toggle.style.cssText = `
+            align-self: flex-end;
+            padding: 5px 9px;
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.72);
+            color: #e0f2fe;
+            font-size: 11px;
+            font-weight: 700;
+            line-height: 1;
+            cursor: pointer;
+            pointer-events: auto;
+        `;
+        toggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            this.setVintedOverlayCollapsed(!this.vintedOverlayCollapsed);
+        }, true);
+
+        const panel = this.currentPanel;
+        if (typeof panel?.prepend === 'function') {
+            panel.prepend(toggle);
+        } else {
+            panel?.appendChild(toggle);
+        }
+        this.applyVintedOverlayCollapsedState();
     }
 
     createVintedOwnedPanelHost() {
@@ -653,7 +721,7 @@ class VintedProcessor {
         preview.setAttribute('data-pokoin-candidate-preview', 'true');
         preview.style.cssText = `
             width: 100%;
-            max-height: 320px;
+            max-height: calc(100vh - 220px);
             overflow-y: auto;
             padding: 12px;
             border: 1px solid rgba(56, 189, 248, 0.35);
@@ -664,7 +732,7 @@ class VintedProcessor {
             font-family: Arial, sans-serif;
         `;
         Object.assign(preview.style, {
-            maxHeight: '320px',
+            maxHeight: 'calc(100vh - 220px)',
             overflowY: 'auto',
         });
 
@@ -703,6 +771,7 @@ class VintedProcessor {
         } else {
             this.ensureVintedPanel(this.currentTitleElement).appendChild(preview);
         }
+        this.applyVintedOverlayCollapsedState();
     }
 
     candidateCardId(result = {}) {
@@ -730,6 +799,29 @@ class VintedProcessor {
         };
     }
 
+    buildSidePanelPreviewRowsPayload(results = this.currentPreviewResults()) {
+        const rows = (Array.isArray(results) ? results : [])
+            .slice(0, 8)
+            .map((result) => {
+                const cardId = this.candidateCardId(result);
+                if (!cardId) {
+                    return null;
+                }
+                return {
+                    card_id: String(cardId),
+                    name: result.name || result.name_en || result.pokemon_name || '',
+                    set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
+                    card_number: result.card_number || result.collector_number || result.collectorNumber || '',
+                    expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                    source: result.source || 'vinted_overlay_preview',
+                    search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
+                    pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                };
+            })
+            .filter(Boolean);
+        return rows.length > 0 ? { previewRows: rows } : {};
+    }
+
     openPokoinSidePanel(candidate = null) {
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
@@ -740,6 +832,8 @@ class VintedProcessor {
             originalTitle: this.currentTitle || document.title,
             clues,
             primaryClues,
+            previewSignature: this.buildVintedSearchSignature(this.currentTitle || document.title, clues),
+            ...this.buildSidePanelPreviewRowsPayload(),
             ...this.buildSidePanelCandidatePayload(candidate || {}),
         };
         return Promise.resolve(chrome.runtime.sendMessage(message)).catch((error) => {
@@ -806,10 +900,12 @@ class VintedProcessor {
             width: '100%',
             maxWidth: '420px',
             margin: '12px 0',
+            maxHeight: 'calc(100vh - 72px)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'stretch',
             gap: '8px',
+            overflow: 'visible',
             pointerEvents: 'auto',
             fontFamily: 'Arial, sans-serif',
         };
@@ -855,12 +951,13 @@ class VintedProcessor {
         return {
             position: 'fixed',
             left: '16px',
-            bottom: '16px',
+            top: '48px',
+            bottom: '24px',
             right: 'auto',
-            top: 'auto',
             zIndex: '2147483647',
             width: 'min(320px, calc(100vw - 32px))',
             maxWidth: '320px',
+            maxHeight: 'calc(100vh - 72px)',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'stretch',
@@ -1185,6 +1282,7 @@ class VintedProcessor {
 
         this.startVintedPanelObserver();
         this.currentPanel = panel;
+        this.renderVintedCollapseToggle();
         return panel;
     }
 

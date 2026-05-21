@@ -7,6 +7,8 @@ class EbayProcessor {
     constructor() {
         this.isEnabled = true;
         this.processedPages = new Set();
+        this.latestResultsByUrl = new Map();
+        this.latestTitleByUrl = new Map();
     }
 
     pokoinIconUrl() {
@@ -40,24 +42,74 @@ class EbayProcessor {
             title,
             url: window.location.href,
         });
-        return response?.success && Array.isArray(response.results) ? response.results : [];
+        const results = response?.success && Array.isArray(response.results) ? response.results : [];
+        this.storeMatchedResults(window.location.href, title, results);
+        return results;
     }
 
-    openPokoinSidePanel() {
+    stableUrl(url = window.location.href) {
+        try {
+            const parsed = new URL(url);
+            parsed.hash = '';
+            parsed.search = '';
+            return parsed.href.replace(/\/+$/, '');
+        } catch (error) {
+            return String(url || '').split('#')[0].split('?')[0].replace(/\/+$/, '');
+        }
+    }
+
+    candidateCardId(result = {}) {
+        return result.card_id || result.blueprint_id || result.cardId || result.blueprintId || '';
+    }
+
+    storeMatchedResults(url = window.location.href, title = '', results = []) {
+        const key = this.stableUrl(url);
+        this.latestTitleByUrl.set(key, title || document.title || '');
+        this.latestResultsByUrl.set(key, Array.isArray(results) ? results : []);
+    }
+
+    buildSidePanelPreviewRowsPayload(url = window.location.href) {
+        const rows = (this.latestResultsByUrl.get(this.stableUrl(url)) || [])
+            .slice(0, 8)
+            .map((result) => {
+                const cardId = this.candidateCardId(result);
+                if (!cardId) {
+                    return null;
+                }
+                return {
+                    card_id: String(cardId),
+                    name: result.name || result.name_en || result.pokemon_name || '',
+                    set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
+                    card_number: result.card_number || result.collector_number || result.collectorNumber || '',
+                    expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                    source: result.source || 'ebay_button_preview',
+                    search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
+                    pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                };
+            })
+            .filter(Boolean);
+        return rows.length > 0 ? { previewRows: rows, previewSignature: `ebay|${this.stableUrl(url)}` } : {};
+    }
+
+    openPokoinSidePanel(url = window.location.href, title = document.title) {
+        const stableUrl = this.stableUrl(url);
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
-            url: window.location.href,
-            title: document.title,
+            url,
+            title: this.latestTitleByUrl.get(stableUrl) || title,
+            originalTitle: title,
+            ...this.buildSidePanelPreviewRowsPayload(url),
         }).catch((error) => {
             console.warn('⚠️ [EBAYE] Unable to open side panel:', error);
         });
     }
 
-    attachSidePanelClick(button) {
+    attachSidePanelClick(button, title = document.title, url = window.location.href) {
         button.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            this.openPokoinSidePanel();
+            event.stopImmediatePropagation?.();
+            this.openPokoinSidePanel(url, title);
         });
     }
 
@@ -167,7 +219,7 @@ class EbayProcessor {
                 min-width: 120px;
             `;
             this.applyPokoinButtonStyles(button, { background: '#6c757d' });
-            this.attachSidePanelClick(button);
+            this.attachSidePanelClick(button, title, window.location.href);
             
             // Insert button after title
             if (titleElement.parentNode) {
@@ -180,6 +232,7 @@ class EbayProcessor {
             
             // Search database and update button state
             this.searchCardInDatabase(titleInfo, title).then(results => {
+                this.storeMatchedResults(window.location.href, title, results);
                 if (results && results.length > 0) {
                     // Turn button green when a link is found
                     button.style.background = '#28a745';
@@ -313,7 +366,8 @@ class EbayProcessor {
                 min-width: 100px;
             `;
             this.applyPokoinButtonStyles(button, { background: '#6c757d' });
-            this.attachSidePanelClick(button);
+            const listingUrl = listingElement.querySelector?.('a[href*="/itm/"]')?.href || window.location.href;
+            this.attachSidePanelClick(button, title, listingUrl);
             
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
@@ -322,6 +376,7 @@ class EbayProcessor {
                 
                 // Search database
                 const results = await this.searchCardInDatabase(titleInfo, title);
+                this.storeMatchedResults(listingUrl, title, results);
                 if (results && results.length > 0) {
                     button.style.background = '#28a745';
                     this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));

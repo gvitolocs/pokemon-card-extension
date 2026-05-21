@@ -1436,6 +1436,30 @@ function selectedCandidateRowFromRequest(request = {}) {
     };
 }
 
+function sidePanelRowFromPreview(row = {}) {
+    const cardId = row.card_id || row.blueprint_id || row.cardId || row.blueprintId || '';
+    if (!cardId) {
+        return null;
+    }
+    return {
+        card_id: String(cardId),
+        name: row.name || row.name_en || row.pokemon_name || '',
+        set_name: row.set_name || row.expansion_name_en || row.expansionName || row.expansion_name || '',
+        card_number: row.card_number || row.collector_number || row.collectorNumber || '',
+        expansion_symbol_url: row.expansion_symbol_url || row.expansionSymbolUrl || row.symbolImageUrl || '',
+        source: row.source || 'vinted_overlay_preview',
+        search_rank: row.search_rank || row.searchScore || row.search_score || row.relevanceScore || row.score || '',
+        pokoin_price: row.pokoin_price || row.pokoinPrice || row.price_formatted || row.priceFormatted || '',
+    };
+}
+
+function previewRowsFromRequest(request = {}) {
+    return (Array.isArray(request.previewRows) ? request.previewRows : [])
+        .map(sidePanelRowFromPreview)
+        .filter(Boolean)
+        .slice(0, 8);
+}
+
 async function getActiveTab() {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     return tab || null;
@@ -1500,6 +1524,14 @@ async function setSidePanelState(nextState = {}) {
     const { sidePanelState: currentState } = await chrome.storage.session.get('sidePanelState');
     if (shouldKeepExistingExactCardmarketState(currentState, state)) {
         console.log('ℹ️ [Background] Kept exact Cardmarket state over weaker same-URL update');
+        return currentState;
+    }
+    if (
+        currentState?.debug?.pinnedPreviewRows &&
+        !state.debug?.pinnedPreviewRows &&
+        sameUrlWithoutHash(currentState.pageInfo?.url || '', state.pageInfo?.url || '')
+    ) {
+        console.log('ℹ️ [Background] Kept pinned preview rows over weaker same-URL update');
         return currentState;
     }
     await chrome.storage.session.set({ sidePanelState: state });
@@ -2435,6 +2467,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
                 const requestTitle = buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
                 const selectedCandidateRow = selectedCandidateRowFromRequest(request);
+                const previewRows = previewRowsFromRequest(request);
                 if (directCardTraderBlueprintId) {
                     const directName = cleanCardTraderDirectName(currentTitle, currentUrl, directCardTraderBlueprintId);
                     const directRow = {
@@ -2485,7 +2518,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     });
                     return directResult;
                 }
-                if (selectedCandidateRow) {
+                if (selectedCandidateRow && previewRows.length === 0) {
                     const selectedResult = {
                         pageInfo: {
                             title: requestTitle || currentTitle,
@@ -2525,6 +2558,81 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     });
                     observeCardmarketScrapeSoon(selectedResult, { promoteVerifiedLink: isCardmarketUrl(currentUrl) });
                     return selectedResult;
+                }
+                if (previewRows.length > 0) {
+                    const bestPreviewRow = selectedCandidateRow || previewRows[0];
+                    const orderedPreviewRows = selectedCandidateRow
+                        ? [
+                            selectedCandidateRow,
+                            ...previewRows.filter((row) => String(row.card_id) !== String(selectedCandidateRow.card_id)),
+                        ]
+                        : previewRows;
+                    const previewResult = {
+                        pageInfo: {
+                            title: requestTitle || currentTitle,
+                            url: currentUrl,
+                            hostname: currentUrl ? new URL(currentUrl).hostname : '',
+                            originalTitle: request.originalTitle || currentTitle,
+                            clues: requestClues,
+                            primaryClues: requestPrimaryClues,
+                            structuredCard: scrapeStructuredCardFields(requestTitle || currentTitle),
+                            previewSignature: request.previewSignature || '',
+                            selectedCandidateId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+                        },
+                        rows: orderedPreviewRows,
+                        best: bestPreviewRow,
+                        blueprintId: String(bestPreviewRow.card_id),
+                        pokoinUrl: `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${bestPreviewRow.card_id}`,
+                        error: '',
+                        debug: {
+                            version: 2,
+                            tab: {
+                                id: tab?.id || null,
+                                title: tab?.title || '',
+                                url: tab?.url || '',
+                            },
+                            query: requestTitle || currentTitle,
+                            apiBaseUrl: CARDVAULT_API_BASE_URL,
+                            attemptedQueries: [],
+                            searched: false,
+                            rowCount: orderedPreviewRows.length,
+                            bestId: String(bestPreviewRow.card_id),
+                            selectedCandidateId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+                            pinnedPreviewRows: true,
+                            pinnedVintedPreview: /^vinted\|/.test(request.previewSignature || ''),
+                            previewSignature: request.previewSignature || '',
+                            error: '',
+                        },
+                    };
+                    await setSidePanelState({
+                        updatedAt: Date.now(),
+                        ...previewResult,
+                    });
+                    void schedulePriceEnrichment(orderedPreviewRows, async (enrichedRows) => {
+                        const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
+                        if (
+                            !currentSidePanelState?.debug?.pinnedPreviewRows ||
+                            !sameUrlWithoutHash(currentSidePanelState.pageInfo?.url || '', currentUrl) ||
+                            String(currentSidePanelState.blueprintId || '') !== String(bestPreviewRow.card_id || '')
+                        ) {
+                            return enrichedRows;
+                        }
+                        const enrichedBest = enrichedRows.find((row) => String(row.card_id) === String(bestPreviewRow.card_id)) || enrichedRows[0] || null;
+                        await setSidePanelState({
+                            updatedAt: Date.now(),
+                            ...previewResult,
+                            rows: enrichedRows,
+                            best: enrichedBest,
+                            blueprintId: enrichedBest?.card_id ? String(enrichedBest.card_id) : '',
+                            pokoinUrl: enrichedBest?.card_id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${enrichedBest.card_id}` : '',
+                            debug: {
+                                ...previewResult.debug,
+                                priceEnriched: true,
+                            },
+                        });
+                        return enrichedRows;
+                    });
+                    return previewResult;
                 }
                 clearBackgroundSearchCachesForUrl(currentUrl);
                 await setSidePanelState({
