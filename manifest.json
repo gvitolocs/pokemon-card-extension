@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Pokemon Card Trader Linker",
-  "version": "1.4.0",
+  "version": "2.0.0",
   "description": "Adds Pokoin card links to supported Pokemon marketplace listings.",
   "permissions": [
     "activeTab",

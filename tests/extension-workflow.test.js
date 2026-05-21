@@ -3569,7 +3569,7 @@ test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state
             storage: {
                 session: {
                     get: async () => ({
-                        pokoinExtensionRuntime: { buildMarker: '1.4.0-runtime-divergence-guard' },
+                        pokoinExtensionRuntime: { buildMarker: '2.0.0-runtime-divergence-guard' },
                         sidePanelState: {
                             updatedAt: Date.now() + 1000,
                             pageInfo: {
@@ -5548,7 +5548,7 @@ test('Cardmarket side-panel write keeps exact state over weaker same-URL update'
         },
         best: { card_id: 'mep-042', name: 'Piplup' },
         blueprintId: 'mep-042',
-        debug: { buildMarker: '1.4.0-runtime-divergence-guard' },
+        debug: { buildMarker: '2.0.0-runtime-divergence-guard' },
     };
     const sandbox = loadBackgroundHelpers(['setSidePanelState']);
     sandbox.chrome.storage.session.get = async () => ({ sidePanelState: exactState });
@@ -5615,7 +5615,7 @@ test('runtime version change invalidates stale session side-panel state', async 
     await sandbox.ensureRuntimeStorageCurrent();
 
     assert.equal(writes.length, 1);
-    assert.equal(writes[0].pokoinExtensionRuntime.buildMarker, '1.4.0-runtime-divergence-guard');
+    assert.equal(writes[0].pokoinExtensionRuntime.buildMarker, '2.0.0-runtime-divergence-guard');
     assert.equal(writes[0].sidePanelState.blueprintId, '');
     assert.equal(writes[0].sidePanelState.pageInfo.url, '');
     assert.equal(writes[0].sidePanelState.debug.invalidatedPreviousBuildMarker, 'old-build');
@@ -5632,7 +5632,7 @@ test('content Cardmarket legacy fallback is disabled and cannot send title-only 
 test('dist zip includes current runtime files without stale backups', () => {
     const { execFileSync } = require('node:child_process');
     const crypto = require('node:crypto');
-    const entries = execFileSync('unzip', ['-l', path.join(REPO_ROOT, 'dist/pokemon-card-extension-1.4.0.zip')], { encoding: 'utf8' });
+    const entries = execFileSync('unzip', ['-l', path.join(REPO_ROOT, 'dist/pokemon-card-extension-2.0.0.zip')], { encoding: 'utf8' });
     const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
 
     [
@@ -5655,7 +5655,7 @@ test('dist zip includes current runtime files without stale backups', () => {
         'ui-pages/sidepanel.css',
     ].forEach((entry) => {
         const sourceHash = hash(readRepoFile(entry));
-        const zipContent = execFileSync('unzip', ['-p', path.join(REPO_ROOT, 'dist/pokemon-card-extension-1.4.0.zip'), entry], { encoding: 'utf8' });
+        const zipContent = execFileSync('unzip', ['-p', path.join(REPO_ROOT, 'dist/pokemon-card-extension-2.0.0.zip'), entry], { encoding: 'utf8' });
         assert.equal(hash(zipContent), sourceHash, `${entry} in dist zip should match source`);
     });
 });

@@ -1,5 +1,5 @@
 // Background script for Pokemon Card Trader Linker
-const EXTENSION_VERSION = (chrome.runtime?.getManifest?.() || {}).version || '1.4.0';
+const EXTENSION_VERSION = (chrome.runtime?.getManifest?.() || {}).version || '2.0.0';
 const EXTENSION_BUILD_MARKER = `${EXTENSION_VERSION}-runtime-divergence-guard`;
 const EXTENSION_RUNTIME_STORAGE_KEY = 'pokoinExtensionRuntime';
 const CARDVAULT_API_BASE_URL = 'https://pokoin.com';
