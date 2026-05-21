@@ -355,7 +355,8 @@ class VintedProcessor {
 
         const normalized = sourceText
             .replace(/\bfull\s*-?\s*art\b|\bfullart\b/gi, ' ')
-            .replace(/[()"'’`.,:;!?\\[\]{}|]+/g, ' ')
+            .replace(/[’`]/g, "'")
+            .replace(/[()".,:;!?\\[\]{}|]+/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
         const words = normalized
@@ -363,7 +364,7 @@ class VintedProcessor {
             .map((word) => this.normalizeClueValue(word))
             .filter((word) => word && !this.vintedKeywordStopWords().has(word.toLowerCase()));
 
-        for (let size = Math.min(2, words.length); size >= 1; size -= 1) {
+        for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
             for (let index = 0; index <= words.length - size; index += 1) {
                 const phrase = words.slice(index, index + size).join(' ');
                 if (phrase.length >= 3 && !/^\d+$/.test(phrase)) {

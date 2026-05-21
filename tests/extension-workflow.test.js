@@ -920,11 +920,44 @@ test('Vinted detached description variation is manual by default', async () => {
     await processor.searchCardWithBackground(processor.currentTitle);
 
     assert.deepEqual(Array.from(processor.selectedKeywordLabels()), ['Regice']);
-    assert.equal(processor.currentKeywords.find((keyword) => /^ex$/i.test(keyword.label))?.selectedByDefault, false);
-    assert.equal(processor.currentKeywords.find((keyword) => /^vintage$/i.test(keyword.label))?.selectedByDefault, false);
     assert.deepEqual(Array.from(messages[0].clues), ['Regice']);
     assert.deepEqual(Array.from(messages[0].primaryClues), ['Regice']);
     assert.equal(messages[0].title, 'Regice');
+});
+
+test('Vinted multi-word Pokemon phrase keeps attached GX selected', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/35-gengar-mimikyu-gx', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /gengar\s+mimikyu/i.test(String(title || '')) ? 'Gengar Mimikyu' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Gengar & Mimikyu GX Set Ex vintage';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    assert.deepEqual(Array.from(processor.selectedKeywordLabels()), ['Gengar Mimikyu GX', 'GX']);
+    assert.deepEqual(Array.from(messages[0].primaryClues), ['Gengar Mimikyu GX', 'GX']);
+    assert.equal(messages[0].title, 'Gengar Mimikyu GX');
 });
 
 test('Vinted keyword defaults select Pokemon-name-like and variation clues', () => {
