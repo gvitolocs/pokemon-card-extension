@@ -157,6 +157,7 @@ class VintedProcessor {
             .replace(/\bex\b/gi, 'ex')
             .replace(/\bgx\b/gi, 'GX')
             .replace(/\bv\b/gi, 'V')
+            .replace(/\bmega\b/gi, 'Mega')
             .replace(/\bvmax\b/gi, 'VMAX')
             .replace(/\bvstar\b/gi, 'VSTAR');
         if (/\bset\s+base\b/i.test(label)) {
@@ -294,9 +295,37 @@ class VintedProcessor {
             labelCompact !== nameCompact &&
             [nameCompact, ...aliasCompacts].some((compact) =>
                 this.vintedVariationCompacts().some((variation) =>
-                    labelCompact.endsWith(`${compact}${variation}`)
+                    labelCompact.endsWith(`${compact}${variation}`) ||
+                    labelCompact.startsWith(`${variation}${compact}`)
                 )
             )
+        );
+    }
+
+    attachedVariationCompactsForNamePhrase(keyword = {}) {
+        const label = keyword.label || keyword.value || '';
+        const resolvedName = this.resolvedPokemonNameFromClue(label);
+        const labelCompact = this.compactClueValue(label);
+        const nameCompact = this.compactClueValue(resolvedName);
+        if (!labelCompact || !nameCompact) {
+            return [];
+        }
+        return this.vintedVariationCompacts().filter((variation) =>
+            labelCompact.endsWith(`${nameCompact}${variation}`) ||
+            labelCompact.startsWith(`${variation}${nameCompact}`)
+        );
+    }
+
+    isPureAttachedVariationPhrase(keyword = {}) {
+        const resolvedName = this.resolvedPokemonNameFromClue(keyword.label || keyword.value || '');
+        const nameCompact = this.compactClueValue(resolvedName);
+        const variationCompacts = this.attachedVariationCompactsForNamePhrase(keyword);
+        const labelCompact = this.compactClueValue(keyword.label || keyword.value || '');
+        return Boolean(
+            nameCompact &&
+            labelCompact &&
+            variationCompacts.length > 0 &&
+            labelCompact.length === nameCompact.length + variationCompacts.join('').length
         );
     }
 
@@ -330,24 +359,27 @@ class VintedProcessor {
 
     isCollectorNumberClue(value = '') {
         const label = this.normalizeClueValue(value);
+        if (/^(?:PSA|BGS|CGC|SGC)\s+\d{1,2}$/i.test(label)) {
+            return false;
+        }
         return /^\d{1,4}[a-z]?$/i.test(label) ||
             /\bPROMO\s+\d{1,4}[a-z]?\b/i.test(label) ||
             /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/.test(label) ||
-            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/.test(label) ||
-            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(label) ||
+            /\b[A-Z0-9][A-Z0-9-]{1,7}\s+\d{1,4}[a-z]?\b/.test(label) ||
+            /\b(?:BW|XY|SM|SWSH|SVP|SV-P)\s?-?\s?\d{1,4}[a-z]?\b/i.test(label) ||
             /\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/i.test(label) ||
-            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/.test(label) ||
+            /\b[A-Z][A-Z0-9-]{0,7}\s?\d{1,4}[a-z]?\s*\/\s*(?:[A-Z][A-Z0-9-]{0,7}\s?)?\d{1,4}[a-z]?\b/.test(label) ||
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label);
     }
 
     vintedCollectorNumberPatterns() {
         return [
             /\bPROMO\s+\d{1,4}[a-z]?\b/gi,
-            /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/g,
-            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/g,
-            /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
             /\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/gi,
-            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/g,
+            /\b[A-Z][A-Z0-9-]{0,7}\s?\d{1,4}[a-z]?\s*\/\s*(?:[A-Z][A-Z0-9-]{0,7}\s?)?\d{1,4}[a-z]?\b/g,
+            /\b(?:BW|XY|SM|SWSH|SVP|SV-P)\s?-?\s?\d{1,4}[a-z]?\b/gi,
+            /\b[A-Z0-9]{2,8}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/g,
+            /\b[A-Z0-9][A-Z0-9-]{1,7}\s+\d{1,4}[a-z]?\b/g,
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
         ];
     }
@@ -388,6 +420,10 @@ class VintedProcessor {
             for (const match of String(text || '').matchAll(/\b\d{1,4}[a-z]?\b/gi)) {
                 const start = match.index;
                 const end = start + match[0].length;
+                const before = String(text || '').slice(Math.max(0, start - 12), start);
+                if (/\b(?:psa|bgs|cgc|sgc)\s*$/i.test(before)) {
+                    continue;
+                }
                 const protectedSpan = protectedBareNumberSpans.find(([spanStart, spanEnd]) => start >= spanStart && end <= spanEnd);
                 if (protectedSpan && !String(text || '').slice(protectedSpan[0], protectedSpan[1]).includes('/')) {
                     continue;
@@ -402,7 +438,7 @@ class VintedProcessor {
         const uniqueMatches = matches.filter((label) => {
             const compact = this.compactClueValue(label);
             const prefix = String(label || '').trim().split(/\s+/)[0] || '';
-            if (!compact || seen.has(compact) || this.isVariationClue(prefix)) {
+            if (!compact || seen.has(compact) || this.isVariationClue(prefix) || /^(?:PSA|BGS|CGC|SGC)\s+\d{1,2}$/i.test(label)) {
                 return false;
             }
             seen.add(compact);
@@ -517,14 +553,14 @@ class VintedProcessor {
         const selectedAttachedVariations = new Set(
             prepared
                 .filter((keyword) => keyword.attachedNamePhrase)
-                .flatMap((keyword) => {
-                    const compact = keyword.compact;
-                    return this.vintedVariationCompacts().filter((variation) => compact.endsWith(variation));
-                })
+                .flatMap((keyword) => this.attachedVariationCompactsForNamePhrase(keyword))
         );
 
         const selectedCompositeNames = prepared
             .filter((keyword) => keyword.compositeName && keyword.selectedByDefault)
+            .map((keyword) => keyword.compact);
+        const selectedAttachedNamePhrases = prepared
+            .filter((keyword) => keyword.attachedNamePhrase && keyword.selectedByDefault && this.isPureAttachedVariationPhrase(keyword))
             .map((keyword) => keyword.compact);
         const hasSelectedTitleCollector = prepared.some((keyword) =>
             keyword.collectorNumber &&
@@ -553,16 +589,23 @@ class VintedProcessor {
                         compositeCompact !== keyword.compact && compositeCompact.includes(keyword.compact)
                     )
                 );
+                const shadowedByAttachedNamePhrase = Boolean(
+                    keyword.attachedNamePhrase &&
+                    this.isPureAttachedVariationPhrase(keyword) &&
+                    selectedAttachedNamePhrases.some((attachedCompact) =>
+                        attachedCompact !== keyword.compact && attachedCompact.includes(keyword.compact)
+                    )
+                );
                 const enrichedKeyword = {
                     ...keyword,
                     attachedVariation: attachedVariation || selectedExplicitTitleVariation,
-                    shadowedByComposite,
+                    shadowedByComposite: shadowedByComposite || shadowedByAttachedNamePhrase,
                     selectedByDefault: (
                         keyword.selectedByDefault ||
                         attachedVariation ||
                         selectedExplicitTitleVariation ||
                         selectedValidatedNameWithTitleCollector
-                    ) && !shadowedByComposite,
+                    ) && !shadowedByComposite && !shadowedByAttachedNamePhrase,
                 };
                 return {
                     ...enrichedKeyword,
@@ -770,10 +813,12 @@ class VintedProcessor {
             .replace(/\s*\/\s*/g, '/')
             .replace(/\s+/g, ' ')
             .trim();
-        return normalized.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s+/g, '') ||
+        return normalized.match(/\bPROMO\s+\d{1,4}[a-z]?\b/i)?.[0] ||
             normalized.match(/\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s*\/\s*/g, '/').replace(/\s+/g, '') ||
+            normalized.match(/\b[A-Z][A-Z0-9-]{0,7}\s?\d{1,4}[a-z]?\s*\/\s*(?:[A-Z][A-Z0-9-]{0,7}\s?)?\d{1,4}[a-z]?\b/)?.[0]?.replace(/\s*\/\s*/g, '/').replace(/\s+/g, '') ||
+            normalized.match(/\b(?:BW|XY|SM|SWSH|SVP|SV-P)\s?-?\s?\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s+/g, ' ') ||
+            normalized.match(/\b[A-Z0-9][A-Z0-9-]{1,7}\s+\d{1,4}[a-z]?\b/)?.[0] ||
             normalized.match(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s*\/\s*/g, '/') ||
-            normalized.match(/\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/)?.[0] ||
             normalized;
     }
 

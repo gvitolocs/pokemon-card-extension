@@ -478,10 +478,7 @@ class EbayProcessor {
             ...featureKeywords.map((keyword) => keyword.value),
             ...(rarity ? [rarity] : []),
         ].filter((feature, index, all) => all.findIndex((candidate) => this.compactClueValue(candidate) === this.compactClueValue(feature)) === index);
-        const primaryClues = [
-            [name, variation].filter(Boolean).join(' '),
-            variation,
-        ].filter(Boolean);
+        const primaryClues = [name, variation].filter(Boolean);
         const searchTitle = this.buildEbaySearchTitle(title, selectedClues, keywords, {
             name,
             variation,
