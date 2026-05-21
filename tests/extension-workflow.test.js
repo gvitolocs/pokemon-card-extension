@@ -373,6 +373,12 @@ function createDomElement(tagName = 'div', attributes = {}) {
             if (selector.startsWith('[data-pokoin-vinted-panel-host]')) {
                 return this.attributes['data-pokoin-vinted-panel-host'] !== undefined;
             }
+            if (selector.startsWith('[data-pokoin-ebay-panel]')) {
+                return this.attributes['data-pokoin-ebay-panel'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-ebay-panel-host]')) {
+                return this.attributes['data-pokoin-ebay-panel-host'] !== undefined;
+            }
             if (selector.startsWith('[data-pokoin-extension-panel]')) {
                 const expected = selector.match(/\[data-pokoin-extension-panel="([^"]+)"\]/)?.[1];
                 if (expected) {
@@ -397,6 +403,9 @@ function createDomElement(tagName = 'div', attributes = {}) {
             }
             if (selector.startsWith('[data-pokoin-vinted-keyword]')) {
                 return this.attributes['data-pokoin-vinted-keyword'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-ebay-keyword]')) {
+                return this.attributes['data-pokoin-ebay-keyword'] !== undefined;
             }
             return false;
         },
@@ -1223,6 +1232,49 @@ test('Vinted Magnezone V keeps V variation distinct from ex', async () => {
     assert.deepEqual(messages.at(-1).previewRows.map((row) => row.card_id), ['magnezone-v']);
 });
 
+test('Vinted Mega Latias ex keeps Mega and ex selected in payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/380-mega-latias-ex', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /latias/i.test(String(title || '')) ? 'Latias' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = messages[0].vintedPayload;
+    assert.ok(selectedLabels.includes('Mega Latias ex'), 'attached Mega phrase should be selected');
+    assert.ok(selectedLabels.includes('Mega'), 'leading Mega modifier should stay selected');
+    assert.ok(selectedLabels.includes('ex'), 'explicit ex modifier should stay selected');
+    assert.equal(selectedLabels.includes('Megaevoluzione'), false, 'localized noisy evolution word should not be selected');
+    assert.equal(payload.name, 'Latias');
+    assert.deepEqual(new Set(payload.variation.split(/\s+/).filter(Boolean)), new Set(['Mega', 'ex']));
+    assert.deepEqual(new Set(payload.primaryClues), new Set(['Mega Latias ex', 'Mega', 'ex']));
+    assert.equal(messages[0].title, 'Mega Latias ex');
+    assert.doesNotMatch(messages[0].title, /Megaevoluzione|PSA/i);
+});
+
 test('Vinted Pikachu volo VMAX keeps noisy word out of structured payload', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -1365,6 +1417,100 @@ test('background Vinted selected keys keep unselected title words out of search'
     assert.equal(response.results[0].blueprint_id, 'flying-pikachu-vmax');
     assert.ok(fetchBodies.length > 0);
     assert.ok(fetchBodies.every((entry) => !JSON.stringify(entry.body).match(/\bvolo\b/i)));
+});
+
+test('background Vinted Mega Latias ex rejects non-Mega Latias rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.name, 'Mega Latias ex');
+                assert.equal(body.variation, 'Mega ex');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'alto-mares-latias', name: "Alto Mare's Latias", expansionName: 'Pokémon Movie VS Pack', collectorNumber: '011/018', score: 100 },
+                            { cardId: 'latias', name: 'Latias', expansionName: 'Generic Set', collectorNumber: '10', score: 98 },
+                            { cardId: 'mega-latias-ex', name: 'Mega Latias EX', expansionName: 'XY Promos', collectorNumber: 'XY78', score: 75 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.doesNotMatch(body.search_term || '', /Megaevoluzione|PSA/i);
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Mega Latias ex',
+                originalTitle: 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10',
+                url: 'https://www.vinted.it/items/380-mega-latias-ex',
+                clues: ['Mega Latias ex', 'Mega', 'ex'],
+                selectedClues: ['Mega Latias ex', 'Mega', 'ex'],
+                primaryClues: ['Mega Latias ex', 'Mega', 'ex'],
+                vintedPayload: {
+                    source: 'vinted',
+                    listingKey: 'https://www.vinted.it/items/380-mega-latias-ex',
+                    originalTitle: 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10',
+                    searchTitle: 'Mega Latias ex',
+                    name: 'Latias',
+                    variation: 'Mega ex',
+                    selectedClues: ['Mega Latias ex', 'Mega', 'ex'],
+                    primaryClues: ['Mega Latias ex', 'Mega', 'ex'],
+                },
+            },
+            { tab: { id: 380, title: 'Carta Pokémon Mega Latias Ex di Megaevoluzione PSA 10', url: 'https://www.vinted.it/items/380-mega-latias-ex' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.deepEqual(Array.from(response.results.map((row) => row.blueprint_id)), ['mega-latias-ex']);
+    assert.ok(fetchBodies.some((entry) => entry.url.includes('/api/extension-card-search')));
 });
 
 test('Vinted Magneton PROMO 159 keeps promo collector and preview rows in side panel payload', async () => {
@@ -1938,6 +2084,57 @@ test('background ranks Trainer Gallery slash collectors by full prefixed code', 
     assert.equal(sandbox.collectorNumberMatchRank('TG16/TG30', 'TG16/TG30'), 0);
     assert.equal(sandbox.collectorNumberMatches('16', 'TG16/TG30'), false);
     assert.equal(sorted[0].card_id, 'tg16');
+});
+
+test('database-observed collector formats stay atomic in marketplace parsers', () => {
+    const { Processor: VintedProcessor } = loadProcessor('processors/VINT.js', 'VintedProcessor');
+    const vintedProcessor = new VintedProcessor();
+    const vintedKeywords = vintedProcessor.extractVintedKeywords(
+        'Latias DRS 009 Machamp HL 9 Mew RC32/RC32 Pikachu SV-P 129',
+        ''
+    );
+    const vintedCollectors = vintedKeywords
+        .filter((keyword) => keyword.collectorNumber)
+        .map((keyword) => keyword.label);
+
+    assert.ok(vintedCollectors.includes('DRS 009'));
+    assert.ok(vintedCollectors.includes('HL 9'));
+    assert.ok(vintedCollectors.includes('RC32/RC32'));
+    assert.ok(vintedCollectors.includes('SV-P 129'));
+    assert.equal(vintedProcessor.normalizeVintedCollectorNumber('DRS 009'), 'DRS 009');
+    assert.equal(vintedProcessor.normalizeVintedCollectorNumber('HL 9'), 'HL 9');
+    assert.equal(vintedProcessor.normalizeVintedCollectorNumber('RC32/RC32'), 'RC32/RC32');
+    assert.equal(vintedProcessor.normalizeVintedCollectorNumber('SV-P 129'), 'SV-P 129');
+
+    const { Processor: EbayProcessor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor');
+    const ebayProcessor = new EbayProcessor();
+    assert.equal(ebayProcessor.extractCollectorNumber({}, 'Pokemon Latias DRS 009 Dragon Selection'), 'DRS 009');
+    assert.equal(ebayProcessor.extractCollectorNumber({}, 'Pokemon Machamp HL 9 EX Hidden Legends'), 'HL 9');
+    assert.equal(ebayProcessor.extractCollectorNumber({}, 'Mew RC32/RC32 Radiant Collection'), 'RC32/RC32');
+});
+
+test('background structured parser preserves prefixed collector evidence for API payloads', () => {
+    const sandbox = loadBackgroundHelpers([
+        'scrapeStructuredCardFields',
+        'collectorNumberForExtensionPayload',
+        'collectorNumberMatchRank',
+        'sortRowsForStructuredCard',
+    ]);
+    const structuredCard = sandbox.scrapeStructuredCardFields('Latias DRS 009', { expansion: 'Dragon Selection' });
+    const rows = [
+        { card_id: 'plain-009', name: 'Latias', set_name: 'Dragon Selection', card_number: '009/020', search_rank: 500 },
+        { card_id: 'wrong-prefix', name: 'Latias', set_name: 'Dragon Selection', card_number: 'POR 009', search_rank: 10 },
+        { card_id: 'drs-009', name: 'Latias', set_name: 'Dragon Selection', card_number: 'DRS 009', search_rank: 300 },
+    ];
+
+    assert.equal(structuredCard.name, 'Latias');
+    assert.equal(structuredCard.collectorNumber, 'DRS 009');
+    assert.equal(structuredCard.printedCollectorNumber, 'DRS 009');
+    assert.equal(structuredCard.numericCollectorNumber, '009');
+    assert.equal(sandbox.collectorNumberForExtensionPayload(structuredCard), 'DRS 009');
+    assert.equal(sandbox.collectorNumberMatchRank('DRS 009', 'DRS 009'), 0);
+    assert.ok(sandbox.collectorNumberMatchRank('009/020', 'DRS 009') > 0);
+    assert.equal(sandbox.sortRowsForStructuredCard(rows, structuredCard)[0].card_id, 'drs-009');
 });
 
 test('Vinted title collector number and localized expansion are selected and structured', async () => {
@@ -2955,10 +3152,152 @@ test('eBay Magearna EX title builds Vinted-like structured payload and clues', (
     assert.equal(payload.numericCollectorNumber, '110');
     assert.equal(payload.expansion, 'Steam Siege');
     assert.equal(payload.searchTitle, 'Magearna ex Steam Siege 110/114');
-    assert.deepEqual(Array.from(payload.primaryClues), ['Magearna ex', 'ex']);
+    assert.deepEqual(Array.from(payload.primaryClues), ['Magearna', 'ex']);
     assert.ok(payload.selectedClues.includes('110/114'));
     assert.ok(payload.selectedClues.includes('Steam Siege'));
     assert.match(processor.buildEbaySearchSignature(payload), /magearnaexsteamsiege110114/);
+});
+
+test('eBay overlay selected keys preserve RC collector and Radiant Collection evidence', async () => {
+    const messages = [];
+    const page = createDomElement('div');
+    const titleElement = createDomElement('h1', { 'data-testid': 'x-item-title__mainTitle' });
+    titleElement.textContent = 'Sylveon EX RC32/RC32 Generations Ultra Rare Full Art Holo 170HP TCG NM/LP';
+    page.appendChild(titleElement);
+
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.com/itm/rc32-sylveon?hash=abc',
+                hostname: 'www.ebay.com',
+                pathname: '/itm/rc32-sylveon',
+            },
+            extractTitleInfo: (title) => ({
+                pokemonName: /sylveon/i.test(String(title || '')) ? 'Sylveon' : null,
+                isEXCard: /\bex\b/i.test(String(title || '')),
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action === 'searchCardForTitle') {
+                        return {
+                            success: true,
+                            results: [
+                                { blueprint_id: 'sylveon-rc32', name_en: 'Sylveon EX', expansion_name_en: 'Generations Radiant Collection', collector_number: 'RC32/RC32', search_score: 95 },
+                            ],
+                        };
+                    }
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            title: titleElement.textContent,
+            querySelector: (selector) => {
+                if (selector.includes('h1') || selector.includes('x-item-title')) return titleElement;
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelector(selector);
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector.includes('x-item-title')) return [titleElement];
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelectorAll(selector);
+                return [];
+            },
+            contains: (element) => page.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: page,
+        },
+    });
+    const processor = new Processor();
+    processor.processProductPage();
+    await Promise.resolve();
+
+    const searchMessage = messages.find((message) => message.action === 'searchCardForTitle');
+    const host = page.querySelector('[data-pokoin-ebay-panel-host]');
+    const panel = host.shadowRoot.querySelector('[data-pokoin-ebay-panel]');
+    const selectedLabels = processor.selectedKeywordLabels();
+
+    assert.ok(host, 'eBay overlay host should render');
+    assert.ok(panel.querySelectorAll('[data-pokoin-ebay-keyword]').length > 0, 'eBay key chips should render');
+    assert.ok(selectedLabels.includes('Sylveon'), 'Pokemon name key should be selected');
+    assert.ok(selectedLabels.includes('ex'), 'explicit variation key should be selected');
+    assert.ok(selectedLabels.includes('RC32/RC32'), 'prefixed slash collector should stay atomic');
+    assert.ok(selectedLabels.includes('Generations Radiant Collection'), 'RC collector should add Radiant Collection context');
+    assert.equal(searchMessage.ebayPayload.name, 'Sylveon');
+    assert.equal(searchMessage.ebayPayload.variation, 'ex');
+    assert.equal(searchMessage.ebayPayload.collectorNumber, 'RC32/RC32');
+    assert.equal(searchMessage.ebayPayload.expansion, 'Generations Radiant Collection');
+    assert.equal(searchMessage.title, 'Sylveon ex Generations Radiant Collection RC32/RC32');
+});
+
+test('eBay overlay chip toggles invalidate stale rows and send selected-key payload', async () => {
+    const messages = [];
+    let resolveFirst;
+    const firstSearch = new Promise((resolve) => {
+        resolveFirst = resolve;
+    });
+    let searchCount = 0;
+    const page = createDomElement('div');
+    const titleElement = createDomElement('h1', { 'data-testid': 'x-item-title__mainTitle' });
+    titleElement.textContent = 'Zangoose 14/100 EX Team Magma vs Aqua Pokemon TCG';
+    page.appendChild(titleElement);
+
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.com/itm/zangoose-14', hostname: 'www.ebay.com', pathname: '/itm/zangoose-14' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /zangoose/i.test(String(title || '')) ? 'Zangoose' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action !== 'searchCardForTitle') return { success: true };
+                    searchCount += 1;
+                    if (searchCount === 1) return firstSearch;
+                    return { success: true, results: [{ blueprint_id: 'zangoose-14', name_en: 'Zangoose', expansion_name_en: 'EX Team Magma vs Aqua', collector_number: '14/100', search_score: 95 }] };
+                },
+            },
+        },
+        document: {
+            title: titleElement.textContent,
+            querySelector: (selector) => {
+                if (selector.includes('h1') || selector.includes('x-item-title')) return titleElement;
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelector(selector);
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector.includes('x-item-title')) return [titleElement];
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelectorAll(selector);
+                return [];
+            },
+            contains: (element) => page.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: page,
+        },
+    });
+    const processor = new Processor();
+    processor.processProductPage();
+
+    const manualChip = processor.currentPanel.querySelectorAll('[data-pokoin-ebay-keyword]')
+        .find((chip) => chip.attributes['aria-pressed'] === 'false');
+    assert.ok(manualChip, 'manual eBay key chip should be available to toggle');
+    manualChip.eventListeners.click({ preventDefault() {}, stopPropagation() {}, stopImmediatePropagation() {} });
+    await Promise.resolve();
+    resolveFirst({ success: true, results: [{ blueprint_id: 'stale-zangoose', name_en: 'Zangoose', collector_number: '15/100', search_score: 99 }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(processor.lastRenderedPreviewResults[0]?.blueprint_id, 'zangoose-14');
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 2);
+    assert.equal(messages[1].selectionRevision, 1);
+    assert.ok(messages[1].ebayPayload.selectedClues.length > messages[0].ebayPayload.selectedClues.length);
 });
 
 test('eBay button sends same structured payload and preview rows to side panel', async () => {
@@ -3622,6 +3961,30 @@ test('background ranks Magearna EX 110/114 Steam Siege above generic Magearna ex
 
     assert.equal(sorted[0].card_id, 'steam-110');
     assert.equal(sorted.at(-1).card_id, 'generic-mega');
+});
+
+test('background ranks eBay RC32 Radiant Collection above generic Sylveon ex rows', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard', 'collectorNumberMatchRank', 'expansionMatches']);
+    const rows = [
+        { card_id: 'generic-156', name: 'Sylveon ex', set_name: 'Prismatic Evolutions', card_number: '156/131', search_rank: 12000 },
+        { card_id: 'tfe-212', name: 'Sylveon ex', set_name: 'Twilight Masquerade', card_number: '212/167', search_rank: 11000 },
+        { card_id: 'rc32', name: 'Sylveon EX', set_name: 'Generations Radiant Collection', card_number: 'RC32/RC32', search_rank: 10 },
+        { card_id: 'bare-32', name: 'Sylveon EX', set_name: 'Generations', card_number: '32/83', search_rank: 9000 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Sylveon',
+        searchName: 'Sylveon ex',
+        variation: 'ex',
+        collectorNumber: 'RC32/RC32',
+        numericCollectorNumber: '32',
+        expansion: 'Generations Radiant Collection',
+    });
+
+    assert.equal(sandbox.collectorNumberMatchRank('RC32/RC32', 'RC32/RC32'), 0);
+    assert.equal(sandbox.collectorNumberMatchRank('32/83', 'RC32/RC32'), 99);
+    assert.equal(sandbox.expansionMatches('Generations Radiant Collection', 'Radiant Collection'), true);
+    assert.equal(sorted[0].card_id, 'rc32');
+    assert.equal(sorted.at(-1).card_id, 'tfe-212');
 });
 
 test('background normalizes eBay payload for exact Magearna search', () => {

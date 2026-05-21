@@ -468,6 +468,8 @@ function scrapeCardmarketContext(title = '') {
 function cardmarketExpansionAliases() {
     return [
         { pattern: /^(?:DRS|Dragon\s+Selection)$/i, name: 'Dragon Selection' },
+        { pattern: /\b(?:RC|Radiant\s+Collection)\b/i, name: 'Radiant Collection' },
+        { pattern: /\bGenerations\s+Radiant\s+Collection\b/i, name: 'Generations Radiant Collection' },
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
         { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
         { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
@@ -486,6 +488,8 @@ function normalizeExpansionAlias(value = '') {
         ? cardmarketExpansionAliases()
         : [
             { pattern: /^(?:DRS|Dragon\s+Selection)$/i, name: 'Dragon Selection' },
+            { pattern: /\b(?:RC|Radiant\s+Collection)\b/i, name: 'Radiant Collection' },
+            { pattern: /\bGenerations\s+Radiant\s+Collection\b/i, name: 'Generations Radiant Collection' },
             { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
             { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
             { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
@@ -655,13 +659,25 @@ function scrapeStructuredCardFields(title = '', context = null) {
         .replace(/\s+/g, ' ')
         .trim();
 
-    const prefixedCollectorNumber = cleanTitle.match(/\b([A-Z]{1,6})\s?(\d{1,4}[a-z]?)(?:\s*\/\s*\d{1,4}[a-z]?)?\b/i);
-    const collectorNumber = (
-        cleanTitle.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i)?.[0] ||
-        cleanTitle.match(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/)?.[0] ||
+    const prefixedSlashCollectorNumber = cleanTitle.match(/\b([A-Z][A-Z0-9-]{0,7})\s?(\d{1,4}[a-z]?)\s*\/\s*(?:([A-Z][A-Z0-9-]{0,7})\s?)?(\d{1,4}[a-z]?)\b/i);
+    const prefixedCollectorNumber = cleanTitle.match(/\b([A-Z0-9][A-Z0-9-]{1,7})\s+(\d{1,4}[a-z]?)\b/);
+    const compactPrefixedCollectorNumber = cleanTitle.match(/\b(BW|XY|SM|SWSH|SVP|SV-P)(\d{1,4}[a-z]?)\b/i);
+    const prefixedSlashCollector = prefixedSlashCollectorNumber
+        ? `${prefixedSlashCollectorNumber[1].toUpperCase()}${prefixedSlashCollectorNumber[2]}/${(prefixedSlashCollectorNumber[3] || prefixedSlashCollectorNumber[1]).toUpperCase()}${prefixedSlashCollectorNumber[4]}`
+        : '';
+    const prefixedCollectorValue = prefixedSlashCollector ||
+        (prefixedCollectorNumber ? `${prefixedCollectorNumber[1].toUpperCase()} ${prefixedCollectorNumber[2]}` : '') ||
+        (compactPrefixedCollectorNumber ? `${compactPrefixedCollectorNumber[1].toUpperCase()}${compactPrefixedCollectorNumber[2]}` : '');
+    const numericCollectorNumber = prefixedSlashCollectorNumber?.[2] ||
         prefixedCollectorNumber?.[2] ||
+        compactPrefixedCollectorNumber?.[2] ||
+        cleanTitle.match(/\b(\d{1,4}[a-z]?)\s*\/\s*\d{1,4}[a-z]?\b/)?.[1] ||
+        '';
+    const collectorNumber = (
+        prefixedCollectorValue ||
+        cleanTitle.match(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/)?.[0] ||
         ''
-    ).replace(/\s+/g, '');
+    ).replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
 
     const variationMatch = cleanTitle.match(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i);
     const variation = variationMatch
@@ -680,10 +696,14 @@ function scrapeStructuredCardFields(title = '', context = null) {
     const expansionNoise = [
         'Legendary Treasure',
         'Legendary Treasures',
+        'Dragon Selection',
         'Black Star Promos',
         'BW Black Star Promos',
         'Paldean Fates',
         'Pokemon 151',
+        'Generations Radiant Collection',
+        'Radiant Collection',
+        'Generations',
         'Steam Siege',
         'Fates Collide',
         'Evolutions',
@@ -702,6 +722,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
     name = name
         .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\bevoluzioni\b/gi, ' ')
+        .replace(/\b(?:Dragon\s+Selection|Generations\s+Radiant\s+Collection|Radiant\s+Collection|Generations)\b/gi, ' ')
         .replace(/\b(?:Legendary|Treasure|Treasures|Promo|Promos)\b/gi, ' ')
         .replace(/\b(?:special illustration rare|illustration rare|illustration|secret rare|ultra rare|holo rare|holo|promo|rare)\b/gi, ' ')
         .replace(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
@@ -712,10 +733,9 @@ function scrapeStructuredCardFields(title = '', context = null) {
         rawTitle: cleanTitle,
         name: removeMarketplaceSearchNoise(name),
         collectorNumber,
-        collectorNumberPrefix: prefixedCollectorNumber?.[1]?.toUpperCase() || '',
-        printedCollectorNumber: prefixedCollectorNumber?.[1]
-            ? `${prefixedCollectorNumber[1].toUpperCase()} ${prefixedCollectorNumber[2]}`
-            : collectorNumber,
+        collectorNumberPrefix: (prefixedSlashCollectorNumber?.[1] || prefixedCollectorNumber?.[1] || compactPrefixedCollectorNumber?.[1] || '').toUpperCase(),
+        printedCollectorNumber: prefixedCollectorValue || collectorNumber,
+        numericCollectorNumber,
         expansion,
         editionHint: hasEditionHint,
         rarity,
@@ -779,6 +799,7 @@ function normalizeMarketplacePayload(payload = null) {
         .trim();
     const selectedSearchTitle = buildPrimaryClueSearchTitle('', selectedClues, primaryClues) ||
         removeMarketplaceSearchNoise(payload.searchTitle || '');
+    const variationTokens = normalizedVariationTokens(payload.variation || '');
     const structuredCard = {
         rawTitle: payload.source === 'vinted'
             ? selectedSearchTitle
@@ -791,8 +812,9 @@ function normalizeMarketplacePayload(payload = null) {
         expansion: removeMarketplaceSearchNoise(payload.expansion || ''),
         rarity: removeMarketplaceSearchNoise(payload.rarity || (features.includes('illustration') ? 'illustration' : '')),
         variation: removeMarketplaceSearchNoise(payload.variation || ''),
+        variationTokens,
         strictVariation: payload.source === 'vinted' && !payload.variation,
-        searchName: removeMarketplaceSearchNoise([payload.name || primaryClues[0] || '', payload.variation || ''].filter(Boolean).join(' ')),
+        searchName: searchNameWithVariation(payload.name || primaryClues[0] || '', payload.variation || ''),
     };
     return {
         ...payload,
@@ -959,6 +981,11 @@ function searchNameWithVariation(name = '', variation = '') {
     const compactVariation = compactSearchValue(variation);
     if (!compactVariation || compactName.endsWith(compactVariation)) {
         return name;
+    }
+    const variationTokens = normalizedVariationTokens(variation);
+    if (variationTokens.includes('mega')) {
+        const suffixTokens = variationTokens.filter((token) => token !== 'mega');
+        return ['Mega', name, ...suffixTokens].filter(Boolean).join(' ');
     }
     return [name, variation].filter(Boolean).join(' ');
 }
@@ -1293,6 +1320,10 @@ function expansionAliasCompacts(expansion = '') {
         hl: 'EX Hidden Legends',
         exhiddenlegends: 'HL',
         hlexhiddenlegends: 'EX Hidden Legends',
+        rc: 'Radiant Collection',
+        radiantcollection: 'RC',
+        generationsradiantcollection: 'Radiant Collection',
+        generations: 'Radiant Collection',
     };
     if (codeAliases[compactExpansion]) {
         variants.add(codeAliases[compactExpansion]);
@@ -1338,7 +1369,8 @@ function expansionMatchRank(rowExpansion = '', requestedExpansion = '') {
 function collectorNumberParts(value = '') {
     const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
     const normalized = normalizeCollectorValue(cleanValue);
-    const prefix = cleanValue.match(/\b(PROMO|[A-Z0-9]*[A-Z][A-Z0-9]{0,5})\s*\d{1,4}[a-z]?\b/i)?.[1]?.toLowerCase() || '';
+    const prefix = cleanValue.match(/\b(PROMO|[A-Z0-9]*[A-Z][A-Z0-9-]{0,7})\s*\d{1,4}[a-z]?\b/i)?.[1]?.toLowerCase() || '';
+    const slashMatch = normalized.match(/([a-z0-9-]*?)(\d{1,4}[a-z]?)\/([a-z0-9-]*?)(\d{1,4}[a-z]?)/i);
     const primary = normalized.match(/\d{1,4}[a-z]?(?=\/|$)/i)?.[0] ||
         normalized.match(/\d{1,4}[a-z]?/i)?.[0] ||
         '';
@@ -1348,6 +1380,8 @@ function collectorNumberParts(value = '') {
         primary,
         numericPrimary: primary.replace(/^0+(\d)/, '$1'),
         hasSlash: normalized.includes('/'),
+        slashRight: slashMatch?.[4] || '',
+        normalizedWithoutPrefix: normalized.replace(/^[a-z0-9-]*?(?=\d)/i, ''),
     };
 }
 
@@ -1360,6 +1394,16 @@ function collectorNumberMatchRank(rowNumber = '', requestedNumber = '') {
 
     if (row.normalized === requested.normalized) {
         return 0;
+    }
+
+    if (
+        row.hasSlash &&
+        requested.hasSlash &&
+        row.prefix &&
+        requested.prefix &&
+        row.prefix !== requested.prefix
+    ) {
+        return 99;
     }
 
     if (requested.hasSlash && requested.prefix) {
@@ -1423,36 +1467,59 @@ function normalizeVariationValue(value = '') {
         .replace(/[^a-z0-9]+/g, '');
 }
 
+function explicitVariationsFromName(value = '') {
+    const matches = String(value || '').match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi) || [];
+    return [...new Set(matches.map(normalizeVariationValue).filter(Boolean))];
+}
+
 function explicitVariationFromName(value = '') {
-    const match = String(value || '').match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i);
-    return match ? normalizeVariationValue(match[0]) : '';
+    return explicitVariationsFromName(value)[0] || '';
+}
+
+function normalizedVariationTokens(value = '') {
+    return explicitVariationsFromName(value);
+}
+
+function requestedVariationTokens(structuredCard = {}) {
+    const tokens = Array.isArray(structuredCard?.variationTokens)
+        ? structuredCard.variationTokens
+        : normalizedVariationTokens(structuredCard?.variation || '');
+    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
+    return [...new Set([
+        ...tokens,
+        ...(
+            requestedVariation && tokens.length === 0
+                ? [requestedVariation]
+                : []
+        ),
+    ].filter(Boolean))];
 }
 
 function rowMatchesStructuredVariation(row = {}, structuredCard = {}) {
-    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
-    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
-    if (!requestedVariation) {
-        return !structuredCard?.strictVariation || !rowVariation;
+    const requestedTokens = requestedVariationTokens(structuredCard);
+    const rowTokens = explicitVariationsFromName(row?.name || row?.canonical_name || '');
+    if (requestedTokens.length === 0) {
+        return !structuredCard?.strictVariation || rowTokens.length === 0;
     }
-    if (requestedVariation === 'v' && !hasExplicitVariationStructuredRows([row], structuredCard)) {
+    if (requestedTokens.length === 1 && requestedTokens[0] === 'v' && !hasExplicitVariationStructuredRows([row], structuredCard)) {
         return false;
     }
-    if (hasStructuredCollectorIdentity(structuredCard) && !rowVariation) {
+    if (hasStructuredCollectorIdentity(structuredCard) && rowTokens.length === 0) {
         return false;
     }
-    return !rowVariation || rowVariation === requestedVariation;
+    return requestedTokens.every((token) => rowTokens.includes(token));
 }
 
 function variationMatchRank(row = {}, structuredCard = {}) {
-    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
-    if (!requestedVariation) {
+    const requestedTokens = requestedVariationTokens(structuredCard);
+    if (requestedTokens.length === 0) {
         return 0;
     }
-    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
-    if (!rowVariation) {
+    const rowTokens = explicitVariationsFromName(row?.name || row?.canonical_name || '');
+    if (rowTokens.length === 0) {
         return 1;
     }
-    return rowVariation === requestedVariation ? 0 : 99;
+    return requestedTokens.every((token) => rowTokens.includes(token)) ? 0 : 99;
 }
 
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
@@ -1626,8 +1693,11 @@ function hasGoodEnoughExactRows(rows = [], structuredCard = {}) {
 }
 
 function hasExplicitVariationStructuredRows(rows = [], structuredCard = {}) {
-    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
-    return Boolean(requestedVariation) && rows.some((row) => explicitVariationFromName(row?.name || row?.canonical_name || '') === requestedVariation);
+    const requestedTokens = requestedVariationTokens(structuredCard);
+    return requestedTokens.length > 0 && rows.some((row) => {
+        const rowTokens = explicitVariationsFromName(row?.name || row?.canonical_name || '');
+        return requestedTokens.every((token) => rowTokens.includes(token));
+    });
 }
 
 function filterStrongExactRows(rows = [], structuredCard = {}) {
@@ -1692,13 +1762,13 @@ function rowMatchesExactOrStructuredVariationName(row = {}, structuredCard = {})
         return true;
     }
     const requestedName = compactSearchValue(structuredCard?.name || '');
-    const requestedVariation = normalizeVariationValue(structuredCard?.variation || '');
+    const requestedTokens = requestedVariationTokens(structuredCard);
     const rowName = compactSearchValue(row?.name || '');
-    const rowVariation = explicitVariationFromName(row?.name || row?.canonical_name || '');
+    const rowTokens = explicitVariationsFromName(row?.name || row?.canonical_name || '');
     return Boolean(
         requestedName &&
-        requestedVariation &&
-        rowVariation === requestedVariation &&
+        requestedTokens.length > 0 &&
+        requestedTokens.every((token) => rowTokens.includes(token)) &&
         rowName.includes(requestedName)
     );
 }
