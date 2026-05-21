@@ -2439,11 +2439,17 @@ function buildCardmarketObservationPayload({ pageInfo = {}, best = null, rows = 
         return null;
     }
     const match = matchFromRow(best || rows[0] || null);
+    const cardmarketContext = cardmarketContextFromPageInfo(pageInfo);
     return {
+        url: cardmarketContext.url,
+        title: cardmarketContext.title,
+        hostname: cardmarketContext.hostname,
         structuredCard,
-        cardmarketContext: cardmarketContextFromPageInfo(pageInfo),
+        cardmarketContext,
         match,
         promoteVerifiedLink: Boolean(promoteVerifiedLink && match?.cardId),
+        extensionVersion: EXTENSION_VERSION,
+        source: 'pokemon-card-extension',
     };
 }
 

@@ -93,6 +93,44 @@ function loadBackgroundHelpers(helperNames = []) {
     return sandbox;
 }
 
+function loadPokoinAuthBridge(overrides = {}) {
+    const source = readRepoFile('pokoin-auth-bridge.js');
+    const messages = [];
+    const postedMessages = [];
+    let messageListener = null;
+    const sandbox = {
+        window: {
+            location: {
+                origin: 'https://pokoin.com',
+                pathname: '/extension/auth-bridge',
+            },
+            addEventListener(type, listener) {
+                if (type === 'message') {
+                    messageListener = listener;
+                }
+            },
+            postMessage(message, targetOrigin) {
+                postedMessages.push({ message, targetOrigin });
+            },
+            ...(overrides.window || {}),
+        },
+        chrome: {
+            runtime: {
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+            ...(overrides.chrome || {}),
+        },
+    };
+    sandbox.window.window = sandbox.window;
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'pokoin-auth-bridge.js' });
+    assert.equal(typeof messageListener, 'function', 'Pokoin auth bridge should install a message listener');
+    return { sandbox, messages, postedMessages, messageListener };
+}
+
 function loadProcessor(relativePath, className, overrides = {}) {
     const source = readRepoFile(relativePath);
     const defaultWindow = {
@@ -9325,37 +9363,7 @@ test('all marketplace buttons use the side panel message workflow', () => {
 });
 
 test('Pokoin auth bridge forwards only same-origin token messages', async () => {
-    const source = readRepoFile('pokoin-auth-bridge.js');
-    const messages = [];
-    const postedMessages = [];
-    let messageListener = null;
-    const sandbox = {
-        window: {
-            location: {
-                origin: 'https://pokoin.com',
-                pathname: '/extension/auth-bridge',
-            },
-            addEventListener(type, listener) {
-                if (type === 'message') {
-                    messageListener = listener;
-                }
-            },
-            postMessage(message, targetOrigin) {
-                postedMessages.push({ message, targetOrigin });
-            },
-        },
-        chrome: {
-            runtime: {
-                sendMessage: async (message) => {
-                    messages.push(message);
-                    return { success: true };
-                },
-            },
-        },
-    };
-    sandbox.window.window = sandbox.window;
-    vm.createContext(sandbox);
-    vm.runInContext(source, sandbox, { filename: 'pokoin-auth-bridge.js' });
+    const { sandbox, messages, postedMessages, messageListener } = loadPokoinAuthBridge();
 
     assert.equal(postedMessages[0].targetOrigin, 'https://pokoin.com');
     assert.equal(postedMessages[0].message.type, 'POKOIN_EXTENSION_AUTH_TOKEN_REQUEST');
@@ -9392,34 +9400,7 @@ test('Pokoin auth bridge forwards only same-origin token messages', async () => 
 });
 
 test('Pokoin auth bridge accepts current Pokoin web token payload', async () => {
-    const source = readRepoFile('pokoin-auth-bridge.js');
-    const messages = [];
-    let messageListener = null;
-    const sandbox = {
-        window: {
-            location: {
-                origin: 'https://pokoin.com',
-                pathname: '/extension/auth-bridge',
-            },
-            addEventListener(type, listener) {
-                if (type === 'message') {
-                    messageListener = listener;
-                }
-            },
-            postMessage() {},
-        },
-        chrome: {
-            runtime: {
-                sendMessage: async (message) => {
-                    messages.push(message);
-                    return { success: true };
-                },
-            },
-        },
-    };
-    sandbox.window.window = sandbox.window;
-    vm.createContext(sandbox);
-    vm.runInContext(source, sandbox, { filename: 'pokoin-auth-bridge.js' });
+    const { sandbox, messages, messageListener } = loadPokoinAuthBridge();
 
     await messageListener({
         origin: 'https://pokoin.com',
@@ -9428,8 +9409,11 @@ test('Pokoin auth bridge accepts current Pokoin web token payload', async () => 
             type: 'pokoin-auth-token',
             ok: true,
             token: {
-                token: 'firebase-token-from-current-pokoin-web-message',
+                accessToken: 'firebase-token-from-current-pokoin-web-message',
                 expiresAt: Date.now() + 600000,
+                issuedAt: Date.now(),
+                uid: 'pokoin-user-id',
+                email: 'user@example.com',
             },
         },
     });
@@ -9438,6 +9422,64 @@ test('Pokoin auth bridge accepts current Pokoin web token payload', async () => 
     assert.equal(messages[0].action, 'pokoinAuthTokenReceived');
     assert.equal(messages[0].tokenMessage.type, 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE');
     assert.equal(messages[0].tokenMessage.token, 'firebase-token-from-current-pokoin-web-message');
+    assert.equal(messages[0].tokenMessage.uid, 'pokoin-user-id');
+    assert.equal(messages[0].tokenMessage.email, 'user@example.com');
+});
+
+test('Pokoin auth bridge accepts JSON string token payload', async () => {
+    const { sandbox, messages, messageListener } = loadPokoinAuthBridge();
+
+    await messageListener({
+        origin: 'https://pokoin.com',
+        source: sandbox.window,
+        data: JSON.stringify({
+            type: 'pokoin-auth-token',
+            ok: true,
+            token: {
+                accessToken: 'firebase-token-from-json-pokoin-web-message',
+                expirationTime: Date.now() + 600000,
+            },
+        }),
+    });
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].action, 'pokoinAuthTokenReceived');
+    assert.equal(messages[0].tokenMessage.type, 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE');
+    assert.equal(messages[0].tokenMessage.token, 'firebase-token-from-json-pokoin-web-message');
+});
+
+test('Pokoin auth bridge rejects old and malformed token payloads', async () => {
+    const { sandbox, messages, messageListener } = loadPokoinAuthBridge();
+
+    await messageListener({
+        origin: 'https://pokoin.com',
+        source: sandbox.window,
+        data: {
+            type: 'pokoin-auth-token',
+            ok: true,
+            token: {
+                token: 'legacy-token-field-should-not-be-accepted',
+            },
+        },
+    });
+    await messageListener({
+        origin: 'https://pokoin.com',
+        source: sandbox.window,
+        data: '{"type":"pokoin-auth-token","ok":true,"token":',
+    });
+    await messageListener({
+        origin: 'https://pokoin.com',
+        source: sandbox.window,
+        data: {
+            type: 'pokoin-auth-token',
+            ok: true,
+            token: {
+                accessToken: 'short',
+            },
+        },
+    });
+
+    assert.equal(messages.length, 0);
 });
 
 test('Pokoin auth token validation stores session token only', async () => {
@@ -9634,6 +9676,43 @@ test('Cardmarket observation POST uses bearer auth payload and de-dupes signatur
     assert.equal(fetchCalls[0].body.cardmarketContext.url, payload.cardmarketContext.url);
     assert.equal(fetchCalls[0].body.match.cardId, 'mep-042');
     assert.equal(fetchCalls[0].body.promoteVerifiedLink, false);
+});
+
+test('Cardmarket observation payload includes top-level page URL metadata', () => {
+    const sandbox = loadBackgroundHelpers(['buildCardmarketObservationPayload']);
+    const url = 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Dragon-Majesty/Hydreigon-DRM33';
+
+    const payload = sandbox.buildCardmarketObservationPayload({
+        pageInfo: {
+            url,
+            title: 'Hydreigon (DRM 33)',
+            hostname: 'www.cardmarket.com',
+            structuredCard: {
+                rawTitle: 'Hydreigon (DRM 33)',
+                name: 'Hydreigon',
+                collectorNumber: 'DRM 33',
+                numericCollectorNumber: '33',
+                expansion: 'Dragon Majesty',
+            },
+        },
+        best: {
+            card_id: '114322',
+            name: 'Hydreigon',
+            set_name: 'Dragon Majesty',
+            card_number: 'DRM 33',
+            search_rank: 98,
+        },
+    });
+
+    assert.equal(payload.url, url);
+    assert.equal(payload.title, 'Hydreigon (DRM 33)');
+    assert.equal(payload.hostname, 'www.cardmarket.com');
+    assert.equal(payload.source, 'pokemon-card-extension');
+    assert.equal(payload.extensionVersion, '2.0.0');
+    assert.equal(payload.structuredCard.name, 'Hydreigon');
+    assert.equal(payload.cardmarketContext.url, url);
+    assert.equal(payload.match.cardId, '114322');
+    assert.equal(payload.promoteVerifiedLink, false);
 });
 
 test('Cardmarket observation with missing token queues without blocking matching state', async () => {

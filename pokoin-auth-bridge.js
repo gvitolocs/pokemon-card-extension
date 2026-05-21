@@ -8,12 +8,23 @@
             window.location.pathname === '/extension/auth-bridge';
     }
 
+    function parseBridgeMessage(data) {
+        if (typeof data === 'string') {
+            try {
+                return JSON.parse(data);
+            } catch (error) {
+                return null;
+            }
+        }
+        return data && typeof data === 'object' ? data : null;
+    }
+
     function isTokenMessage(data) {
         return data &&
             typeof data === 'object' &&
             (
                 (data.type === RESPONSE_TYPE && typeof data.token === 'string' && data.token.length > 20) ||
-                (data.type === 'pokoin-auth-token' && data.ok === true && typeof data.token?.token === 'string' && data.token.token.length > 20)
+                (data.type === 'pokoin-auth-token' && data.ok === true && typeof data.token?.accessToken === 'string' && data.token.accessToken.length > 20)
             );
     }
 
@@ -21,9 +32,11 @@
         if (data.type === 'pokoin-auth-token') {
             return {
                 type: RESPONSE_TYPE,
-                token: data.token.token,
+                token: data.token.accessToken,
                 expiresAt: data.token.expiresAt || data.token.expirationTime || null,
                 issuedAt: data.token.issuedAt || null,
+                uid: data.token.uid || '',
+                email: data.token.email || '',
             };
         }
 
@@ -40,13 +53,14 @@
     }
 
     window.addEventListener('message', (event) => {
-        if (event.origin !== TRUSTED_ORIGIN || event.source !== window || !isTokenMessage(event.data)) {
+        const data = parseBridgeMessage(event.data);
+        if (event.origin !== TRUSTED_ORIGIN || event.source !== window || !isTokenMessage(data)) {
             return;
         }
 
         chrome.runtime.sendMessage({
             action: 'pokoinAuthTokenReceived',
-            tokenMessage: normalizeTokenMessage(event.data),
+            tokenMessage: normalizeTokenMessage(data),
         }).catch(() => {});
     });
 
