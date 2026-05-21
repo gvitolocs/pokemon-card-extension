@@ -8,7 +8,7 @@
 4. Clicking any marketplace button opens the Chrome side panel for the current tab instead of opening a new browser tab.
 5. The background service worker refreshes the side panel state for the sender tab.
 6. The side panel embeds the Pokoin marketplace card page so the user's Pokoin login session stays inside the panel.
-7. Marketplace processors use the background service worker as the reliable Cardvault search path. Direct content-script fetches are legacy/fallback only; expected page-context network failures are quiet and must not spam Chrome extension warnings on repeated processor attempts.
+7. Marketplace processors use the background service worker as the reliable Cardvault search path. There is no active Supabase client, `config/supabase` module, or direct database lookup in the extension.
 8. Button clicks always force a fresh side-panel loading state and resolve the clicked tab URL/title, avoiding stale candidates from previous pages.
 9. Vinted, eBay, Cardmarket, and CardTrader all use this same button -> background refresh -> side panel render workflow.
 10. Vinted passes selected item-description clues with preview searches and button clicks. Selected Pokemon-name-like clues are marked as primary clues, so the background service worker searches that clue first instead of noisy title/category fragments.
@@ -60,7 +60,9 @@
 
 ## Processor Boundaries
 
-Marketplace processors are responsible for page detection, button placement, lightweight preview UI, and sending `searchCardForTitle` / `openSidePanelForCurrentTab` messages. The background service worker owns Cardvault search, fallback autocomplete, and the canonical side-panel payload: `pageInfo`, `rows`, `best`, `blueprintId`, `pokoinUrl`, `error`, and debug metadata. Processors should not open Pokoin cards directly, should not depend on having a resolved candidate before wiring the side-panel click handler, and should avoid repeated direct content-script API fetches that produce noisy page-context failures.
+Marketplace processors are responsible for page detection, button placement, lightweight preview UI, and sending `searchCardForTitle` / `openSidePanelForCurrentTab` messages. The background service worker owns Cardvault search, fallback autocomplete, and the canonical side-panel payload: `pageInfo`, `rows`, `best`, `blueprintId`, `pokoinUrl`, `error`, and debug metadata. Processors should not open Pokoin cards directly, should not depend on having a resolved candidate before wiring the side-panel click handler, and should not add direct Supabase/database lookups.
+
+Some older content-script APIs still use database-era names such as `searchCardInDatabase` and return result objects with legacy field names like `blueprint_id` for processor compatibility. Those adapters now call Pokoin/Cardvault endpoints (`/api/extension-card-search` and `/api/marketplace-autocomplete`); they are not Supabase integration points.
 
 eBay and Cardmarket processors attach the side-panel click handler as soon as the gray button is created, then only update visual state after matches arrive. Vinted additionally sends selected clue chips and primary Pokemon-name-like clues. CardTrader sends the blueprint id directly and lets the background service worker write a complete direct-card side-panel state.
 
