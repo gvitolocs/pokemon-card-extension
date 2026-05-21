@@ -853,6 +853,32 @@ test('Vinted collector codes stay atomic and suppress noisy partial chips', () =
     assert.equal(lowerLabels.includes('11b 137 appena'), false);
 });
 
+test('Vinted Lapras bare collector number is atomic and keeps illustration visible', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: (title) => ({
+                pokemonName: /^lapras$/i.test(String(title || '').replace(/\b(?:it|ita|appena|sbustata)\b/gi, '').trim()) ? 'Lapras' : null,
+            }),
+        },
+    });
+    const processor = new Processor();
+
+    const keywords = processor.extractVintedKeywords(
+        'Pokemon carta Lapras it 194',
+        '194 appena sbustata, condizioni ottime'
+    );
+    const labels = keywords.map((keyword) => keyword.label);
+    const lowerLabels = labels.map((label) => label.toLowerCase());
+
+    assert.ok(labels.includes('Lapras'), 'card name should be visible');
+    assert.ok(labels.includes('194'), 'bare collector number should be a standalone chip');
+    assert.ok(labels.includes('illustration'), 'manual illustration chip should not be truncated');
+    assert.equal(lowerLabels.includes('it 194'), false);
+    assert.equal(lowerLabels.includes('194 appena'), false);
+    assert.equal(keywords.find((keyword) => keyword.label === '194')?.category, 'collector');
+    assert.equal(keywords.find((keyword) => keyword.label === 'illustration')?.selectedByDefault, false);
+});
+
 test('Vinted illustration chip is always visible and only auto-selected from title hint', () => {
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -1523,6 +1549,55 @@ test('Vinted side panel payload includes selected clues and preview rows', async
     assert.ok(sidePanelMessage.clues.some((clue) => /^illustration$/i.test(clue)));
     assert.ok(sidePanelMessage.primaryClues.some((clue) => /^Tornadus ex$/i.test(clue)));
     assert.match(sidePanelMessage.previewSignature, /tornadusex/);
+});
+
+test('Vinted structured payload carries selected collector to background and side panel', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/194-lapras', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /lapras/i.test(String(title || '')) ? 'Lapras' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return {
+                        success: true,
+                        results: [
+                            { blueprint_id: 'lapras-194', name_en: 'Lapras', expansion_name_en: 'Stellar Crown', collector_number: '194', search_score: 99 },
+                        ],
+                    };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pokemon carta Lapras it 194';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '194 appena sbustata');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault || keyword.compact === '194')
+            .map((keyword) => keyword.compact)
+    );
+    processor.currentButton = createButtonStub();
+    processor.renderCandidatePreview = () => {};
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+    await processor.openPokoinSidePanel();
+
+    const searchMessage = messages[0];
+    const sidePanelMessage = messages.at(-1);
+    assert.equal(searchMessage.vintedPayload.collectorNumber, '194');
+    assert.equal(searchMessage.vintedPayload.numericCollectorNumber, '194');
+    assert.deepEqual(Array.from(searchMessage.vintedPayload.primaryClues), ['Lapras']);
+    assert.ok(searchMessage.vintedPayload.selectedClues.includes('194'));
+    assert.equal(sidePanelMessage.vintedPayload.collectorNumber, '194');
+    assert.deepEqual(sidePanelMessage.previewRows.map((row) => row.card_id), ['lapras-194']);
+    assert.equal(processor.vintedDiagnostics.at(-1).payload.collectorNumber, '194');
 });
 
 test('Vinted collapsed and reopened overlay preserves canonical preview rows', async () => {
@@ -5590,6 +5665,103 @@ test('stale broad refresh cannot overwrite Vinted pinned preview rows', async ()
     assert.equal(storage.sidePanelState.debug.pinnedPreviewRows, true);
     assert.equal(storage.sidePanelState.debug.previewSource, 'vinted_overlay');
     assert.deepEqual(storageWrites.at(-1).rows.map((row) => row.card_id), ['96', '90']);
+});
+
+test('background Vinted preview state prefers structured payload over reparsed title', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    let messageListener = null;
+    const vintedUrl = 'https://www.vinted.it/items/194-lapras';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async (url) => {
+            if (url.includes('/api/cardtrader-redirect')) return { ok: true, json: async () => ({ products: [] }) };
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({ id: 10, title: 'Pokemon carta Lapras it 194', url: vintedUrl }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => { throw new Error('structured payload should avoid broad scrape'); } },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: vintedUrl,
+                title: 'Lapras 194',
+                originalTitle: 'Pokemon carta Lapras it 194',
+                clues: ['Lapras', '194'],
+                primaryClues: ['Lapras'],
+                selectedClues: ['Lapras', '194'],
+                vintedPayload: {
+                    source: 'vinted',
+                    originalTitle: 'Pokemon carta Lapras it 194',
+                    searchTitle: 'Lapras 194',
+                    primaryClues: ['Lapras'],
+                    selectedClues: ['Lapras', '194'],
+                    name: 'Lapras',
+                    collectorNumber: '194',
+                    numericCollectorNumber: '194',
+                    features: [],
+                    selectedChipCategories: [
+                        { label: 'Lapras', category: 'name' },
+                        { label: '194', category: 'collector' },
+                    ],
+                },
+                previewSignature: 'vinted|lapras194',
+                previewSource: 'vinted_overlay',
+                previewRows: [
+                    { card_id: 'lapras-194', name: 'Lapras', set_name: 'Stellar Crown', card_number: '194', search_rank: 99 },
+                ],
+            },
+            { tab: { id: 10, title: 'Pokemon carta Lapras it 194', url: vintedUrl } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(storage.sidePanelState.pageInfo.structuredCard.name, 'Lapras');
+    assert.equal(storage.sidePanelState.pageInfo.structuredCard.collectorNumber, '194');
+    assert.equal(storage.sidePanelState.pageInfo.structuredCard.numericCollectorNumber, '194');
+    assert.deepEqual(storage.sidePanelState.pageInfo.selectedClues, ['Lapras', '194']);
+    assert.equal(storage.sidePanelState.best.card_id, 'lapras-194');
 });
 
 test('background clue helpers remove generic card words from request titles', () => {

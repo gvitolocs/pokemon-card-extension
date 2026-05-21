@@ -244,8 +244,9 @@ class VintedProcessor {
 
     isCollectorNumberClue(value = '') {
         const label = this.normalizeClueValue(value);
-        return /\b[A-Z0-9]{2,6}\s+[A-Z0-9]*\d[A-Z0-9]*\s+\d{1,4}[a-z]?\b/i.test(label) ||
-            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/i.test(label) ||
+        return /^\d{1,4}[a-z]?$/i.test(label) ||
+            /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/.test(label) ||
+            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/.test(label) ||
             /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(label) ||
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label) ||
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label);
@@ -253,21 +254,59 @@ class VintedProcessor {
 
     vintedCollectorNumberPatterns() {
         return [
-            /\b[A-Z0-9]{2,6}\s+[A-Z0-9]*\d[A-Z0-9]*\s+\d{1,4}[a-z]?\b/gi,
-            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/gi,
+            /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/g,
+            /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/g,
             /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
         ];
     }
 
-    collectVintedCollectorClues(text = '') {
+    hasVintedBareCollectorContext(text = '') {
+        const normalized = this.normalizeClueValue(text);
+        if (/\b(?:pok[eé]mon|pokemon|carta|carte|card|cards|tcg|collector|numero|number)\b/i.test(normalized)) {
+            return true;
+        }
+        const withoutNumbers = normalized.replace(/\b\d{1,4}[a-z]?\b/gi, ' ');
+        return this.isPokemonNameLikeClue(withoutNumbers);
+    }
+
+    isLikelyVintedBareCollectorNumber(value = '') {
+        const number = this.normalizeClueValue(value);
+        if (!/^\d{1,4}[a-z]?$/i.test(number)) {
+            return false;
+        }
+        const numericValue = Number(number.replace(/[a-z]+$/i, ''));
+        return !(numericValue >= 1900 && numericValue <= 2099);
+    }
+
+    collectVintedCollectorClues(text = '', options = {}) {
         const matches = [];
+        const protectedBareNumberSpans = [];
         this.vintedCollectorNumberPatterns().forEach((pattern) => {
             for (const match of String(text || '').matchAll(pattern)) {
                 matches.push(match[0].replace(/\s+/g, ' ').trim());
+                const rawMatch = match[0] || '';
+                const numberMatch = [...rawMatch.matchAll(/\b\d{1,4}[a-z]?\b/gi)].at(-1);
+                if (numberMatch) {
+                    const start = match.index + numberMatch.index;
+                    protectedBareNumberSpans.push([start, start + numberMatch[0].length]);
+                }
             }
         });
+        if (options.includeBareNumbers && this.hasVintedBareCollectorContext(options.contextText || text)) {
+            for (const match of String(text || '').matchAll(/\b\d{1,4}[a-z]?\b/gi)) {
+                const start = match.index;
+                const end = start + match[0].length;
+                if (protectedBareNumberSpans.some(([spanStart, spanEnd]) => start >= spanStart && end <= spanEnd)) {
+                    continue;
+                }
+                const label = match[0].trim();
+                if (this.isLikelyVintedBareCollectorNumber(label)) {
+                    matches.push(label);
+                }
+            }
+        }
         const seen = new Set();
         const uniqueMatches = matches.filter((label) => {
             const compact = this.compactClueValue(label);
@@ -312,6 +351,35 @@ class VintedProcessor {
         );
     }
 
+    vintedKeywordCategory(keyword = {}) {
+        if (keyword.nameLike || keyword.attachedNamePhrase) return 'name';
+        if (keyword.illustration) return 'feature';
+        if (keyword.collectorNumber) return 'collector';
+        if (keyword.expansion) return 'expansion';
+        if (keyword.variation || keyword.attachedVariation) return 'variation';
+        return 'context';
+    }
+
+    limitVintedKeywords(keywords = [], limit = 10) {
+        const limited = keywords.slice(0, limit);
+        keywords
+            .filter((keyword) => keyword.illustration)
+            .forEach((keyword) => {
+                if (limited.some((candidate) => candidate.compact === keyword.compact)) {
+                    return;
+                }
+                const replaceIndex = [...limited]
+                    .map((candidate, index) => ({ candidate, index }))
+                    .reverse()
+                    .find(({ candidate }) => !candidate.selectedByDefault && candidate.category === 'context')?.index ??
+                    limited.length - 1;
+                if (replaceIndex >= 0) {
+                    limited[replaceIndex] = keyword;
+                }
+            });
+        return limited;
+    }
+
     prepareVintedKeywordCandidates(candidates = [], sourceText = '') {
         const prepared = candidates
             .map((candidate, index) => {
@@ -352,13 +420,17 @@ class VintedProcessor {
                 })
         );
 
-        return prepared
+        const sorted = prepared
             .map((keyword) => {
                 const attachedVariation = keyword.variation && selectedAttachedVariations.has(keyword.compact);
-                return {
+                const enrichedKeyword = {
                     ...keyword,
                     attachedVariation,
                     selectedByDefault: keyword.selectedByDefault || attachedVariation,
+                };
+                return {
+                    ...enrichedKeyword,
+                    category: this.vintedKeywordCategory(enrichedKeyword),
                 };
             })
             .sort((left, right) => {
@@ -381,11 +453,11 @@ class VintedProcessor {
                     return left.collectorNumber ? -1 : 1;
                 }
                 if (left.illustration !== right.illustration) {
-                    return left.illustration ? 1 : -1;
+                    return left.illustration ? -1 : 1;
                 }
                 return left._index - right._index;
-            })
-            .slice(0, 10)
+            });
+        return this.limitVintedKeywords(sorted, 12)
             .map(({ _index, ...keyword }) => keyword);
     }
 
@@ -448,9 +520,16 @@ class VintedProcessor {
         const titleHasIllustrationHint = /\b(?:full\s*-?\s*art|fullart|illustration)\b/i.test(title);
         this.addKeywordCandidate(candidates, 'illustration', titleHasIllustrationHint ? 'title-illustration' : 'manual-illustration');
 
+        const collectorContextText = sourceText;
         const collectorClues = [
-            ...this.collectVintedCollectorClues(title).map((label) => ({ label, source: 'title-pattern' })),
-            ...this.collectVintedCollectorClues(description).map((label) => ({ label, source: 'pattern' })),
+            ...this.collectVintedCollectorClues(title, {
+                includeBareNumbers: true,
+                contextText: collectorContextText,
+            }).map((label) => ({ label, source: 'title-pattern' })),
+            ...this.collectVintedCollectorClues(description, {
+                includeBareNumbers: true,
+                contextText: collectorContextText,
+            }).map((label) => ({ label, source: 'pattern' })),
         ];
         collectorClues.forEach(({ label, source }) => this.addKeywordCandidate(candidates, label, source));
 
@@ -511,6 +590,10 @@ class VintedProcessor {
             .map((keyword) => keyword.value);
     }
 
+    selectedVintedKeywords() {
+        return this.currentKeywords.filter((keyword) => this.selectedKeywordValues.has(keyword.compact));
+    }
+
     selectedPrimaryClues(clues = this.selectedKeywordLabels()) {
         const selectedCompacts = new Set(
             this.currentKeywords
@@ -542,6 +625,51 @@ class VintedProcessor {
         return clues.filter((clue) => this.isCollectorNumberClue(clue));
     }
 
+    normalizeVintedCollectorNumber(value = '') {
+        return this.normalizeClueValue(value)
+            .replace(/\s*\/\s*/g, '/')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    numericVintedCollectorNumber(value = '') {
+        return this.normalizeVintedCollectorNumber(value).match(/\b(\d{1,4}[a-z]?)(?:\/\d{1,4}[a-z]?)?\b/i)?.[1] || '';
+    }
+
+    buildVintedPayload(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
+        const selectedClues = Array.from(clues);
+        const primaryClues = this.selectedPrimaryClues(selectedClues);
+        const selectedKeywords = this.selectedVintedKeywords();
+        const keywordFor = (category) => selectedKeywords.find((keyword) => keyword.category === category);
+        const collectorKeyword = keywordFor('collector');
+        const expansionKeyword = keywordFor('expansion');
+        const featureKeywords = selectedKeywords.filter((keyword) => keyword.category === 'feature');
+        const variationKeywords = selectedKeywords.filter((keyword) => keyword.category === 'variation');
+        const name = primaryClues.find((clue) => !this.isVariationClue(clue)) || primaryClues[0] || '';
+        const collectorNumber = collectorKeyword ? this.normalizeVintedCollectorNumber(collectorKeyword.value) : '';
+        return {
+            source: 'vinted',
+            listingKey: this.currentVintedListingKey(),
+            originalTitle: title,
+            searchTitle: this.buildVintedSearchTitle(title, selectedClues),
+            primaryClues,
+            selectedClues,
+            selectedChipCategories: selectedKeywords.map((keyword) => ({
+                label: keyword.label,
+                value: keyword.value,
+                category: keyword.category,
+                selectedByDefault: Boolean(keyword.selectedByDefault),
+            })),
+            name,
+            variation: variationKeywords.map((keyword) => keyword.value).join(' '),
+            collectorNumber,
+            numericCollectorNumber: collectorNumber ? this.numericVintedCollectorNumber(collectorNumber) : '',
+            expansion: expansionKeyword?.value || '',
+            features: featureKeywords.map((keyword) => keyword.value),
+            rarity: featureKeywords.some((keyword) => this.isIllustrationClue(keyword.value)) ? 'illustration' : '',
+        };
+    }
+
     currentVintedListingKey(url = window.location.href) {
         try {
             const parsed = new URL(url);
@@ -569,6 +697,8 @@ class VintedProcessor {
             skippedDuplicateReason: details.skippedDuplicateReason || '',
             staleResponseIgnored: Boolean(details.staleResponseIgnored),
             title: String(details.title || this.currentTitle || '').slice(0, 160),
+            selectedChipCategories: details.selectedChipCategories || this.selectedVintedKeywords().map((keyword) => `${keyword.category}:${keyword.value}`),
+            payload: details.payload || null,
             timestamp: Date.now(),
         };
         this.vintedDiagnostics.push(entry);
@@ -951,6 +1081,7 @@ class VintedProcessor {
     openPokoinSidePanel(candidate = null) {
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
+        const vintedPayload = this.buildVintedPayload(this.currentTitle || document.title, clues);
         const previewPayload = this.buildSidePanelPreviewRowsPayload();
         if (!previewPayload.previewRows?.length && candidate) {
             previewPayload.previewRows = [this.buildSidePanelCandidatePayload(candidate).selectedCandidate]
@@ -963,11 +1094,20 @@ class VintedProcessor {
             originalTitle: this.currentTitle || document.title,
             clues,
             primaryClues,
+            selectedClues: clues,
+            vintedPayload,
             previewSignature: this.buildVintedSearchSignature(this.currentTitle || document.title, clues),
             previewSource: 'vinted_overlay',
             ...previewPayload,
             ...this.buildSidePanelCandidatePayload(candidate || {}),
         };
+        this.recordVintedDiagnostic('side-panel-payload', {
+            trigger: candidate ? 'candidate-click' : 'main-button',
+            searchSignature: message.previewSignature,
+            selectedChipCategories: vintedPayload.selectedChipCategories,
+            payload: vintedPayload,
+            title: message.title,
+        });
         return Promise.resolve(chrome.runtime.sendMessage(message)).catch((error) => {
             console.warn('⚠️ [VINT] Unable to open side panel:', error);
         });
@@ -995,11 +1135,14 @@ class VintedProcessor {
         }
 
         const primaryClues = this.selectedPrimaryClues(clues);
+        const vintedPayload = this.buildVintedPayload(title, clues);
         const requestUrl = window.location.href;
         this.recordVintedDiagnostic('search-start', {
             searchSignature: signature,
             trigger: 'background-preview',
             title,
+            selectedChipCategories: vintedPayload.selectedChipCategories,
+            payload: vintedPayload,
         });
         const searchPromise = chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
@@ -1007,6 +1150,8 @@ class VintedProcessor {
             originalTitle: title,
             clues,
             primaryClues,
+            selectedClues: clues,
+            vintedPayload,
             url: requestUrl,
         }).then((response) => {
             const results = response?.success && Array.isArray(response.results) ? response.results : [];

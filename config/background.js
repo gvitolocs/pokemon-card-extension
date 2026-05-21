@@ -707,6 +707,44 @@ function normalizeRequestClues(clues = []) {
         .slice(0, 10);
 }
 
+function normalizeVintedPayload(payload = null) {
+    if (!payload || typeof payload !== 'object' || payload.source !== 'vinted') {
+        return null;
+    }
+    const selectedClues = normalizeRequestClues(payload.selectedClues);
+    const primaryClues = normalizeRequestClues(payload.primaryClues);
+    const features = normalizeRequestClues(payload.features);
+    const collectorNumber = removeMarketplaceSearchNoise(payload.collectorNumber || '')
+        .replace(/\s*\/\s*/g, '/')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const numericCollectorNumber = removeMarketplaceSearchNoise(payload.numericCollectorNumber || '')
+        .replace(/\s+/g, '')
+        .trim();
+    const structuredCard = {
+        rawTitle: payload.searchTitle || payload.originalTitle || '',
+        name: removeMarketplaceSearchNoise(payload.name || primaryClues[0] || ''),
+        collectorNumber,
+        collectorNumberPrefix: collectorNumber.match(/^([A-Z]{1,6})\b/i)?.[1]?.toUpperCase() || '',
+        printedCollectorNumber: collectorNumber,
+        numericCollectorNumber,
+        expansion: removeMarketplaceSearchNoise(payload.expansion || ''),
+        rarity: removeMarketplaceSearchNoise(payload.rarity || (features.includes('illustration') ? 'illustration' : '')),
+        variation: removeMarketplaceSearchNoise(payload.variation || ''),
+        searchName: removeMarketplaceSearchNoise([payload.name || primaryClues[0] || '', payload.variation || ''].filter(Boolean).join(' ')),
+    };
+    return {
+        ...payload,
+        source: 'vinted',
+        selectedClues,
+        primaryClues,
+        features,
+        collectorNumber,
+        numericCollectorNumber,
+        structuredCard,
+    };
+}
+
 function buildTitleWithRequestClues(title = '', clues = []) {
     const normalizedClues = normalizeRequestClues(clues);
     const seen = new Set();
@@ -2409,13 +2447,18 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     }
     const requestClues = normalizeRequestClues(requestContext.clues);
     const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
-    if (requestClues.length > 0) {
+    const vintedPayload = normalizeVintedPayload(requestContext.vintedPayload);
+    const effectiveRequestClues = vintedPayload?.selectedClues || requestClues;
+    const effectivePrimaryClues = vintedPayload?.primaryClues || requestPrimaryClues;
+    if (effectiveRequestClues.length > 0) {
         const originalTitle = requestContext.originalTitle || pageInfo.title || tab?.title || '';
         pageInfo.originalTitle = originalTitle;
-        pageInfo.clues = requestClues;
-        pageInfo.primaryClues = requestPrimaryClues;
-        pageInfo.title = buildPrimaryClueSearchTitle(originalTitle, requestClues, requestPrimaryClues);
-        pageInfo.structuredCard = scrapeStructuredCardFields(pageInfo.title);
+        pageInfo.clues = effectiveRequestClues;
+        pageInfo.primaryClues = effectivePrimaryClues;
+        pageInfo.selectedClues = effectiveRequestClues;
+        pageInfo.title = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues);
+        pageInfo.structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(pageInfo.title);
+        pageInfo.vintedPayload = vintedPayload;
     }
     let rows = [];
     let error = pageInfoError;
@@ -2702,9 +2745,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(() => {
                 const tab = sender.tab;
                 const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
-                const clues = normalizeRequestClues(request.clues);
-                const primaryClues = normalizeRequestClues(request.primaryClues);
-                const title = buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
+                const vintedPayload = normalizeVintedPayload(request.vintedPayload);
+                const clues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
+                const primaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
+                const title = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
                 const requestUrl = request.url || tab?.url || '';
                 const searchSignature = buildBackgroundSearchSignature({
                     title,
@@ -2735,7 +2779,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const cardmarketContext = isCardmarketUrl(requestUrl)
                         ? { expansion: cardmarketExpansionFromUrl(requestUrl) }
                         : null;
-                    const structuredCard = scrapeStructuredCardFields(title, cardmarketContext);
+                    const structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(title, cardmarketContext);
                     const exactIdentity = hasExactStructuredIdentity(structuredCard);
                     const exactFastPath = hasExactSearchFastPath(structuredCard);
                     let rows = [];
@@ -2842,9 +2886,11 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }, 'open');
                 openOwner = owner;
                 await openSidePanelPromise;
-                const requestClues = normalizeRequestClues(request.clues);
-                const requestPrimaryClues = normalizeRequestClues(request.primaryClues);
-                const requestTitle = buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
+                const vintedPayload = normalizeVintedPayload(request.vintedPayload);
+                const requestClues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
+                const requestPrimaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
+                const requestTitle = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
+                const requestStructuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || currentTitle);
                 const selectedCandidateRow = selectedCandidateRowFromRequest(request);
                 const previewRows = previewRowsFromRequest(request);
                 if (directCardTraderBlueprintId) {
@@ -2906,7 +2952,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             originalTitle: request.originalTitle || currentTitle,
                             clues: requestClues,
                             primaryClues: requestPrimaryClues,
-                            structuredCard: scrapeStructuredCardFields(requestTitle || currentTitle),
+                            selectedClues: requestClues,
+                            structuredCard: requestStructuredCard,
+                            vintedPayload,
                             selectedCandidateId: String(selectedCandidateRow.card_id),
                         },
                         rows: [selectedCandidateRow],
@@ -2952,7 +3000,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             originalTitle: request.originalTitle || currentTitle,
                             clues: requestClues,
                             primaryClues: requestPrimaryClues,
-                            structuredCard: scrapeStructuredCardFields(requestTitle || currentTitle),
+                            selectedClues: requestClues,
+                            structuredCard: requestStructuredCard,
+                            vintedPayload,
                             previewSignature: request.previewSignature || '',
                             selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
                         },
@@ -2979,6 +3029,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             pinnedVintedPreview: request.previewSource === 'vinted_overlay' || /^vinted\|/.test(request.previewSignature || ''),
                             previewSignature: request.previewSignature || '',
                             previewSource: request.previewSource || '',
+                            vintedPayload: vintedPayload ? {
+                                selectedChipCategories: vintedPayload.selectedChipCategories || [],
+                                structuredCard: requestStructuredCard,
+                            } : null,
                             error: '',
                         },
                     };
@@ -3027,6 +3081,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         originalTitle: request.originalTitle || currentTitle,
                         clues: requestClues,
                         primaryClues: requestPrimaryClues,
+                        selectedClues: requestClues,
+                        structuredCard: requestStructuredCard,
+                        vintedPayload,
                     },
                     rows: [],
                     best: null,
@@ -3046,6 +3103,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     originalTitle: request.originalTitle || currentTitle,
                     clues: requestClues,
                     primaryClues: requestPrimaryClues,
+                    vintedPayload,
                     promoteVerifiedLink: isCardmarketUrl(currentUrl),
                     owner,
                 });
