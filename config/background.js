@@ -777,8 +777,12 @@ function normalizeMarketplacePayload(payload = null) {
     const numericCollectorNumber = removeMarketplaceSearchNoise(payload.numericCollectorNumber || '')
         .replace(/\s+/g, '')
         .trim();
+    const selectedSearchTitle = buildPrimaryClueSearchTitle('', selectedClues, primaryClues) ||
+        removeMarketplaceSearchNoise(payload.searchTitle || '');
     const structuredCard = {
-        rawTitle: payload.searchTitle || payload.originalTitle || '',
+        rawTitle: payload.source === 'vinted'
+            ? selectedSearchTitle
+            : (payload.searchTitle || payload.originalTitle || ''),
         name: removeMarketplaceSearchNoise(payload.name || primaryClues[0] || ''),
         collectorNumber,
         collectorNumberPrefix: collectorNumber.match(/^([A-Z]{1,6})\b/i)?.[1]?.toUpperCase() || '',
@@ -1358,6 +1362,10 @@ function collectorNumberMatchRank(rowNumber = '', requestedNumber = '') {
         return 0;
     }
 
+    if (requested.hasSlash && requested.prefix) {
+        return 99;
+    }
+
     if (!row.primary || !requested.primary) {
         return 99;
     }
@@ -1934,6 +1942,39 @@ function samePinnedVintedPreviewState(state = {}, url = '') {
     );
 }
 
+function selectedClueSignature(clues = [], primaryClues = []) {
+    return [
+        normalizeRequestClues(clues).map(compactSearchValue).sort().join(','),
+        normalizeRequestClues(primaryClues).map(compactSearchValue).sort().join(','),
+    ].join('|');
+}
+
+function vintedStateSelectionSignature(state = {}) {
+    const pageInfo = state?.pageInfo || {};
+    const payload = normalizeVintedPayload(pageInfo.vintedPayload);
+    return selectedClueSignature(
+        payload?.selectedClues || pageInfo.selectedClues || pageInfo.clues,
+        payload?.primaryClues || pageInfo.primaryClues
+    );
+}
+
+function isNewerVintedSelectionState(existingState = {}, nextState = {}) {
+    if (!isVintedUrl(existingState?.pageInfo?.url || '') || !isVintedUrl(nextState?.pageInfo?.url || '')) {
+        return false;
+    }
+    if (!sameUrlWithoutHash(existingState.pageInfo?.url || '', nextState.pageInfo?.url || '')) {
+        return false;
+    }
+    const existingRevision = Number(existingState.pageInfo?.selectionRevision ?? existingState.debug?.selectionRevision ?? 0);
+    const nextRevision = Number(nextState.pageInfo?.selectionRevision ?? nextState.debug?.selectionRevision ?? 0);
+    if (Number.isFinite(nextRevision) && nextRevision > existingRevision) {
+        return true;
+    }
+    const existingSignature = existingState.pageInfo?.previewSignature || existingState.debug?.previewSignature || vintedStateSelectionSignature(existingState);
+    const nextSignature = nextState.pageInfo?.previewSignature || nextState.debug?.previewSignature || vintedStateSelectionSignature(nextState);
+    return Boolean(nextSignature && existingSignature && nextSignature !== existingSignature);
+}
+
 function shouldKeepExistingExactCardmarketState(existingState = {}, nextState = {}) {
     if (!isExactCardmarketState(existingState)) {
         return false;
@@ -1953,6 +1994,9 @@ function shouldKeepExistingPinnedVintedState(existingState = {}, nextState = {})
     const existingUrl = existingState.pageInfo?.url || '';
     const nextUrl = nextState.pageInfo?.url || '';
     if (!existingUrl || !nextUrl || !sameUrlWithoutHash(existingUrl, nextUrl)) {
+        return false;
+    }
+    if (isNewerVintedSelectionState(existingState, nextState)) {
         return false;
     }
     return !nextState.debug?.pinnedVintedPreview;
@@ -2675,6 +2719,7 @@ function vintedCanonicalFromRequest(request = {}, senderTab = {}) {
         previewSource: request.previewSource || 'vinted_overlay',
         previewRows,
         selectedCandidateId: request.selectedCandidateId || '',
+        selectionRevision: Number(request.selectionRevision || vintedPayload?.selectionRevision || 0),
         updatedAt: Date.now(),
         source: 'vinted',
     };
@@ -2801,9 +2846,11 @@ async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, 
     const vintedPayload = normalizeVintedPayload(canonical.vintedPayload);
     const requestClues = vintedPayload?.selectedClues || normalizeRequestClues(canonical.clues);
     const requestPrimaryClues = vintedPayload?.primaryClues || normalizeRequestClues(canonical.primaryClues);
-    const requestTitle = vintedPayload?.searchTitle ||
+    const requestTitle = vintedPayload?.selectedClues?.length > 0
+        ? buildPrimaryClueSearchTitle('', requestClues, requestPrimaryClues)
+        : vintedPayload?.searchTitle ||
         buildPrimaryClueSearchTitle(canonical.originalTitle || canonical.title || tab?.title || '', requestClues, requestPrimaryClues);
-    const requestStructuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || canonical.title || tab?.title || '');
+    const requestStructuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || '');
     const previewRows = (Array.isArray(canonical.previewRows) ? canonical.previewRows : [])
         .map(sidePanelRowFromPreview)
         .filter(Boolean)
@@ -2824,6 +2871,7 @@ async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, 
             vintedPayload,
             previewSignature: canonical.previewSignature || '',
             selectedCandidateId: canonical.selectedCandidateId || '',
+            selectionRevision: canonical.selectionRevision || 0,
         },
         rows: previewRows,
         best: bestPreviewRow,
@@ -2848,6 +2896,7 @@ async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, 
             pinnedVintedPreview: previewRows.length > 0,
             previewSignature: canonical.previewSignature || '',
             previewSource: canonical.previewSource || 'vinted_overlay',
+            selectionRevision: canonical.selectionRevision || 0,
             vintedReadyDriven: true,
             vintedCanonicalUpdatedAt: canonical.updatedAt || null,
             refreshFailureReason: options.reason || '',
@@ -3037,9 +3086,13 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     let pageInfo;
     let pageInfoError = '';
     if (vintedPayload) {
+        const hasSelectedVintedClues = vintedPayload.selectedClues?.length > 0;
         const originalTitle = requestContext.originalTitle || vintedPayload.originalTitle || tab?.title || '';
+        const selectedTitle = hasSelectedVintedClues
+            ? buildPrimaryClueSearchTitle('', effectiveRequestClues, effectivePrimaryClues)
+            : '';
         pageInfo = {
-            title: vintedPayload.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues),
+            title: selectedTitle || vintedPayload.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues),
             url: tab?.url || vintedPayload.listingKey || '',
             hostname: tab?.url ? new URL(tab.url).hostname : '',
             originalTitle,
@@ -3073,7 +3126,9 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         pageInfo.clues = effectiveRequestClues;
         pageInfo.primaryClues = effectivePrimaryClues;
         pageInfo.selectedClues = effectiveRequestClues;
-        pageInfo.title = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues);
+        pageInfo.title = vintedPayload?.source === 'vinted'
+            ? buildPrimaryClueSearchTitle('', effectiveRequestClues, effectivePrimaryClues)
+            : (vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues));
         pageInfo.structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(pageInfo.title, cardmarketContextFromRequest({ clues: effectiveRequestClues }, pageInfo.url || tab?.url || ''));
         pageInfo.vintedPayload = vintedPayload;
     }
@@ -3146,7 +3201,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     try {
                         const nameResolutionTitle = titleForNameResolution(
                             pageInfo.title,
-                            pageInfo.originalTitle || tab?.title || '',
+                            vintedPayload?.source === 'vinted' && effectiveRequestClues.length > 0 ? '' : (pageInfo.originalTitle || tab?.title || ''),
                             pageInfo.clues
                         );
                         const nameResolution = await resolveNameFromCardvaultTitle(
@@ -3397,9 +3452,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const tab = sender.tab;
                 const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
                 const vintedPayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
+                const isSelectedVintedSearch = vintedPayload?.source === 'vinted' && vintedPayload.selectedClues?.length > 0;
                 const clues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
                 const primaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
-                const title = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
+                const title = isSelectedVintedSearch
+                    ? buildPrimaryClueSearchTitle('', clues, primaryClues)
+                    : (vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues));
                 const requestUrl = request.url || tab?.url || '';
                 const searchSignature = buildBackgroundSearchSignature({
                     title,
@@ -3441,7 +3499,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (rows.length === 0 || (exactIdentity && !hasGoodEnoughExactRows(rows, structuredCard))) {
                         const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
                         const nameResolution = await resolveNameFromCardvaultTitle(
-                            titleForNameResolution(title, request.originalTitle || tab?.title || '', [...clues, ...primaryClues]),
+                            titleForNameResolution(title, isSelectedVintedSearch ? '' : (request.originalTitle || tab?.title || ''), [...clues, ...primaryClues]),
                             structuredContext
                         );
                         if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
@@ -3536,11 +3594,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 openOwner = owner;
                 await openSidePanelPromise;
                 const vintedPayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
+                const isSelectedVintedOpen = vintedPayload?.source === 'vinted' && vintedPayload.selectedClues?.length > 0;
                 const requestClues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
                 const requestPrimaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
-                const requestTitle = vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues);
+                const requestTitle = isSelectedVintedOpen
+                    ? buildPrimaryClueSearchTitle('', requestClues, requestPrimaryClues)
+                    : (vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues));
                 const requestStructuredCard = vintedPayload?.structuredCard ||
-                    scrapeStructuredCardFields(requestTitle || currentTitle, cardmarketContextFromRequest(request, currentUrl));
+                    scrapeStructuredCardFields(requestTitle || (isSelectedVintedOpen ? '' : currentTitle), cardmarketContextFromRequest(request, currentUrl));
                 const selectedCandidateRow = selectedCandidateRowFromRequest(request);
                 const previewRows = previewRowsFromRequest(request);
                 const vintedCanonical = vintedCanonicalFromRequest(request, {
@@ -3617,6 +3678,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             structuredCard: requestStructuredCard,
                             vintedPayload,
                             selectedCandidateId: String(selectedCandidateRow.card_id),
+                            selectionRevision: Number(request.selectionRevision || 0),
                         },
                         rows: [selectedCandidateRow],
                         best: selectedCandidateRow,
@@ -3666,6 +3728,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             vintedPayload,
                             previewSignature: request.previewSignature || '',
                             selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
+                            selectionRevision: Number(request.selectionRevision || 0),
                         },
                         rows: orderedPreviewRows,
                         best: bestPreviewRow,
@@ -3690,6 +3753,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             pinnedVintedPreview: request.previewSource === 'vinted_overlay' || /^vinted\|/.test(request.previewSignature || ''),
                             previewSignature: request.previewSignature || '',
                             previewSource: request.previewSource || '',
+                            selectionRevision: Number(request.selectionRevision || 0),
                             vintedPayload: vintedPayload ? {
                                 selectedChipCategories: vintedPayload.selectedChipCategories || [],
                                 structuredCard: requestStructuredCard,
@@ -3745,6 +3809,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         selectedClues: requestClues,
                         structuredCard: requestStructuredCard,
                         vintedPayload,
+                        previewSignature: request.previewSignature || '',
+                        selectionRevision: Number(request.selectionRevision || 0),
                     },
                     rows: [],
                     best: null,
@@ -3880,6 +3946,16 @@ chrome.action.onClicked.addListener(async (tab) => {
         }
 
         const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+        if (isVintedUrl(tab?.url || '')) {
+            const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
+            if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
+                await applyVintedCanonicalToSidePanel(tab, canonical, owner, { reason: 'action-click' });
+                return;
+            }
+            await setVintedWaitingForPreviewState(tab, 'action-click-awaiting-vinted-preview', owner);
+            return;
+        }
+
         if (samePinnedVintedPreviewState(sidePanelState, tab?.url || '')) {
             return;
         }

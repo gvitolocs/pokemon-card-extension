@@ -33,6 +33,7 @@ class VintedProcessor {
         this.vintedDiagnostics = [];
         this.vintedOverlayCollapsed = false;
         this.currentMatchCount = 0;
+        this.currentSelectionRevision = 0;
     }
 
     pokoinIconUrl() {
@@ -334,6 +335,7 @@ class VintedProcessor {
             /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/.test(label) ||
             /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/.test(label) ||
             /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i.test(label) ||
+            /\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/i.test(label) ||
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/.test(label) ||
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label);
     }
@@ -344,6 +346,7 @@ class VintedProcessor {
             /\b[A-Z0-9]{2,6}\s+[A-Za-z0-9]*\d[A-Za-z0-9]*\s+\d{1,4}[a-z]?\b/g,
             /\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/g,
             /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
+            /\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/gi,
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/g,
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
         ];
@@ -420,12 +423,13 @@ class VintedProcessor {
     vintedExpansionAliases() {
         return [
             { pattern: /\bevoluzioni\b/i, label: 'Evolutions' },
+            { pattern: /\borigine\s+perduta\b/i, label: 'Lost Origin' },
         ];
     }
 
     isExpansionClue(value = '') {
         return this.isBaseSetClue(value) ||
-            /\b(?:evolutions|evoluzioni|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
+            /\b(?:evolutions|evoluzioni|lost\s+origin|origine\s+perduta|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
     }
 
     sourceContainsClue(value = '', sourceText = '') {
@@ -767,13 +771,16 @@ class VintedProcessor {
             .replace(/\s+/g, ' ')
             .trim();
         return normalized.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s+/g, '') ||
+            normalized.match(/\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s*\/\s*/g, '/').replace(/\s+/g, '') ||
             normalized.match(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i)?.[0]?.replace(/\s*\/\s*/g, '/') ||
             normalized.match(/\b[A-Z0-9]{2,6}\s+\d{1,4}[a-z]?\b/)?.[0] ||
             normalized;
     }
 
     numericVintedCollectorNumber(value = '') {
-        return this.normalizeVintedCollectorNumber(value).match(/\b(\d{1,4}[a-z]?)(?:\/\d{1,4}[a-z]?)?\b/i)?.[1] || '';
+        return this.normalizeVintedCollectorNumber(value).match(/\b[A-Z]{1,6}\s?(\d{1,4}[a-z]?)(?:\/(?:[A-Z]{1,6}\s?)?\d{1,4}[a-z]?)?\b/i)?.[1] ||
+            this.normalizeVintedCollectorNumber(value).match(/\b(\d{1,4}[a-z]?)(?:\/\d{1,4}[a-z]?)?\b/i)?.[1] ||
+            '';
     }
 
     buildVintedPayload(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
@@ -922,9 +929,30 @@ class VintedProcessor {
                 primaryCompact !== compact && primaryCompact.includes(compact)
             );
         };
-        const searchParts = primaryClues.length > 0
-            ? [...searchPrimaryClues, ...expansionClues, ...collectorNumberClues, ...illustrationClues, ...additionalVariationClues]
-            : [this.removeVintedMarketplaceNoise(title), ...clues];
+        const selectedOnlyParts = [
+            ...searchPrimaryClues,
+            ...expansionClues,
+            ...collectorNumberClues,
+            ...illustrationClues,
+            ...additionalVariationClues,
+            ...clues.filter((clue) =>
+                !primaryClues.includes(clue) &&
+                !expansionClues.includes(clue) &&
+                !collectorNumberClues.includes(clue) &&
+                !illustrationClues.includes(clue) &&
+                !variationClues.includes(clue)
+            ),
+        ];
+        const searchParts = clues.length > 0
+            ? [
+                ...(
+                    primaryClues.length > 0 || !title
+                        ? []
+                        : [this.removeVintedMarketplaceNoise(title)]
+                ),
+                ...selectedOnlyParts,
+            ]
+            : [this.removeVintedMarketplaceNoise(title)];
 
         return searchParts
             .map((part) => this.removeVintedMarketplaceNoise(part))
@@ -944,11 +972,15 @@ class VintedProcessor {
         return [number || rawNumber, setName, price].filter(Boolean).join(' · ');
     }
 
-    currentPreviewResults() {
+    currentPreviewResults(options = {}) {
         const signature = this.buildVintedSearchSignature(this.currentTitle, this.selectedKeywordLabels());
         const results = this.searchResultsBySignature.get(signature) ||
             this.pendingSearchApplications.get(signature) ||
-            this.lastRenderedPreviewResults ||
+            (
+                options.allowRenderedFallback || signature === this.lastAppliedSearchSignature
+                    ? this.lastRenderedPreviewResults
+                    : []
+            ) ||
             [];
         return Array.isArray(results) ? results : [];
     }
@@ -1222,11 +1254,26 @@ class VintedProcessor {
         return this.buildSidePanelPreviewRowsPayload().previewRows?.length > 0;
     }
 
+    invalidateVintedPreviewForSelectionChange() {
+        this.currentSelectionRevision += 1;
+        this.latestSearchToken += 1;
+        this.lastAppliedSearchSignature = '';
+        this.pendingSearchApplications.clear();
+        this.lastRenderedPreviewResults = [];
+        this.removeOwnedPanelChildren('[data-pokoin-candidate-preview]');
+        this.currentMatchCount = 0;
+        if (this.currentButton) {
+            this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+        }
+    }
+
     openPokoinSidePanel(candidate = null) {
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
         const vintedPayload = this.buildVintedPayload(this.currentTitle || document.title, clues);
-        const previewPayload = this.buildSidePanelPreviewRowsPayload();
+        const previewPayload = this.buildSidePanelPreviewRowsPayload(
+            candidate ? this.currentPreviewResults({ allowRenderedFallback: true }) : this.currentPreviewResults()
+        );
         if (!previewPayload.previewRows?.length && candidate) {
             previewPayload.previewRows = [this.buildSidePanelCandidatePayload(candidate).selectedCandidate]
                 .filter(Boolean);
@@ -1242,6 +1289,7 @@ class VintedProcessor {
             vintedPayload,
             previewSignature: this.buildVintedSearchSignature(this.currentTitle || document.title, clues),
             previewSource: 'vinted_overlay',
+            selectionRevision: this.currentSelectionRevision,
             ...previewPayload,
             ...this.buildSidePanelCandidatePayload(candidate || {}),
         };
@@ -1296,6 +1344,7 @@ class VintedProcessor {
             primaryClues,
             selectedClues: clues,
             vintedPayload,
+            selectionRevision: this.currentSelectionRevision,
             url: requestUrl,
         }).then((response) => {
             const results = response?.success && Array.isArray(response.results) ? response.results : [];
@@ -1975,6 +2024,7 @@ class VintedProcessor {
                     this.selectedKeywordValues.add(keyword.compact);
                 }
                 this.applyKeywordChipStyle(chip, !isSelected);
+                this.invalidateVintedPreviewForSelectionChange();
                 this.sendVintedTokensReady('keyword-toggle');
                 this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle, 'keyword-toggle');
             });
@@ -2100,6 +2150,7 @@ class VintedProcessor {
             vintedPayload,
             previewSignature,
             previewSource: options.includePreviewRows ? 'vinted_overlay' : 'vinted_overlay_tokens',
+            selectionRevision: this.currentSelectionRevision,
             ...previewPayload,
         };
         this.recordVintedDiagnostic(options.includePreviewRows ? 'preview-ready' : 'tokens-ready', {

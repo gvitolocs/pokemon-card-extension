@@ -1233,6 +1233,102 @@ test('Vinted Pikachu volo VMAX keeps noisy word out of structured payload', asyn
     assert.doesNotMatch(messages[0].title, /\bvolo\b/i);
 });
 
+test('background Vinted selected keys keep unselected title words out of search', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.doesNotMatch(body.search_term || '', /\bvolo\b/i);
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                assert.doesNotMatch(body.name || '', /\bvolo\b/i);
+                assert.equal(body.name, 'Pikachu VMAX');
+                assert.equal(body.collectorNumber, '007/025');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'flying-pikachu-vmax', name: 'Flying Pikachu VMAX', expansionName: 'Celebrations', collectorNumber: '007/025', score: 99 },
+                        ],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'searchCardForTitle',
+                title: 'Pikachu VMAX 007/025',
+                originalTitle: 'Pikachu volo Vmax 007/025',
+                url: 'https://www.vinted.it/items/7-pikachu-volo-vmax',
+                clues: ['Pikachu', 'VMAX', '007/025'],
+                selectedClues: ['Pikachu', 'VMAX', '007/025'],
+                primaryClues: ['Pikachu', 'VMAX'],
+                vintedPayload: {
+                    source: 'vinted',
+                    listingKey: 'https://www.vinted.it/items/7-pikachu-volo-vmax',
+                    originalTitle: 'Pikachu volo Vmax 007/025',
+                    searchTitle: 'Pikachu VMAX 007/025',
+                    name: 'Pikachu',
+                    variation: 'VMAX',
+                    collectorNumber: '007/025',
+                    numericCollectorNumber: '007',
+                    selectedClues: ['Pikachu', 'VMAX', '007/025'],
+                    primaryClues: ['Pikachu', 'VMAX'],
+                },
+            },
+            { tab: { id: 7, title: 'Pikachu volo Vmax 007/025', url: 'https://www.vinted.it/items/7-pikachu-volo-vmax' } },
+            resolve
+        );
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.results[0].blueprint_id, 'flying-pikachu-vmax');
+    assert.ok(fetchBodies.length > 0);
+    assert.ok(fetchBodies.every((entry) => !JSON.stringify(entry.body).match(/\bvolo\b/i)));
+});
+
 test('Vinted Magneton PROMO 159 keeps promo collector and preview rows in side panel payload', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -1665,6 +1761,145 @@ test('Vinted selected keyword toggles shape background and side-panel messages',
     assert.equal(messages[1].action, 'openSidePanelForCurrentTab');
     assert.deepEqual([...messages[1].clues], ['Evolving Skies', 'SWSH154']);
     assert.deepEqual([...messages[1].primaryClues], []);
+});
+
+test('Vinted chip toggle invalidates stale preview rows before side-panel open', async () => {
+    const messages = [];
+    let searchCount = 0;
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/8-pikachu-gengar', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /pikachu/i.test(String(title || '')) ? 'Pikachu' : /gengar/i.test(String(title || '')) ? 'Gengar' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action !== 'searchCardForTitle') {
+                        return { success: true };
+                    }
+                    searchCount += 1;
+                    if (searchCount === 1) {
+                        return {
+                            success: true,
+                            results: [{ blueprint_id: 'gengar-v', name_en: 'Gengar V', collector_number: '156/264', search_score: 99 }],
+                        };
+                    }
+                    return new Promise(() => {});
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pikachu V Illustration Gengar V';
+    processor.currentKeywords = [
+        { label: 'Gengar V', value: 'Gengar V', compact: 'gengarv', nameLike: true, attachedNamePhrase: true, category: 'name', selectedByDefault: true },
+        { label: 'Pikachu V', value: 'Pikachu V', compact: 'pikachuv', nameLike: true, attachedNamePhrase: true, category: 'name', selectedByDefault: false },
+        { label: 'V', value: 'V', compact: 'v', variation: true, category: 'variation', selectedByDefault: true },
+        { label: 'illustration', value: 'illustration', compact: 'illustration', illustration: true, category: 'feature', selectedByDefault: false },
+        { label: 'Pikachu VTG16/TG30', value: 'Pikachu VTG16/TG30', compact: 'pikachuvtg16tg30', collectorNumber: true, category: 'collector', selectedByDefault: false },
+    ];
+    processor.selectedKeywordValues = new Set(['gengarv', 'v']);
+    processor.currentButton = createButtonStub();
+
+    await processor.runVintedSearch(processor.extractTitleInfo(processor.currentTitle), processor.currentTitle, 'initial');
+    assert.deepEqual(processor.currentPreviewResults().map((row) => row.blueprint_id), ['gengar-v']);
+
+    processor.selectedKeywordValues = new Set(['pikachuv', 'v', 'illustration', 'pikachuvtg16tg30']);
+    processor.invalidateVintedPreviewForSelectionChange();
+    processor.sendVintedTokensReady('keyword-toggle');
+    processor.openPokoinSidePanel();
+
+    const latestTokenMessage = messages.filter((message) => message.action === 'marketplacePreviewReady').at(-1);
+    const latestOpenMessage = messages.filter((message) => message.action === 'openSidePanelForCurrentTab').at(-1);
+    assert.deepEqual([...latestTokenMessage.selectedClues], ['Pikachu V', 'V', 'illustration', 'Pikachu VTG16/TG30']);
+    assert.deepEqual([...latestOpenMessage.selectedClues], ['Pikachu V', 'V', 'illustration', 'Pikachu VTG16/TG30']);
+    assert.equal(latestOpenMessage.previewRows, undefined);
+    assert.doesNotMatch(latestOpenMessage.title, /Gengar/i);
+    assert.match(latestOpenMessage.title, /Pikachu V/i);
+    assert.ok(latestOpenMessage.selectionRevision > 0);
+});
+
+test('Vinted Trainer Gallery slash collector stays atomic and clears stale rows', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/16-pikachu-v-tg16', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /pikachu/i.test(String(title || '')) ? 'Pikachu' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokemon Pikachu V TG16/TG30 di Origine Perduta';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+    processor.searchResultsBySignature.set('old-signature', [{ blueprint_id: 'gengar-v', name_en: 'Gengar V' }]);
+    processor.lastAppliedSearchSignature = 'old-signature';
+    processor.lastRenderedPreviewResults = [{ blueprint_id: 'gengar-v', name_en: 'Gengar V' }];
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = processor.buildVintedPayload(processor.currentTitle, selectedLabels);
+    await processor.openPokoinSidePanel();
+
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.label === 'TG16/TG30' && keyword.collectorNumber));
+    assert.ok(selectedLabels.includes('Pikachu V'));
+    assert.ok(selectedLabels.includes('V'));
+    assert.ok(selectedLabels.includes('TG16/TG30'));
+    assert.ok(selectedLabels.includes('Lost Origin'));
+    assert.equal(payload.name, 'Pikachu');
+    assert.equal(payload.variation, 'V');
+    assert.equal(payload.collectorNumber, 'TG16/TG30');
+    assert.equal(payload.numericCollectorNumber, '16');
+    assert.equal(payload.expansion, 'Lost Origin');
+
+    const openMessage = messages.at(-1);
+    assert.equal(openMessage.action, 'openSidePanelForCurrentTab');
+    assert.deepEqual(openMessage.previewRows?.map((row) => row.card_id) || [], []);
+    assert.doesNotMatch(JSON.stringify(openMessage), /gengar/i);
+    assert.match(openMessage.title, /TG16\/TG30/);
+});
+
+test('background ranks Trainer Gallery slash collectors by full prefixed code', () => {
+    const sandbox = loadBackgroundHelpers([
+        'collectorNumberMatchRank',
+        'collectorNumberMatches',
+        'sortRowsForStructuredCard',
+    ]);
+    const structuredCard = {
+        name: 'Pikachu',
+        searchName: 'Pikachu V',
+        variation: 'V',
+        collectorNumber: 'TG16/TG30',
+        numericCollectorNumber: '16',
+        expansion: 'Lost Origin',
+    };
+    const rows = [
+        { card_id: 'plain-16', name: 'Pikachu V', set_name: 'Lost Origin', card_number: '16', search_rank: 9999 },
+        { card_id: 'tg16', name: 'Pikachu V', set_name: 'Lost Origin', card_number: 'TG16/TG30', search_rank: 10 },
+        { card_id: 'tg17', name: 'Pikachu V', set_name: 'Lost Origin', card_number: 'TG17/TG30', search_rank: 9998 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, structuredCard);
+
+    assert.equal(sandbox.collectorNumberMatchRank('TG16/TG30', 'TG16/TG30'), 0);
+    assert.equal(sandbox.collectorNumberMatches('16', 'TG16/TG30'), false);
+    assert.equal(sorted[0].card_id, 'tg16');
 });
 
 test('Vinted title collector number and localized expansion are selected and structured', async () => {
@@ -3967,6 +4202,79 @@ test('Vinted side panel Refresh waits when canonical overlay state is not ready'
     assert.equal(response.result.loading, true);
     assert.equal(storage.sidePanelState.loading, true);
     assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+    assert.equal(fetchCalls, 0);
+    assert.equal(scraped, false);
+});
+
+test('Vinted extension action waits for selected-key payload before searching', async () => {
+    const source = readRepoFile('config/background.js');
+    let actionClickListener = null;
+    let fetchCalls = 0;
+    let scraped = false;
+    const storage = {};
+    const tab = {
+        id: 87,
+        title: 'Pikachu volo Vmax 007/025',
+        url: 'https://www.vinted.it/items/87-pikachu-volo-vmax',
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                get: async () => tab,
+                query: async () => [tab],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    scraped = true;
+                    return [];
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setOptions: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: {
+                setIcon: async () => {},
+                onClicked: {
+                    addListener(listener) {
+                        actionClickListener = listener;
+                    },
+                },
+            },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await actionClickListener(tab);
+
+    assert.equal(storage.sidePanelState.loading, true);
+    assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+    assert.equal(storage.sidePanelState.debug.refreshFailureReason, 'action-click-awaiting-vinted-preview');
     assert.equal(fetchCalls, 0);
     assert.equal(scraped, false);
 });
