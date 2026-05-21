@@ -200,7 +200,9 @@ class VintedProcessor {
             labelCompact &&
             nameCompact &&
             labelCompact !== nameCompact &&
-            this.vintedVariationCompacts().some((variation) => labelCompact === `${nameCompact}${variation}`)
+            this.vintedVariationCompacts().some((variation) =>
+                labelCompact.endsWith(`${nameCompact}${variation}`)
+            )
         );
     }
 
@@ -499,6 +501,15 @@ class VintedProcessor {
             }
             return !primaryCompacts.some((primaryCompact) => primaryCompact === compact || primaryCompact.endsWith(compact));
         });
+        const selectedCompositeCompacts = primaryClues
+            .map((clue) => this.compactClueValue(clue))
+            .filter((compact) => compact.length > 0);
+        const includedByLongerPrimary = (clue) => {
+            const compact = this.compactClueValue(clue);
+            return selectedCompositeCompacts.some((primaryCompact) =>
+                primaryCompact !== compact && primaryCompact.includes(compact)
+            );
+        };
         const searchParts = primaryClues.length > 0
             ? [...searchPrimaryClues, ...baseSetClues, ...illustrationClues, ...additionalVariationClues]
             : [this.removeVintedMarketplaceNoise(title), ...clues];
@@ -506,6 +517,7 @@ class VintedProcessor {
         return searchParts
             .map((part) => this.removeVintedMarketplaceNoise(part))
             .filter(Boolean)
+            .filter((part) => !includedByLongerPrimary(part))
             .filter((part, index, all) => all.findIndex((candidate) => this.compactClueValue(candidate) === this.compactClueValue(part)) === index)
             .join(' ');
     }

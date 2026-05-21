@@ -497,13 +497,16 @@ function resolvedCardNameFromRow(row, term = '') {
 }
 
 function candidateNameTermsFromTitle(title = '', structuredCard = null) {
+    const terms = [];
     if (structuredCard?.name) {
-        return [structuredCard.name];
+        terms.push(structuredCard.name);
     }
 
     const cleaned = removeMarketplaceSearchNoise(String(title || '')
         .replace(/\s*\|\s*(?:Vinted|Cardmarket)\s*$/i, '')
-        .replace(/[()"'’`.,:;!?/\\[\]{}|]+/g, ' ')
+        .replace(/[’`]/g, "'")
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[".,:;!?/\\[\]{}|]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim());
     const stopWords = new Set([
@@ -516,15 +519,58 @@ function candidateNameTermsFromTitle(title = '', structuredCard = null) {
         .split(/\s+/)
         .map((word) => word.trim())
         .filter((word) => word && !stopWords.has(word.toLowerCase()));
-    const terms = [];
 
-    for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
+    if (cleaned) {
+        const cleanedWithoutTrailingNumber = cleaned.replace(/\s+\d{1,4}[a-z]?\s*$/i, '').trim();
+        if (cleanedWithoutTrailingNumber) {
+            terms.push(cleanedWithoutTrailingNumber);
+        }
+        terms.push(cleaned);
+    }
+
+    for (let size = Math.min(4, words.length); size >= 1; size -= 1) {
         for (let index = 0; index <= words.length - size; index += 1) {
             terms.push(words.slice(index, index + size).join(' '));
         }
     }
 
     return [...new Set(terms)].slice(0, 18);
+}
+
+function titleForNameResolution(title = '', originalTitle = '', clues = []) {
+    return buildTitleWithRequestClues(
+        '',
+        [title, ...(Array.isArray(clues) ? clues : []), originalTitle].filter(Boolean)
+    );
+}
+
+function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    if (!resolvedName) {
+        return false;
+    }
+    if (!requestedName) {
+        return true;
+    }
+
+    const resolvedCompact = compactSearchValue(resolvedName);
+    const searchCompact = compactSearchValue(structuredCard?.searchName || '');
+    const requestedWithoutNumbers = compactSearchValue(String(structuredCard?.name || '').replace(/\b\d{1,4}[a-z]?\b/gi, ' '));
+    const searchWithoutNumbers = compactSearchValue(String(structuredCard?.searchName || '').replace(/\b\d{1,4}[a-z]?\b/gi, ' '));
+    return resolvedCompact === requestedName ||
+        resolvedCompact.includes(requestedName) ||
+        (searchCompact && resolvedCompact === searchCompact) ||
+        (requestedWithoutNumbers && resolvedCompact.includes(requestedWithoutNumbers)) ||
+        (searchWithoutNumbers && resolvedCompact === searchWithoutNumbers);
+}
+
+function searchNameWithVariation(name = '', variation = '') {
+    const compactName = compactSearchValue(name);
+    const compactVariation = compactSearchValue(variation);
+    if (!compactVariation || compactName.endsWith(compactVariation)) {
+        return name;
+    }
+    return [name, variation].filter(Boolean).join(' ');
 }
 
 async function resolveNameFromCardvaultTitle(title = '', structuredCard = null) {
@@ -1164,23 +1210,23 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 debug.cardtraderBlueprintId = pageInfo.cardtraderBlueprintId;
             } else {
                 try {
-                    const nameResolution = await resolveNameFromCardvaultTitle(
+                    const nameResolutionTitle = titleForNameResolution(
                         pageInfo.title,
+                        pageInfo.originalTitle || tab?.title || '',
+                        pageInfo.clues
+                    );
+                    const nameResolution = await resolveNameFromCardvaultTitle(
+                        nameResolutionTitle,
                         isCardmarketUrl(pageInfo.url) ? pageInfo.structuredCard : null
                     );
                     debug.nameResolution = nameResolution;
-                    if (nameResolution.name && (
-                        !pageInfo.structuredCard?.name ||
-                        compactSearchValue(nameResolution.name) === compactSearchValue(pageInfo.structuredCard.name)
-                    )) {
+                    if (shouldUseResolvedCardName(nameResolution.name, pageInfo.structuredCard)) {
                         pageInfo.structuredCard = {
                             ...(pageInfo.structuredCard || {}),
                             name: nameResolution.name,
                         };
                         if (pageInfo.structuredCard.variation) {
-                            pageInfo.structuredCard.searchName = [nameResolution.name, pageInfo.structuredCard.variation]
-                                .filter(Boolean)
-                                .join(' ');
+                            pageInfo.structuredCard.searchName = searchNameWithVariation(nameResolution.name, pageInfo.structuredCard.variation);
                         }
                     }
                 } catch (nameResolutionError) {
@@ -1314,16 +1360,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
                     const structuredCard = scrapeStructuredCardFields(title);
                     const structuredContext = isCardmarketUrl(request.url || tab?.url || '') ? structuredCard : null;
-                    const nameResolution = await resolveNameFromCardvaultTitle(title, structuredContext);
-                    if (nameResolution.name && (
-                        !structuredCard.name ||
-                        compactSearchValue(nameResolution.name) === compactSearchValue(structuredCard.name)
-                    )) {
+                    const nameResolution = await resolveNameFromCardvaultTitle(
+                        titleForNameResolution(title, request.originalTitle || tab?.title || '', [...clues, ...primaryClues]),
+                        structuredContext
+                    );
+                    if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
                         structuredCard.name = nameResolution.name;
                         if (structuredCard.variation) {
-                            structuredCard.searchName = [nameResolution.name, structuredCard.variation]
-                                .filter(Boolean)
-                                .join(' ');
+                            structuredCard.searchName = searchNameWithVariation(nameResolution.name, structuredCard.variation);
                         }
                     }
                     const searchResult = await searchExtensionCard(structuredCard);

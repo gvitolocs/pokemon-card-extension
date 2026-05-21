@@ -886,6 +886,45 @@ test('Vinted Regice Ex defaults only name phrase and attached variation', async 
     assert.doesNotMatch(messages[0].title, /vintage|Set Ex/i);
 });
 
+test('Vinted preserves trainer composite clue in background payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/35-arven-mabosstiff', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /mabosstiff/i.test(String(title || '')) ? 'Mabosstiff' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pokemon card Mabosstiff ex';
+    processor.currentKeywords = processor.extractVintedKeywords(
+        processor.currentTitle,
+        'Arven\'s Mabosstiff ex 484'
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'Arven\'s Mabosstiff ex'));
+    assert.ok(messages[0].clues.some((clue) => clue === 'Arven\'s Mabosstiff ex'));
+    assert.ok(messages[0].primaryClues.some((clue) => clue === 'Arven\'s Mabosstiff ex'));
+    assert.equal(messages[0].title, 'Arven\'s Mabosstiff ex');
+});
+
 test('Vinted detached description variation is manual by default', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -2110,6 +2149,128 @@ test('Cardmarket background search prefers trainer composite over shorter Pokemo
     const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
     assert.equal(extensionPayload.name, 'Arven\'s Mabosstiff ex');
     assert.equal(extensionPayload.collectorNumber, '484');
+});
+
+test('background marketplace search preserves trainer composite names across sites', async () => {
+    for (const { label, url, title, originalTitle, clues, primaryClues } of [
+        {
+            label: 'Vinted',
+            url: 'https://www.vinted.it/items/35-arven-mabosstiff',
+            title: 'Arven\'s Mabosstiff ex',
+            originalTitle: 'Pokemon card Mabosstiff ex',
+            clues: ['Arven\'s Mabosstiff ex', 'Mabosstiff ex', 'ex'],
+            primaryClues: ['Arven\'s Mabosstiff ex', 'ex'],
+        },
+        {
+            label: 'eBay',
+            url: 'https://www.ebay.com/itm/123456',
+            title: 'Pokemon TCG Arven\'s Mabosstiff ex 484',
+            originalTitle: '',
+            clues: [],
+            primaryClues: [],
+        },
+    ]) {
+        const source = readRepoFile('config/background.js');
+        let messageListener = null;
+        const fetchBodies = [];
+        const sandbox = {
+            console: { log() {}, warn() {}, error() {} },
+            URL,
+            setTimeout,
+            clearTimeout,
+            fetch: async (fetchUrl, options = {}) => {
+                if (fetchUrl.includes('/api/cardtrader-redirect')) {
+                    return {
+                        ok: true,
+                        json: async () => ({ products: [] }),
+                    };
+                }
+                const body = JSON.parse(options.body || '{}');
+                fetchBodies.push({ url: fetchUrl, body });
+                if (fetchUrl.includes('/api/marketplace-autocomplete')) {
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            rows: body.search_term === 'Arven\'s Mabosstiff ex'
+                                ? [{ card_id: '484', name: 'Arven\'s Mabosstiff ex', canonical_name: 'Arven\'s Mabosstiff ex', search_rank: 100 }]
+                                : body.search_term === 'Mabosstiff'
+                                    ? [{ card_id: '999', name: 'Mabosstiff', canonical_name: 'Mabosstiff', search_rank: 100 }]
+                                    : [],
+                        }),
+                    };
+                }
+                if (fetchUrl.includes('/api/extension-card-search')) {
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            matches: body.name === 'Arven\'s Mabosstiff ex'
+                                ? [{
+                                    cardId: '484',
+                                    name: 'Arven\'s Mabosstiff ex',
+                                    expansionName: 'Mega Evolution',
+                                    collectorNumber: '484',
+                                    score: 95,
+                                }]
+                                : [{
+                                    cardId: '999',
+                                    name: 'Mabosstiff',
+                                    expansionName: 'Mega Evolution',
+                                    collectorNumber: '123',
+                                    score: 95,
+                                }],
+                        }),
+                    };
+                }
+                throw new Error(`Unexpected fetch: ${fetchUrl}`);
+            },
+            chrome: {
+                runtime: {
+                    onMessage: {
+                        addListener(listener) {
+                            messageListener = listener;
+                        },
+                    },
+                    onInstalled: { addListener() {} },
+                    onStartup: { addListener() {} },
+                },
+                tabs: {
+                    query: async () => [],
+                    onUpdated: { addListener() {} },
+                    onActivated: { addListener() {} },
+                },
+                scripting: { executeScript: async () => [] },
+                storage: {
+                    session: { get: async () => ({}), set: async () => {} },
+                    local: { set: async () => {} },
+                },
+                sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+                action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+            },
+        };
+        vm.createContext(sandbox);
+        vm.runInContext(source, sandbox, { filename: `config/background.js:${label}` });
+
+        const response = await new Promise((resolve) => {
+            messageListener(
+                {
+                    action: 'searchCardForTitle',
+                    title,
+                    originalTitle,
+                    clues,
+                    primaryClues,
+                    url,
+                },
+                { tab: { id: 8, title: originalTitle || title, url } },
+                resolve
+            );
+        });
+
+        assert.equal(response.success, true, `${label} response should succeed`);
+        assert.equal(response.results[0].name_en, 'Arven\'s Mabosstiff ex', `${label} should return composite card name`);
+        assert.equal(fetchBodies[0].body.search_term, 'Arven\'s Mabosstiff ex', `${label} should resolve composite name before Pokemon-only fallback`);
+        const extensionPayload = fetchBodies.find((entry) => entry.url.includes('/api/extension-card-search')).body;
+        assert.equal(extensionPayload.name, 'Arven\'s Mabosstiff ex', `${label} extension search should use composite card name`);
+    }
 });
 
 test('background search de-dupes repeated identical title requests', async () => {
