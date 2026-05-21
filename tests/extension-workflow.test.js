@@ -846,6 +846,87 @@ test('Vinted normalizes Vastro typo to preselected VSTAR in clues and payload', 
     assert.ok(messages[0].primaryClues.some((clue) => /^vstar$/i.test(clue)));
 });
 
+test('Vinted Regice Ex defaults only name phrase and attached variation', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/33-regice-ex', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /regice/i.test(String(title || '')) ? 'Regice' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Regice Ex vintage Set Ex';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    assert.deepEqual(Array.from(selectedLabels), ['Regice ex', 'ex']);
+    assert.equal(processor.currentKeywords.find((keyword) => /^vintage$/i.test(keyword.label))?.selectedByDefault, false);
+    assert.equal(processor.currentKeywords.find((keyword) => /^Set ex$/i.test(keyword.label))?.selectedByDefault, false);
+    assert.deepEqual(Array.from(messages[0].clues), ['Regice ex', 'ex']);
+    assert.deepEqual(Array.from(messages[0].primaryClues), ['Regice ex', 'ex']);
+    assert.equal(messages[0].title, 'Regice ex');
+    assert.doesNotMatch(messages[0].title, /vintage|Set Ex/i);
+});
+
+test('Vinted detached description variation is manual by default', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/34-regice', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^regice$/i.test(String(title || '').trim()) ? 'Regice' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pokemon Regice';
+    processor.currentKeywords = processor.extractVintedKeywords(
+        processor.currentTitle,
+        'Carta vintage. Versione ex nella descrizione.'
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    assert.deepEqual(Array.from(processor.selectedKeywordLabels()), ['Regice']);
+    assert.equal(processor.currentKeywords.find((keyword) => /^ex$/i.test(keyword.label))?.selectedByDefault, false);
+    assert.equal(processor.currentKeywords.find((keyword) => /^vintage$/i.test(keyword.label))?.selectedByDefault, false);
+    assert.deepEqual(Array.from(messages[0].clues), ['Regice']);
+    assert.deepEqual(Array.from(messages[0].primaryClues), ['Regice']);
+    assert.equal(messages[0].title, 'Regice');
+});
+
 test('Vinted keyword defaults select Pokemon-name-like and variation clues', () => {
     const appended = [];
     const chips = [];
@@ -996,7 +1077,7 @@ test('Vinted selected Pokemon clue overrides noisy title terms', async () => {
     assert.deepEqual([...messages[1].primaryClues], ['reshiram']);
 });
 
-test('Vinted Base Set clue is selected and preserved with Pokemon primary clue', async () => {
+test('Vinted Base Set clue is manual unless user selects it', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -1025,15 +1106,17 @@ test('Vinted Base Set clue is selected and preserved with Pokemon primary clue',
     );
 
     await processor.searchCardWithBackground(processor.currentTitle);
-    await processor.openPokoinSidePanel();
-
     assert.deepEqual([...messages[0].primaryClues], ['Mewtwo']);
-    assert.ok(messages[0].clues.some((clue) => /^Base Set$/i.test(clue)));
-    assert.equal(messages[0].title, 'Mewtwo Base Set');
+    assert.deepEqual([...messages[0].clues], ['Mewtwo']);
+    assert.equal(messages[0].title, 'Mewtwo');
+
+    processor.selectedKeywordValues.add(processor.currentKeywords.find((keyword) => keyword.compact === 'baseset').compact);
+    await processor.openPokoinSidePanel();
+    assert.ok(messages[1].clues.some((clue) => /^Base Set$/i.test(clue)));
     assert.equal(messages[1].title, 'Mewtwo Base Set');
 });
 
-test('Vinted fullart title normalizes to illustration clue', async () => {
+test('Vinted fullart title normalizes to manual illustration clue', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -1063,11 +1146,11 @@ test('Vinted fullart title normalizes to illustration clue', async () => {
 
     await processor.searchCardWithBackground(processor.currentTitle);
 
-    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'illustration' && keyword.selectedByDefault));
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'illustration' && keyword.selectedByDefault === false));
     assert.ok(!processor.currentKeywords.some((keyword) => /Fullart Scrivimi/i.test(keyword.value)));
     assert.deepEqual([...messages[0].primaryClues], ['Froslass']);
-    assert.ok(messages[0].clues.some((clue) => clue === 'illustration'));
-    assert.equal(messages[0].title, 'Froslass illustration');
+    assert.deepEqual(Array.from(messages[0].clues), ['Froslass']);
+    assert.equal(messages[0].title, 'Froslass');
 });
 
 test('Vinted selected keyword toggles shape background and side-panel messages', async () => {
@@ -1490,7 +1573,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
             extractTitleInfo: (title) => ({
-                pokemonName: /^regigigas$/i.test(String(title || '').trim()) ? 'Regigigas' : null,
+                pokemonName: /regigigas/i.test(String(title || '')) ? 'Regigigas' : null,
             }),
         },
         chrome: {
@@ -1531,7 +1614,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => ['regigigas', 'vstar'].includes(keyword.compact))
+            .filter((keyword) => keyword.selectedByDefault)
             .map((keyword) => keyword.compact)
     );
 
@@ -1566,9 +1649,9 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.equal(messages.at(-1).selectedCandidateId, '9000');
     assert.equal(messages.at(-1).selectedCandidate.card_id, '9000');
     assert.equal(messages.at(-1).selectedCandidate.name, 'Regigigas VSTAR');
-    assert.ok(messages.at(-1).clues.some((clue) => /^regigigas$/i.test(clue)));
+    assert.ok(messages.at(-1).clues.some((clue) => /^regigigas vstar$/i.test(clue)));
     assert.ok(messages.at(-1).clues.some((clue) => /^vstar$/i.test(clue)));
-    assert.ok(messages.at(-1).primaryClues.some((clue) => /^regigigas$/i.test(clue)));
+    assert.ok(messages.at(-1).primaryClues.some((clue) => /^regigigas vstar$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^vstar$/i.test(clue)));
 
     await rows[0].eventListeners.click({
@@ -1611,7 +1694,7 @@ test('Vinted main Pokoin button opens side panel from shadow overlay', async () 
                 pathname: '/items/40-dragonite',
             },
             extractTitleInfo: (title) => ({
-                pokemonName: /^dragonite$/i.test(String(title || '').trim()) ? 'Dragonite' : null,
+                pokemonName: /dragonite/i.test(String(title || '')) ? 'Dragonite' : null,
             }),
         },
         chrome: {
@@ -1655,8 +1738,8 @@ test('Vinted main Pokoin button opens side panel from shadow overlay', async () 
     assert.equal(messages.length, 1);
     assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
     assert.equal(messages[0].url, 'https://www.vinted.it/items/40-dragonite');
-    assert.ok(messages[0].primaryClues.some((clue) => /^dragonite$/i.test(clue)));
-    assert.ok(messages[0].primaryClues.some((clue) => /\bv\b/i.test(clue)));
+    assert.ok(messages[0].primaryClues.some((clue) => /^dragonite v$/i.test(clue)));
+    assert.ok(messages[0].primaryClues.some((clue) => /^v$/i.test(clue)));
 
     await processor.currentButton.eventListeners.click({
         preventDefault() {},

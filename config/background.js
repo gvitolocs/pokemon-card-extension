@@ -497,15 +497,13 @@ function resolvedCardNameFromRow(row, term = '') {
 }
 
 function candidateNameTermsFromTitle(title = '', structuredCard = null) {
-    const terms = [];
     if (structuredCard?.name) {
-        terms.push(structuredCard.name);
+        return [structuredCard.name];
     }
 
     const cleaned = removeMarketplaceSearchNoise(String(title || '')
         .replace(/\s*\|\s*(?:Vinted|Cardmarket)\s*$/i, '')
-        .replace(/\([^)]*\)/g, ' ')
-        .replace(/["’`.,:;!?/\\[\]{}|]+/g, ' ')
+        .replace(/[()"'’`.,:;!?/\\[\]{}|]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim());
     const stopWords = new Set([
@@ -518,27 +516,15 @@ function candidateNameTermsFromTitle(title = '', structuredCard = null) {
         .split(/\s+/)
         .map((word) => word.trim())
         .filter((word) => word && !stopWords.has(word.toLowerCase()));
-    for (let size = Math.min(4, words.length); size >= 1; size -= 1) {
+    const terms = [];
+
+    for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
         for (let index = 0; index <= words.length - size; index += 1) {
             terms.push(words.slice(index, index + size).join(' '));
         }
     }
 
     return [...new Set(terms)].slice(0, 18);
-}
-
-function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
-    const requestedName = compactSearchValue(structuredCard?.name || '');
-    if (!resolvedName) {
-        return false;
-    }
-    if (!requestedName) {
-        return true;
-    }
-
-    const resolvedCompact = compactSearchValue(resolvedName);
-    return resolvedCompact === requestedName ||
-        resolvedCompact.includes(requestedName);
 }
 
 async function resolveNameFromCardvaultTitle(title = '', structuredCard = null) {
@@ -758,7 +744,8 @@ function rowMatchesStructuredName(row, structuredCard) {
     }
 
     return rowName === requestedName ||
-        rowName.includes(requestedName);
+        rowName.includes(requestedName) ||
+        requestedName.includes(rowName);
 }
 
 function isAllowedBaseSetFamily(row) {
@@ -1182,7 +1169,10 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                         isCardmarketUrl(pageInfo.url) ? pageInfo.structuredCard : null
                     );
                     debug.nameResolution = nameResolution;
-                    if (shouldUseResolvedCardName(nameResolution.name, pageInfo.structuredCard)) {
+                    if (nameResolution.name && (
+                        !pageInfo.structuredCard?.name ||
+                        compactSearchValue(nameResolution.name) === compactSearchValue(pageInfo.structuredCard.name)
+                    )) {
                         pageInfo.structuredCard = {
                             ...(pageInfo.structuredCard || {}),
                             name: nameResolution.name,
@@ -1325,7 +1315,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     const structuredCard = scrapeStructuredCardFields(title);
                     const structuredContext = isCardmarketUrl(request.url || tab?.url || '') ? structuredCard : null;
                     const nameResolution = await resolveNameFromCardvaultTitle(title, structuredContext);
-                    if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
+                    if (nameResolution.name && (
+                        !structuredCard.name ||
+                        compactSearchValue(nameResolution.name) === compactSearchValue(structuredCard.name)
+                    )) {
                         structuredCard.name = nameResolution.name;
                         if (structuredCard.variation) {
                             structuredCard.searchName = [nameResolution.name, structuredCard.variation]

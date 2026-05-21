@@ -105,12 +105,19 @@ class VintedProcessor {
 
     addKeywordCandidate(candidates, value, source = 'description') {
         let label = this.normalizeClueValue(value);
+        label = label
+            .replace(/\bex\b/gi, 'ex')
+            .replace(/\bgx\b/gi, 'GX')
+            .replace(/\bv\b/gi, 'V')
+            .replace(/\bvmax\b/gi, 'VMAX')
+            .replace(/\bvstar\b/gi, 'VSTAR');
         if (/\bset\s+base\b/i.test(label)) {
             label = label.replace(/\bset\s+base\b/gi, 'Base Set');
         }
         const compact = this.compactClueValue(label);
         const stopWords = this.vintedKeywordStopWords();
-        if (!label || compact.length < 2 || stopWords.has(label.toLowerCase()) || stopWords.has(compact)) {
+        const isVariation = this.isVariationClue(label);
+        if (!label || (compact.length < 2 && !isVariation) || stopWords.has(label.toLowerCase()) || stopWords.has(compact)) {
             return;
         }
         if (!candidates.some((candidate) => candidate.compact === compact)) {
@@ -148,6 +155,75 @@ class VintedProcessor {
         return /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(value));
     }
 
+    vintedVariationCompacts() {
+        return ['vmax', 'vstar', 'ex', 'gx', 'v', 'lvx', 'mega', 'radiant', 'shining', 'prime', 'break'];
+    }
+
+    resolvedPokemonNameFromClue(value = '') {
+        if (typeof window.extractTitleInfo !== 'function') {
+            return '';
+        }
+
+        try {
+            const titleInfo = window.extractTitleInfo(this.normalizeClueValue(value)) || {};
+            return titleInfo.pokemonName || titleInfo.name || '';
+        } catch (error) {
+            console.warn('⚠️ [VINT] Unable to resolve clue Pokemon name:', error);
+            return '';
+        }
+    }
+
+    hasAttachedVariationForName(name = '', sourceText = '') {
+        const nameCompact = this.compactClueValue(name);
+        const sourceCompact = this.compactClueValue(sourceText);
+        if (!nameCompact || !sourceCompact) {
+            return false;
+        }
+
+        return this.vintedVariationCompacts().some((variation) => sourceCompact.includes(`${nameCompact}${variation}`));
+    }
+
+    isAttachedNamePhraseClue(value = '') {
+        const label = this.removeVintedMarketplaceNoise(typeof value === 'object' ? value.label || value.value : value);
+        if (!this.isVariationClue(label)) {
+            return false;
+        }
+
+        const resolvedName = this.resolvedPokemonNameFromClue(label);
+        if (!resolvedName) {
+            return false;
+        }
+
+        const labelCompact = this.compactClueValue(label);
+        const nameCompact = this.compactClueValue(resolvedName);
+        return Boolean(
+            labelCompact &&
+            nameCompact &&
+            labelCompact !== nameCompact &&
+            this.vintedVariationCompacts().some((variation) => labelCompact === `${nameCompact}${variation}`)
+        );
+    }
+
+    isAttachedVariationClue(value = '', sourceText = '') {
+        if (!this.isVariationClue(value)) {
+            return false;
+        }
+
+        const labelCompact = this.compactClueValue(value);
+        if (!this.vintedVariationCompacts().includes(labelCompact)) {
+            return false;
+        }
+
+        const sourceCompact = this.compactClueValue(sourceText);
+        if (!sourceCompact) {
+            return false;
+        }
+
+        return this.currentKeywords
+            .filter((keyword) => keyword.attachedNamePhrase)
+            .some((keyword) => this.compactClueValue(keyword.value).endsWith(labelCompact));
+    }
+
     isIllustrationClue(value = '') {
         return /\b(?:illustration|full\s*-?\s*art|fullart)\b/i.test(this.normalizeClueValue(value));
     }
@@ -156,26 +232,55 @@ class VintedProcessor {
         return /\b(?:base\s+set|set\s+base)\b/i.test(this.normalizeClueValue(value));
     }
 
-    prepareVintedKeywordCandidates(candidates = []) {
-        return candidates
+    prepareVintedKeywordCandidates(candidates = [], sourceText = '') {
+        const prepared = candidates
             .map((candidate, index) => {
                 const nameLike = this.isPokemonNameLikeClue(candidate);
                 const variation = this.isVariationClue(candidate.label || candidate.value);
                 const baseSet = this.isBaseSetClue(candidate.label || candidate.value);
                 const illustration = this.isIllustrationClue(candidate.label || candidate.value);
+                const attachedNamePhrase = this.isAttachedNamePhraseClue(candidate);
+                const selectedNameLike = nameLike && !this.hasAttachedVariationForName(candidate.label || candidate.value, sourceText);
                 return {
                     ...candidate,
                     nameLike,
                     variation,
                     baseSet,
                     illustration,
-                    selectedByDefault: nameLike || variation || baseSet || illustration,
+                    attachedNamePhrase,
+                    attachedVariation: false,
+                    selectedByDefault: attachedNamePhrase || selectedNameLike,
                     _index: index,
+                };
+            });
+
+        const selectedAttachedVariations = new Set(
+            prepared
+                .filter((keyword) => keyword.attachedNamePhrase)
+                .flatMap((keyword) => {
+                    const compact = keyword.compact;
+                    return this.vintedVariationCompacts().filter((variation) => compact.endsWith(variation));
+                })
+        );
+
+        return prepared
+            .map((keyword) => {
+                const attachedVariation = keyword.variation && selectedAttachedVariations.has(keyword.compact);
+                return {
+                    ...keyword,
+                    attachedVariation,
+                    selectedByDefault: keyword.selectedByDefault || attachedVariation,
                 };
             })
             .sort((left, right) => {
                 if (left.selectedByDefault !== right.selectedByDefault) {
                     return left.selectedByDefault ? -1 : 1;
+                }
+                if (left.attachedNamePhrase !== right.attachedNamePhrase) {
+                    return left.attachedNamePhrase ? -1 : 1;
+                }
+                if (left.attachedVariation !== right.attachedVariation) {
+                    return left.attachedVariation ? -1 : 1;
                 }
                 return left._index - right._index;
             })
@@ -240,7 +345,7 @@ class VintedProcessor {
             /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi,
             /\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|holo|promo|rare)\b/gi,
-            /\b(?:vmax|vstar|vastro|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
+            /\b(?:vmax|vstar|vastro|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
         ];
         cluePatterns.forEach((pattern) => {
             for (const match of sourceText.matchAll(pattern)) {
@@ -267,7 +372,7 @@ class VintedProcessor {
             }
         }
 
-        return this.prepareVintedKeywordCandidates(candidates);
+        return this.prepareVintedKeywordCandidates(candidates, sourceText);
     }
 
     selectedKeywordLabels() {
@@ -280,7 +385,7 @@ class VintedProcessor {
         const selectedCompacts = new Set(
             this.currentKeywords
                 .filter((keyword) => this.selectedKeywordValues.has(keyword.compact))
-                .filter((keyword) => keyword.nameLike || keyword.variation)
+                .filter((keyword) => keyword.nameLike || keyword.attachedNamePhrase || keyword.attachedVariation)
                 .map((keyword) => keyword.compact)
         );
 
@@ -378,8 +483,23 @@ class VintedProcessor {
         const variationClues = this.selectedVariationClues(clues);
         const baseSetClues = this.selectedBaseSetClues(clues);
         const illustrationClues = this.selectedIllustrationClues(clues);
+        const primaryCompacts = primaryClues.map((clue) => this.compactClueValue(clue));
+        const searchPrimaryClues = primaryClues.filter((clue) => {
+            const compact = this.compactClueValue(clue);
+            if (!this.vintedVariationCompacts().includes(compact)) {
+                return true;
+            }
+            return !primaryCompacts.some((primaryCompact) => primaryCompact !== compact && primaryCompact.endsWith(compact));
+        });
+        const additionalVariationClues = variationClues.filter((clue) => {
+            const compact = this.compactClueValue(clue);
+            if (!this.vintedVariationCompacts().includes(compact)) {
+                return false;
+            }
+            return !primaryCompacts.some((primaryCompact) => primaryCompact === compact || primaryCompact.endsWith(compact));
+        });
         const searchParts = primaryClues.length > 0
-            ? [...primaryClues, ...baseSetClues, ...illustrationClues, ...variationClues]
+            ? [...searchPrimaryClues, ...baseSetClues, ...illustrationClues, ...additionalVariationClues]
             : [this.removeVintedMarketplaceNoise(title), ...clues];
 
         return searchParts
