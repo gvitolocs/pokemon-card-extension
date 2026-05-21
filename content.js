@@ -149,8 +149,7 @@ class PokemonCardTraderLinker {
                 window.cardmarketProcessor = new window.CardmarketProcessor();
                 window.cardmarketProcessor.init();
             } else {
-                console.log('⚠️ [CardTrader] CardmarketProcessor not available, using original logic');
-                this.patchCardmarketProductPage();
+                console.warn('⚠️ [Pokoin] CardmarketProcessor unavailable; legacy Cardmarket fallback is disabled.');
             }
         } else if (hostname.includes('cardtrader')) {
             patchCardTraderCardPage();
@@ -181,7 +180,8 @@ class PokemonCardTraderLinker {
                 console.log('🚫 [CardTrader] CardmarketProcessor active, skipping fallback logic for Cardmarket');
                 return;
             }
-            this.patchCardmarketProductPage();
+            console.warn('⚠️ [Pokoin] CardmarketProcessor unavailable; legacy Cardmarket fallback is disabled.');
+            return;
         }
     }
     
@@ -663,8 +663,7 @@ async function initializeExtension() {
                     window.cardmarketProcessor = new window.CardmarketProcessor();
                     window.cardmarketProcessor.init();
                 } else {
-                    console.log('⚠️ [CardTrader] CardmarketProcessor not available, using original logic');
-                    patchCardmarketProductPage();
+                    console.warn('⚠️ [Pokoin] CardmarketProcessor unavailable; legacy Cardmarket fallback is disabled.');
                 }
             } else if (hostname.includes('cardtrader')) {
                 patchCardTraderCardPage();
@@ -695,7 +694,8 @@ async function initializeExtension() {
                     console.log('🚫 [CardTrader] CardmarketProcessor active, skipping fallback logic for Cardmarket');
                     return;
                 }
-                patchCardmarketProductPage();
+                console.warn('⚠️ [Pokoin] CardmarketProcessor unavailable; legacy Cardmarket fallback is disabled.');
+                return;
             } else if (hostname.includes('cardtrader')) {
                 patchCardTraderCardPage();
             }
@@ -1800,126 +1800,7 @@ function patchVintedProductPage() {
 // Patch for Cardmarket product pages
 function patchCardmarketProductPage() {
     if (!window.location.hostname.includes('cardmarket')) return;
-    
-    try {
-        // Search for i product title
-        const titleSelectors = [
-            '.page-title-container h1',
-            'h1',
-            '.col-12 .d-flex .flex-grow-1 h1',
-            '.product-details h1',
-            '.card-title',
-            '.product-title'
-        ];
-        
-        let titleElement = null;
-        for (const selector of titleSelectors) {
-            titleElement = document.querySelector(selector);
-            if (titleElement) break;
-        }
-        
-        if (!titleElement) {
-            console.log('⚠️ [CardTrader] Cardmarket product title not found');
-            return;
-        }
-        
-        // For Cardmarket, get the ENTIRE h1 content including spans (to capture expansion)
-        let title = titleElement.textContent.trim();
-        
-        if (!title) {
-            console.log('⚠️ [CardTrader] Cardmarket product title is empty');
-            return;
-        }
-        
-        console.log(`🔍 [CardTrader] Cardmarket product title: "${title}"`);
-        
-        // Extract info from title
-        const titleInfo = extractTitleInfo(title);
-        
-        // Create gray loading button immediately
-        const button = document.createElement('button');
-        setPokoinButtonLabel(button);
-        button.style.cssText = `
-            margin: 0;
-            padding: 6px 12px;
-            font-size: 15px;
-            min-width: 100px;
-        `;
-        applyPokoinButtonStyles(button, { background: '#6c757d' });
-        attachPokoinSidePanelClick(button);
-        
-        // Search il link "Contact Support" e sostituiscilo with il button Pokoin
-        const supportLink = document.querySelector('a[href*="support/tickets/new"]');
-        let buttonInserted = false; // Flag to track whether the button was inserted
-        
-        // Inserisci il button
-        if (supportLink && supportLink.parentNode) {
-            supportLink.parentNode.replaceChild(button, supportLink);
-            console.log(`✅ [CardTrader] Replaced support link with Pokoin button on Cardmarket (loading)`);
-            buttonInserted = true;
-        } else {
-            // Find the support link container and insert the button there
-            const supportContainer = document.querySelector('.align-self-end.mb-md-1 div');
-            if (supportContainer) {
-                supportContainer.appendChild(button);
-                console.log(`✅ [CardTrader] Inserted Pokoin button in support container on Cardmarket (loading)`);
-                buttonInserted = true;
-            } else {
-                // Fallback: inserisci direttamente in h1
-                titleElement.appendChild(button);
-                console.log(`✅ [CardTrader] Added Pokoin button to the product page Cardmarket (loading fallback)`);
-                buttonInserted = true;
-            }
-        }
-
-        
-        // Ottieni il riferimento al button
-        let targetButton = button;
-        
-        // Esegui sempre la search database se il button esiste (nuovo o already presente)
-        console.log('🔍 [CardTrader] Avvio search database for:', titleInfo.pokemonName || title);
-        searchCardInDatabase(titleInfo, title).then(results => {
-            if (results && results.length > 0) {
-                // Change color to green when a link is found
-                targetButton.style.background = '#28a745';
-                setPokoinButtonLabel(targetButton, countHighConfidenceMatches(results));
-                console.log(`✅ [CardTrader] Link found, button turned green`);
-                
-                // Enhanced hover effects (green)
-                targetButton.addEventListener('mouseenter', () => {
-                    targetButton.style.background = '#218838';
-                    targetButton.style.transform = 'scale(1.02)';
-                    targetButton.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
-                });
-                
-                targetButton.addEventListener('mouseleave', () => {
-                    targetButton.style.background = '#28a745';
-                    targetButton.style.transform = 'scale(1)';
-                    targetButton.style.boxShadow = 'none';
-                });
-                
-            } else {
-                // Mantieni gray se not ha found results
-                console.log(`⚠️ [CardTrader] No result found, button stays gray`);
-                
-                // Effetti hover for button gray (disabilitato)
-                targetButton.addEventListener('mouseenter', () => {
-                    targetButton.style.background = '#5a6268';
-                    targetButton.style.transform = 'scale(1.02)';
-                    targetButton.style.boxShadow = '0 1px 4px rgba(0,0,0,0.15)';
-                });
-                
-                targetButton.addEventListener('mouseleave', () => {
-                    targetButton.style.background = '#6c757d';
-                    targetButton.style.transform = 'scale(1)';
-                    targetButton.style.boxShadow = 'none';
-                });
-            }
-        });
-        
-    } catch (error) {
-        console.error('❌ [CardTrader] Error patching Cardmarket product page:', error);
-    }
+    console.warn('⚠️ [Pokoin] Legacy Cardmarket product-page fallback is disabled; processors/CME.js owns Cardmarket runtime.');
 }
 
 // Extract info from title

@@ -8,6 +8,7 @@ const elements = {
     pokoinFrame: document.getElementById('pokoinFrame'),
     candidatesSection: document.getElementById('candidatesSection'),
     candidateList: document.getElementById('candidateList'),
+    runtimeInfo: document.getElementById('runtimeInfo'),
 };
 
 function setStatus(message, isError = false) {
@@ -265,12 +266,16 @@ function renderState(state) {
     const best = state?.best || null;
     const blueprintId = state?.blueprintId || best?.card_id || '';
     const isCardTraderDirect = Boolean(pageInfo.cardtraderBlueprintId || best?.source === 'cardtrader_url');
+    const buildMarker = state?.debug?.buildMarker || pageInfo.debug?.buildMarker || '';
+    const extensionVersion = state?.debug?.extensionVersion || pageInfo.debug?.extensionVersion || '';
 
     elements.frameSection.hidden = true;
     elements.candidatesSection.hidden = true;
     elements.frameSection.classList.toggle('frame-section-direct', false);
     document.body.classList.toggle('direct-card-view', false);
     elements.candidateList.replaceChildren();
+    elements.runtimeInfo.textContent = [extensionVersion && `v${extensionVersion}`, buildMarker].filter(Boolean).join(' · ');
+    elements.runtimeInfo.hidden = !elements.runtimeInfo.textContent;
 
     if (state?.error) {
         elements.cardName.textContent = 'No card loaded';

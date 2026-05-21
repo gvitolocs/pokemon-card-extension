@@ -1,4 +1,7 @@
 // Background script for Pokemon Card Trader Linker
+const EXTENSION_VERSION = (chrome.runtime?.getManifest?.() || {}).version || '1.4.0';
+const EXTENSION_BUILD_MARKER = `${EXTENSION_VERSION}-runtime-divergence-guard`;
+const EXTENSION_RUNTIME_STORAGE_KEY = 'pokoinExtensionRuntime';
 const CARDVAULT_API_BASE_URL = 'https://pokoin.com';
 const POKOIN_AUTH_ORIGIN = 'https://pokoin.com';
 const POKOIN_AUTH_BRIDGE_URL = `${POKOIN_AUTH_ORIGIN}/extension/auth-bridge`;
@@ -457,6 +460,61 @@ function cardmarketExpansionFromUrl(url = '') {
     }
 }
 
+function titleCaseCardmarketSlug(value = '') {
+    return String(value || '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\bex|gx|vmax|vstar|lv x\b/gi, (match) => match.toUpperCase())
+        .replace(/\bmc\b/gi, 'MC')
+        .replace(/\b\w/g, (match) => match.toUpperCase())
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cardmarketProductInfoFromUrl(url = '', title = '') {
+    try {
+        const parsed = new URL(url);
+        if (!parsed.hostname.includes('cardmarket')) {
+            return null;
+        }
+        const parts = parsed.pathname
+            .split('/')
+            .map((part) => decodeURIComponent(part))
+            .filter(Boolean);
+        const singlesIndex = parts.findIndex((part) => /^Singles$/i.test(part));
+        const expansionSlug = singlesIndex >= 0 ? parts[singlesIndex + 1] || '' : '';
+        const productSlug = singlesIndex >= 0 ? parts[singlesIndex + 2] || '' : '';
+        if (!productSlug) {
+            return null;
+        }
+        const productMatch = productSlug.match(/^(.+?)-([A-Z]{1,6})(\d{1,4}[a-z]?)$/i);
+        if (!productMatch) {
+            return null;
+        }
+        const [, rawName, rawPrefix, rawNumber] = productMatch;
+        const name = titleCaseCardmarketSlug(rawName);
+        const collectorNumber = `${rawPrefix.toUpperCase()} ${rawNumber}`;
+        const expansion = normalizeExpansionAlias(titleCaseCardmarketSlug(expansionSlug));
+        const derivedTitle = `${name} (${collectorNumber})`;
+        const structuredCard = scrapeStructuredCardFields(derivedTitle, { expansion });
+        if (!hasExactStructuredIdentity(structuredCard)) {
+            return null;
+        }
+        return {
+            title: derivedTitle,
+            url,
+            hostname: parsed.hostname,
+            structuredCard,
+            debug: {
+                extractorVersion: 2,
+                titleSource: 'cardmarket-url-product-slug',
+                originalTitle: title || '',
+            },
+        };
+    } catch (error) {
+        return null;
+    }
+}
+
 function scrapeStructuredCardFields(title = '', context = null) {
     const cleanTitle = String(title || '')
         .replace(/\s*\|\s*Vinted\s*$/i, '')
@@ -821,16 +879,30 @@ async function getActivePageInfo(tab) {
         return cardTraderDirectPageInfo;
     }
 
+    const cardmarketUrlPageInfo = cardmarketProductInfoFromUrl(tab.url || '', tab.title || '');
+
     const [result] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: extractTitleFromPage,
     });
 
-    return result?.result || {
+    const pageInfo = result?.result || {
         title: tab.title || '',
         url: tab.url || '',
         hostname: new URL(tab.url).hostname,
     };
+    const scrapedHasExactIdentity = hasExactStructuredIdentity(pageInfo.structuredCard);
+    if (cardmarketUrlPageInfo && !scrapedHasExactIdentity) {
+        return {
+            ...cardmarketUrlPageInfo,
+            debug: {
+                ...(pageInfo.debug || {}),
+                ...cardmarketUrlPageInfo.debug,
+                replacedScrapedTitle: pageInfo.title || '',
+            },
+        };
+    }
+    return pageInfo;
 }
 
 function buildCardvaultQueries(title) {
@@ -1399,6 +1471,58 @@ function isLockedCardTraderDirectState(state = {}, url = '') {
     );
 }
 
+function isExactCardmarketState(state = {}) {
+    const pageInfo = state?.pageInfo || {};
+    return Boolean(
+        isCardmarketUrl(pageInfo.url || '') &&
+        hasExactStructuredIdentity(pageInfo.structuredCard || {}) &&
+        (state.blueprintId || state.best?.card_id || state.best?.blueprint_id)
+    );
+}
+
+function shouldKeepExistingExactCardmarketState(existingState = {}, nextState = {}) {
+    if (!isExactCardmarketState(existingState)) {
+        return false;
+    }
+    const existingUrl = existingState.pageInfo?.url || '';
+    const nextUrl = nextState.pageInfo?.url || '';
+    if (!existingUrl || !nextUrl || !sameUrlWithoutHash(existingUrl, nextUrl)) {
+        return false;
+    }
+    return !isExactCardmarketState(nextState);
+}
+
+async function setSidePanelState(nextState = {}) {
+    const state = {
+        ...nextState,
+        debug: runtimeDebugMetadata(nextState.debug || {}),
+    };
+    const { sidePanelState: currentState } = await chrome.storage.session.get('sidePanelState');
+    if (shouldKeepExistingExactCardmarketState(currentState, state)) {
+        console.log('ℹ️ [Background] Kept exact Cardmarket state over weaker same-URL update');
+        return currentState;
+    }
+    await chrome.storage.session.set({ sidePanelState: state });
+    return state;
+}
+
+function clearBackgroundSearchCachesForUrl(url = '') {
+    const stableUrl = stableSearchUrl(url);
+    if (!stableUrl) {
+        return;
+    }
+    for (const key of [...backgroundSearchInFlight.keys()]) {
+        if (key.startsWith(`${stableUrl}|`)) {
+            backgroundSearchInFlight.delete(key);
+        }
+    }
+    for (const key of [...backgroundSearchResultCache.keys()]) {
+        if (key.startsWith(`${stableUrl}|`)) {
+            backgroundSearchResultCache.delete(key);
+        }
+    }
+}
+
 const sidePanelRefreshTimers = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
@@ -1407,6 +1531,62 @@ const pokoinPriceCache = new Map();
 const cardmarketObservationSignatures = new Set();
 const cardmarketObservationInFlight = new Map();
 let pokoinAuthBridgeInFlight = null;
+
+function runtimeDebugMetadata(extra = {}) {
+    return {
+        extensionVersion: EXTENSION_VERSION,
+        buildMarker: EXTENSION_BUILD_MARKER,
+        ...extra,
+    };
+}
+
+async function ensureRuntimeStorageCurrent() {
+    const storage = await chrome.storage.session.get([EXTENSION_RUNTIME_STORAGE_KEY, 'sidePanelState']);
+    const runtime = storage?.[EXTENSION_RUNTIME_STORAGE_KEY] || {};
+    if (runtime.buildMarker === EXTENSION_BUILD_MARKER) {
+        return;
+    }
+    backgroundSearchInFlight.clear();
+    backgroundSearchResultCache.clear();
+    cardvaultNameResolutionCache.clear();
+    if (!runtime.buildMarker) {
+        await chrome.storage.session.set({
+            [EXTENSION_RUNTIME_STORAGE_KEY]: {
+                extensionVersion: EXTENSION_VERSION,
+                buildMarker: EXTENSION_BUILD_MARKER,
+                initializedAt: Date.now(),
+            },
+        });
+        return;
+    }
+    await chrome.storage.session.set({
+        [EXTENSION_RUNTIME_STORAGE_KEY]: {
+            extensionVersion: EXTENSION_VERSION,
+            buildMarker: EXTENSION_BUILD_MARKER,
+            initializedAt: Date.now(),
+        },
+        sidePanelState: storage.sidePanelState
+            ? {
+                updatedAt: Date.now(),
+                pageInfo: {
+                    ...(storage.sidePanelState.pageInfo || {}),
+                    title: '',
+                    url: '',
+                    hostname: '',
+                },
+                rows: [],
+                best: null,
+                blueprintId: '',
+                pokoinUrl: '',
+                error: '',
+                loading: false,
+                debug: runtimeDebugMetadata({
+                    invalidatedPreviousBuildMarker: runtime.buildMarker || '',
+                }),
+            }
+            : storage.sidePanelState,
+    });
+}
 
 function normalizePokoinTokenExpiry(value, receivedAt = Date.now()) {
     if (!value) {
@@ -1794,6 +1974,7 @@ function buildBackgroundSearchSignature({ title = '', originalTitle = '', clues 
 }
 
 async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
+    await ensureRuntimeStorageCurrent();
     if (!tab?.id || !isSupportedMarketplaceUrl(tab.url)) {
         return;
     }
@@ -1825,19 +2006,17 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
                 return;
             }
 
-            await chrome.storage.session.set({
-                sidePanelState: {
-                    ...(latestSidePanelState || {}),
-                    updatedAt: Date.now(),
-                    loading: true,
-                    pageInfo: {
-                        ...(latestSidePanelState?.pageInfo || {}),
-                        title: refreshTab.title || '',
-                        url: refreshTab.url || '',
-                        hostname: refreshTab.url ? new URL(refreshTab.url).hostname : '',
-                    },
-                    error: '',
+            await setSidePanelState({
+                ...(latestSidePanelState || {}),
+                updatedAt: Date.now(),
+                loading: true,
+                pageInfo: {
+                    ...(latestSidePanelState?.pageInfo || {}),
+                    title: refreshTab.title || '',
+                    url: refreshTab.url || '',
+                    hostname: refreshTab.url ? new URL(refreshTab.url).hostname : '',
                 },
+                error: '',
             });
             await resolveActiveTabForSidePanel(refreshTab, { expectedUrl: scheduledUrl });
             console.log(`✅ [Background] Side panel refreshed after ${reason}`);
@@ -1848,6 +2027,7 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
 }
 
 async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
+    await ensureRuntimeStorageCurrent();
     const resolveStartedAt = Date.now();
     const phaseTimings = {};
     let phaseStartedAt = resolveStartedAt;
@@ -1883,6 +2063,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     let error = pageInfoError;
     const debug = {
         version: 2,
+        ...runtimeDebugMetadata(),
         tab: {
             id: tab?.id || null,
             title: tab?.title || '',
@@ -2031,17 +2212,15 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
     }
 
-    await chrome.storage.session.set({
-        sidePanelState: {
-            updatedAt: Date.now(),
-            pageInfo,
-            rows,
-            best,
-            blueprintId,
-            pokoinUrl,
-            error,
-            debug,
-        },
+    await setSidePanelState({
+        updatedAt: Date.now(),
+        pageInfo,
+        rows,
+        best,
+        blueprintId,
+        pokoinUrl,
+        error,
+        debug,
     });
 
     void schedulePriceEnrichment(rows, async (enrichedRows) => {
@@ -2055,19 +2234,17 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
             return enrichedRows;
         }
         const enrichedBest = enrichedRows[0] || null;
-        await chrome.storage.session.set({
-            sidePanelState: {
-                updatedAt: Date.now(),
-                pageInfo,
-                rows: enrichedRows,
-                best: enrichedBest,
-                blueprintId,
-                pokoinUrl,
-                error,
-                debug: {
-                    ...debug,
-                    priceEnriched: true,
-                },
+        await setSidePanelState({
+            updatedAt: Date.now(),
+            pageInfo,
+            rows: enrichedRows,
+            best: enrichedBest,
+            blueprintId,
+            pokoinUrl,
+            error,
+            debug: {
+                ...debug,
+                priceEnriched: true,
             },
         });
     });
@@ -2092,6 +2269,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         sendResponse({ success: true });
     } else if (request.action === 'getStats') {
         sendResponse({ stats });
+    } else if (request.action === 'getRuntimeInfo') {
+        ensureRuntimeStorageCurrent()
+            .then(() => sendResponse({ success: true, runtime: runtimeDebugMetadata() }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to read runtime info.' }));
     } else if (request.action === 'toggleExtension') {
         // Implement extension enable/disable logic
         sendResponse({ success: true });
@@ -2125,25 +2306,27 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 sendResponse({ success: false, error: error.message || 'Unable to refresh match.' });
             });
     } else if (request.action === 'searchCardForTitle') {
-        const tab = sender.tab;
-        const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
-        const clues = normalizeRequestClues(request.clues);
-        const primaryClues = normalizeRequestClues(request.primaryClues);
-        const title = buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
-        const requestUrl = request.url || tab?.url || '';
-        const searchSignature = buildBackgroundSearchSignature({
-            title,
-            originalTitle: request.originalTitle || request.title || tab?.title || '',
-            clues,
-            primaryClues,
-            url: requestUrl,
-        });
-        if (backgroundSearchResultCache.has(searchSignature)) {
-            sendResponse({ success: true, results: backgroundSearchResultCache.get(searchSignature) });
-            return true;
-        }
-        if (!backgroundSearchInFlight.has(searchSignature)) {
-            backgroundSearchInFlight.set(searchSignature, Promise.resolve()
+        ensureRuntimeStorageCurrent()
+            .then(() => {
+                const tab = sender.tab;
+                const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
+                const clues = normalizeRequestClues(request.clues);
+                const primaryClues = normalizeRequestClues(request.primaryClues);
+                const title = buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues);
+                const requestUrl = request.url || tab?.url || '';
+                const searchSignature = buildBackgroundSearchSignature({
+                    title,
+                    originalTitle: request.originalTitle || request.title || tab?.title || '',
+                    clues,
+                    primaryClues,
+                    url: requestUrl,
+                });
+                if (backgroundSearchResultCache.has(searchSignature)) {
+                    sendResponse({ success: true, results: backgroundSearchResultCache.get(searchSignature) });
+                    return;
+                }
+                if (!backgroundSearchInFlight.has(searchSignature)) {
+                    backgroundSearchInFlight.set(searchSignature, Promise.resolve()
                 .then(async () => {
                     if (directCardTraderBlueprintId) {
                         const directName = cleanCardTraderDirectName(title || tab?.title || '', request.url || tab?.url || '', directCardTraderBlueprintId);
@@ -2223,10 +2406,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 .finally(() => {
                     backgroundSearchInFlight.delete(searchSignature);
                 }));
-        }
-        backgroundSearchInFlight.get(searchSignature)
-            .then((results) => sendResponse({ success: true, results }))
-            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
+                }
+                backgroundSearchInFlight.get(searchSignature)
+                    .then((results) => sendResponse({ success: true, results }))
+                    .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
+            })
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to initialize runtime state.' }));
     } else if (request.action === 'openSidePanelForCurrentTab') {
         const senderTab = sender.tab;
         if (!senderTab?.id) {
@@ -2239,6 +2424,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             : Promise.resolve();
         Promise.resolve()
             .then(async () => {
+                await ensureRuntimeStorageCurrent();
                 const tab = await chrome.tabs.get(senderTab.id);
                 const currentUrl = request.url || tab.url || senderTab.url || '';
                 const currentTitle = request.title || tab.title || senderTab.title || '';
@@ -2293,11 +2479,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             error: '',
                         },
                     };
-                    await chrome.storage.session.set({
-                        sidePanelState: {
-                            updatedAt: Date.now(),
-                            ...directResult,
-                        },
+                    await setSidePanelState({
+                        updatedAt: Date.now(),
+                        ...directResult,
                     });
                     return directResult;
                 }
@@ -2335,33 +2519,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             error: '',
                         },
                     };
-                    await chrome.storage.session.set({
-                        sidePanelState: {
-                            updatedAt: Date.now(),
-                            ...selectedResult,
-                        },
+                    await setSidePanelState({
+                        updatedAt: Date.now(),
+                        ...selectedResult,
                     });
                     observeCardmarketScrapeSoon(selectedResult, { promoteVerifiedLink: isCardmarketUrl(currentUrl) });
                     return selectedResult;
                 }
-                await chrome.storage.session.set({
-                    sidePanelState: {
-                        updatedAt: Date.now(),
-                        loading: true,
-                        pageInfo: {
-                            title: requestTitle || currentTitle,
-                            url: currentUrl,
-                            hostname: currentUrl ? new URL(currentUrl).hostname : '',
-                            originalTitle: request.originalTitle || currentTitle,
-                            clues: requestClues,
-                            primaryClues: requestPrimaryClues,
-                        },
-                        rows: [],
-                        best: null,
-                        blueprintId: '',
-                        pokoinUrl: '',
-                        error: '',
+                clearBackgroundSearchCachesForUrl(currentUrl);
+                await setSidePanelState({
+                    updatedAt: Date.now(),
+                    loading: true,
+                    pageInfo: {
+                        title: requestTitle || currentTitle,
+                        url: currentUrl,
+                        hostname: currentUrl ? new URL(currentUrl).hostname : '',
+                        originalTitle: request.originalTitle || currentTitle,
+                        clues: requestClues,
+                        primaryClues: requestPrimaryClues,
                     },
+                    rows: [],
+                    best: null,
+                    blueprintId: '',
+                    pokoinUrl: '',
+                    error: '',
+                    debug: runtimeDebugMetadata({ loading: true }),
                 });
                 return resolveActiveTabForSidePanel({
                     ...tab,
@@ -2418,40 +2600,38 @@ chrome.action.onClicked.addListener(async (tab) => {
             await chrome.sidePanel.open({ tabId: tab.id });
         }
 
-        await chrome.storage.session.set({
-            sidePanelState: {
-                updatedAt: Date.now(),
-                pageInfo: {
-                    title: tab?.title || '',
-                    url: tab?.url || '',
-                    hostname: tab?.url ? new URL(tab.url).hostname : '',
-                },
-                rows: [],
-                best: null,
-                blueprintId: '',
-                pokoinUrl: '',
-                error: '',
-                loading: true,
+        await setSidePanelState({
+            updatedAt: Date.now(),
+            pageInfo: {
+                title: tab?.title || '',
+                url: tab?.url || '',
+                hostname: tab?.url ? new URL(tab.url).hostname : '',
             },
+            rows: [],
+            best: null,
+            blueprintId: '',
+            pokoinUrl: '',
+            error: '',
+            loading: true,
+            debug: runtimeDebugMetadata({ loading: true }),
         });
 
         await resolveActiveTabForSidePanel(tab);
     } catch (error) {
         console.error('❌ Failed to open CardTrader side panel:', error);
-        await chrome.storage.session.set({
-            sidePanelState: {
-                updatedAt: Date.now(),
-                pageInfo: {
-                    title: tab?.title || '',
-                    url: tab?.url || '',
-                    hostname: tab?.url ? new URL(tab.url).hostname : '',
-                },
-                rows: [],
-                best: null,
-                blueprintId: '',
-                pokoinUrl: '',
-                error: error.message || 'Unable to open side panel.',
+        await setSidePanelState({
+            updatedAt: Date.now(),
+            pageInfo: {
+                title: tab?.title || '',
+                url: tab?.url || '',
+                hostname: tab?.url ? new URL(tab.url).hostname : '',
             },
+            rows: [],
+            best: null,
+            blueprintId: '',
+            pokoinUrl: '',
+            error: error.message || 'Unable to open side panel.',
+            debug: runtimeDebugMetadata({ error: true }),
         });
 
         if (chrome.sidePanel?.open && tab?.id) {

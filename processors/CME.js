@@ -56,11 +56,67 @@ class CardmarketProcessor {
         });
     }
 
+    buildStructuredRequestContext(context = {}) {
+        const details = context.details || {};
+        const number = details.number || '';
+        const expansion = details.expansion || this.extractExpansionFromUrl();
+        return {
+            originalTitle: context.title || '',
+            clues: [number, expansion].filter(Boolean),
+        };
+    }
+
+    extractExpansionFromUrl() {
+        try {
+            const parts = new URL(window.location.href).pathname
+                .split('/')
+                .map((part) => decodeURIComponent(part))
+                .filter(Boolean);
+            const singlesIndex = parts.findIndex((part) => /^Singles$/i.test(part));
+            return singlesIndex >= 0 && parts[singlesIndex + 1]
+                ? parts[singlesIndex + 1].replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+                : '';
+        } catch (error) {
+            return '';
+        }
+    }
+
+    async searchProductWithBackground(context) {
+        const response = await chrome.runtime.sendMessage({
+            action: 'searchCardForTitle',
+            title: context.title,
+            url: window.location.href,
+            ...this.buildStructuredRequestContext(context),
+            cardmarketReady: true,
+        });
+        return response?.success && Array.isArray(response.results) ? response.results : [];
+    }
+
+    openProductSidePanel(context) {
+        return chrome.runtime.sendMessage({
+            action: 'openSidePanelForCurrentTab',
+            url: window.location.href,
+            title: context.title,
+            ...this.buildStructuredRequestContext(context),
+            cardmarketReady: true,
+        }).catch((error) => {
+            console.warn('⚠️ [CME] Unable to open side panel:', error);
+        });
+    }
+
     attachSidePanelClick(button) {
         button.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
             this.openPokoinSidePanel();
+        });
+    }
+
+    attachProductSidePanelClick(button, context) {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.openProductSidePanel(context);
         });
     }
 
@@ -273,7 +329,7 @@ class CardmarketProcessor {
                 min-width: 100px;
             `;
             this.applyPokoinButtonState(button, 'loading');
-            this.attachSidePanelClick(button);
+            this.attachProductSidePanelClick(button, context);
             
             // Look for "Contact Support" link and replace with Pokoin button
             let buttonInserted = false; // Track whether the button was inserted
@@ -304,7 +360,7 @@ class CardmarketProcessor {
             
             // Always run database lookup if button exists (new or already present)
             console.log('🔍 [CME] Starting database lookup for:', titleInfo.pokemonName || context.title);
-            const searchPromise = this.inFlightProductSearches.get(context.key) || this.searchCardInDatabase(titleInfo, context.title);
+            const searchPromise = this.inFlightProductSearches.get(context.key) || this.searchProductWithBackground(context);
             this.inFlightProductSearches.set(context.key, searchPromise);
             searchPromise.then(results => {
                 if (results && results.length > 0) {

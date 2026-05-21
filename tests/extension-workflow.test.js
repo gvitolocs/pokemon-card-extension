@@ -2132,6 +2132,51 @@ test('Cardmarket product injection is once per stable ready product URL', async 
     assert.equal(documentStub.actionArea.querySelectorAll('[data-pokemon-linker-button]').length, 1);
 });
 
+test('Cardmarket processor sends ready detail clues with product search and side-panel open', async () => {
+    const messages = [];
+    const documentStub = createCardmarketFixture({ includeDetails: true });
+    const { Processor } = loadProcessor('processors/CME.js', 'CardmarketProcessor', {
+        window: {
+            location: {
+                href: 'https://www.cardmarket.com/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                hostname: 'www.cardmarket.com',
+                pathname: '/it/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+            extractTitleInfo: () => ({ pokemonName: 'Piplup' }),
+        },
+        document: documentStub,
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Piplup', blueprint_id: 'mep-042' }] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightProductSearches.values().next().value;
+    const button = documentStub.actionArea.querySelector('[data-pokemon-linker-button]');
+    button.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+    });
+    await Promise.resolve();
+
+    const searchMessage = messages.find((message) => message.action === 'searchCardForTitle');
+    const openMessage = messages.find((message) => message.action === 'openSidePanelForCurrentTab');
+    assert.equal(searchMessage.title, 'Piplup (MEP 042)');
+    assert.deepEqual([...searchMessage.clues], ['042', 'MEP Black Star Promos']);
+    assert.equal(searchMessage.primaryClues, undefined);
+    assert.equal(searchMessage.cardmarketReady, true);
+    assert.deepEqual([...openMessage.clues], ['042', 'MEP Black Star Promos']);
+    assert.equal(openMessage.title, 'Piplup (MEP 042)');
+});
+
 test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     const source = readRepoFile('config/background.js');
     const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
@@ -3524,6 +3569,7 @@ test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state
             storage: {
                 session: {
                     get: async () => ({
+                        pokoinExtensionRuntime: { buildMarker: '1.4.0-runtime-divergence-guard' },
                         sidePanelState: {
                             updatedAt: Date.now() + 1000,
                             pageInfo: {
@@ -3541,7 +3587,9 @@ test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state
                         },
                     }),
                     set: async (payload) => {
-                        storageWrites.push(payload);
+                        if (payload.sidePanelState) {
+                            storageWrites.push(payload);
+                        }
                     },
                 },
                 local: { set: async () => {} },
@@ -4620,7 +4668,7 @@ test('side panel renders direct CardTrader card as full panel with clean header'
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
         makeElement(id);
     }
 
@@ -4694,7 +4742,7 @@ test('side panel does not use direct full-panel classes for other marketplaces',
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
         makeElement(id);
     }
 
@@ -4765,7 +4813,7 @@ test('side panel loading state uses short Pokoin copy', () => {
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
         makeElement(id);
     }
 
@@ -4821,7 +4869,7 @@ test('side panel preserves API candidate order while rendering logos', () => {
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
         makeElement(id);
     }
 
@@ -5483,4 +5531,131 @@ test('Cardmarket selected side-panel candidate promotes verified link', async ()
     assert.equal(observation.body.promoteVerifiedLink, true);
     assert.equal(observation.body.cardmarketContext.url, 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042');
     assert.equal(observation.body.match.cardId, 'mep-042');
+});
+
+test('Cardmarket side-panel write keeps exact state over weaker same-URL update', async () => {
+    const writes = [];
+    const exactState = {
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: 'Piplup (MEP 042)',
+            url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            structuredCard: {
+                name: 'Piplup',
+                collectorNumber: 'MEP 042',
+                expansion: 'MEP Black Star Promos',
+            },
+        },
+        best: { card_id: 'mep-042', name: 'Piplup' },
+        blueprintId: 'mep-042',
+        debug: { buildMarker: '1.4.0-runtime-divergence-guard' },
+    };
+    const sandbox = loadBackgroundHelpers(['setSidePanelState']);
+    sandbox.chrome.storage.session.get = async () => ({ sidePanelState: exactState });
+    sandbox.chrome.storage.session.set = async (payload) => writes.push(payload);
+
+    const retained = await sandbox.setSidePanelState({
+        updatedAt: Date.now() + 1,
+        pageInfo: {
+            title: 'Piplup',
+            url: exactState.pageInfo.url,
+            structuredCard: { name: 'Piplup' },
+        },
+        best: { card_id: 'sc-006', name: 'Piplup', set_name: 'Stellar Crown', card_number: '006/142' },
+        blueprintId: 'sc-006',
+        debug: {},
+    });
+
+    assert.equal(retained, exactState);
+    assert.equal(writes.length, 0, 'weaker title-only state should not overwrite exact Cardmarket state');
+});
+
+test('Cardmarket URL product slug restores exact identity when page scrape is degraded', async () => {
+    const sandbox = loadBackgroundHelpers(['getActivePageInfo']);
+    sandbox.chrome.scripting.executeScript = async () => [{
+        result: {
+            title: 'Piplup',
+            url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            hostname: 'www.cardmarket.com',
+            structuredCard: { name: 'Piplup' },
+            debug: { titleSource: 'degraded-title-only' },
+        },
+    }];
+
+    const pageInfo = await sandbox.getActivePageInfo({
+        id: 8,
+        title: 'Piplup',
+        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+    });
+
+    assert.equal(pageInfo.title, 'Piplup (MEP 042)');
+    assert.equal(pageInfo.structuredCard.name, 'Piplup');
+    assert.equal(pageInfo.structuredCard.collectorNumber, 'MEP 042');
+    assert.equal(pageInfo.structuredCard.expansion, 'MEP Black Star Promos');
+    assert.equal(pageInfo.debug.titleSource, 'cardmarket-url-product-slug');
+});
+
+test('runtime version change invalidates stale session side-panel state', async () => {
+    const writes = [];
+    const sandbox = loadBackgroundHelpers(['ensureRuntimeStorageCurrent']);
+    sandbox.chrome.storage.session.get = async () => ({
+        pokoinExtensionRuntime: { buildMarker: 'old-build' },
+        sidePanelState: {
+            pageInfo: {
+                title: 'Piplup',
+                url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Stellar-Crown/Piplup-006',
+                hostname: 'www.cardmarket.com',
+            },
+            best: { card_id: 'sc-006' },
+            blueprintId: 'sc-006',
+        },
+    });
+    sandbox.chrome.storage.session.set = async (payload) => writes.push(payload);
+
+    await sandbox.ensureRuntimeStorageCurrent();
+
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].pokoinExtensionRuntime.buildMarker, '1.4.0-runtime-divergence-guard');
+    assert.equal(writes[0].sidePanelState.blueprintId, '');
+    assert.equal(writes[0].sidePanelState.pageInfo.url, '');
+    assert.equal(writes[0].sidePanelState.debug.invalidatedPreviousBuildMarker, 'old-build');
+});
+
+test('content Cardmarket legacy fallback is disabled and cannot send title-only search', () => {
+    const source = readRepoFile('content.js');
+    const fallback = extractFunctionSource(source, 'patchCardmarketProductPage');
+
+    assert.match(fallback, /Legacy Cardmarket product-page fallback is disabled/);
+    assert.doesNotMatch(fallback, /searchCardInDatabase\(|searchCardForTitle/);
+});
+
+test('dist zip includes current runtime files without stale backups', () => {
+    const { execFileSync } = require('node:child_process');
+    const crypto = require('node:crypto');
+    const entries = execFileSync('unzip', ['-l', path.join(REPO_ROOT, 'dist/pokemon-card-extension-1.4.0.zip')], { encoding: 'utf8' });
+    const hash = (value) => crypto.createHash('sha256').update(value).digest('hex');
+
+    [
+        'manifest.json',
+        'content.js',
+        'config/background.js',
+        'processors/CME.js',
+        'ui-pages/sidepanel.js',
+        'ui-pages/sidepanel.html',
+    ].forEach((entry) => assert.match(entries, new RegExp(`\\b${entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)));
+    assert.doesNotMatch(entries, /\b(?:backup|old|legacy|copy|~)\b/i);
+
+    [
+        'manifest.json',
+        'content.js',
+        'config/background.js',
+        'processors/CME.js',
+        'ui-pages/sidepanel.js',
+        'ui-pages/sidepanel.html',
+        'ui-pages/sidepanel.css',
+    ].forEach((entry) => {
+        const sourceHash = hash(readRepoFile(entry));
+        const zipContent = execFileSync('unzip', ['-p', path.join(REPO_ROOT, 'dist/pokemon-card-extension-1.4.0.zip'), entry], { encoding: 'utf8' });
+        assert.equal(hash(zipContent), sourceHash, `${entry} in dist zip should match source`);
+    });
 });
