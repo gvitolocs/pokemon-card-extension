@@ -371,6 +371,8 @@ elements.refreshBtn.addEventListener('click', async () => {
             clues: sidePanelState?.pageInfo?.selectedClues || sidePanelState?.pageInfo?.clues || [],
             primaryClues: sidePanelState?.pageInfo?.primaryClues || [],
             vintedPayload: sidePanelState?.pageInfo?.vintedPayload || null,
+            ebayPayload: sidePanelState?.pageInfo?.ebayPayload || null,
+            marketplacePayload: sidePanelState?.pageInfo?.marketplacePayload || null,
         });
         if (!response?.success) {
             throw new Error(response?.error || 'Refresh failed.');

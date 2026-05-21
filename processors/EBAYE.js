@@ -109,6 +109,10 @@ class EbayProcessor {
         if (/^(?:PSA|BGS|CGC|SGC)\s+\d{1,2}$/i.test(label)) {
             return false;
         }
+        if (/\b(?:NM|LP|MP|HP|DMG|GD|VG|PR)\s*\/\s*(?:NM|LP|MP|HP|DMG|GD|VG|PR)\b/i.test(label) ||
+            /\b(?:NM|LP|MP|HP|DMG|GD|VG|PR)\s+\d{4}\b/i.test(label)) {
+            return false;
+        }
         return /\b(?:BW|XY|SM|SWSH|SVP|SV-P)\s?-?\s?\d{1,4}[a-z]?\b/i.test(label) ||
             /\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/i.test(label) ||
             /\b[A-Z][A-Z0-9-]{0,7}\s?\d{1,4}[a-z]?\s*\/\s*(?:[A-Z][A-Z0-9-]{0,7}\s?)?\d{1,4}[a-z]?\b/.test(label) ||
@@ -186,6 +190,7 @@ class EbayProcessor {
 
     knownExpansionAliases() {
         return [
+            { pattern: /\b(?:ex\s+)?(?:sandstorm|tempesta\s+di\s+sabbia)\b/i, name: 'EX Sandstorm' },
             { pattern: /\bgenerations\s+radiant\s+collection\b/i, name: 'Generations Radiant Collection' },
             { pattern: /\bradiant\s+collection\b/i, name: 'Radiant Collection' },
             { pattern: /\bgenerations\b/i, name: 'Generations' },
@@ -196,6 +201,13 @@ class EbayProcessor {
             { pattern: /\bevolutions\b|\bevoluzioni\b/i, name: 'Evolutions' },
             { pattern: /\bbase\s+set\b|\bset\s+base\b/i, name: 'Base Set' },
         ];
+    }
+
+    stripKnownExpansionAliases(value = '') {
+        return this.knownExpansionAliases().reduce(
+            (text, { pattern }) => text.replace(pattern, ' '),
+            String(value || '')
+        ).replace(/\s+/g, ' ').trim();
     }
 
     extractEbayDetails() {
@@ -242,7 +254,10 @@ class EbayProcessor {
         const matches = [];
         this.ebayCollectorNumberPatterns().forEach((pattern) => {
             for (const match of String(text || '').matchAll(pattern)) {
-                matches.push(this.normalizeEbayCollectorNumber(match[0]));
+                const label = this.normalizeEbayCollectorNumber(match[0]);
+                if (this.isCollectorNumberClue(label)) {
+                    matches.push(label);
+                }
             }
         });
         const seen = new Set();
@@ -312,11 +327,13 @@ class EbayProcessor {
         [
             /\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|holo|promo|rare)\b/gi,
             /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
-        ].forEach((pattern) => {
-            for (const match of title.matchAll(pattern)) {
+        ].forEach((pattern, patternIndex) => {
+            const titleSource = patternIndex === 1 ? this.stripKnownExpansionAliases(title) : title;
+            const detailsSource = patternIndex === 1 ? this.stripKnownExpansionAliases(details) : details;
+            for (const match of titleSource.matchAll(pattern)) {
                 this.addKeywordCandidate(candidates, match[0], 'title-pattern');
             }
-            for (const match of details.matchAll(pattern)) {
+            for (const match of detailsSource.matchAll(pattern)) {
                 this.addKeywordCandidate(candidates, match[0], 'pattern');
             }
         });
@@ -398,12 +415,16 @@ class EbayProcessor {
     }
 
     extractVariation(titleInfo = {}, text = '') {
-        const variation = titleInfo.cardType ||
-            (titleInfo.isEXCard ? 'ex' : '') ||
-            (titleInfo.isGXCard ? 'gx' : '') ||
-            (titleInfo.isVSTARCard ? 'vstar' : '') ||
-            (titleInfo.isVCard ? 'v' : '') ||
-            (text.match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i)?.[0] || '');
+        const textWithoutExpansion = this.stripKnownExpansionAliases(text);
+        const explicitVariation = textWithoutExpansion.match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i)?.[0] || '';
+        const variation = explicitVariation ||
+            (!text ? (
+                titleInfo.cardType ||
+                (titleInfo.isEXCard ? 'ex' : '') ||
+                (titleInfo.isGXCard ? 'gx' : '') ||
+                (titleInfo.isVSTARCard ? 'vstar' : '') ||
+                (titleInfo.isVCard ? 'v' : '')
+            ) : '');
         return String(variation || '').replace(/\s+/g, '').replace(/\./g, '').toLowerCase();
     }
 
@@ -1155,6 +1176,8 @@ class EbayProcessor {
         // Process immediately if current page is a product page
         if (this.isProductPage()) {
             this.processProductPage();
+        } else if (window.location.hostname.includes('ebay') && window.location.pathname.includes('/itm/')) {
+            this.scheduleProductPageRetry('initial-hydration');
         }
         
         // Start observer for new listings
@@ -1228,6 +1251,19 @@ class EbayProcessor {
         }
     }
 
+    scheduleProductPageRetry(reason = 'dom-update') {
+        if (this.productPageRetryTimer) {
+            return;
+        }
+        this.productPageRetryTimer = setTimeout(() => {
+            this.productPageRetryTimer = null;
+            if (this.isProductPage()) {
+                console.log(`🔁 [EBAYE] Retrying product page processing after ${reason}`);
+                this.processProductPage();
+            }
+        }, 250);
+    }
+
     /**
      * Start observer for new listings
      */
@@ -1237,6 +1273,9 @@ class EbayProcessor {
             
             mutations.forEach((mutation) => {
                 if (mutation.type === 'childList') {
+                    if (window.location.pathname.includes('/itm/') && !this.isEbayOwnedNodeConnected(this.currentButton)) {
+                        this.scheduleProductPageRetry('mutation');
+                    }
                     mutation.addedNodes.forEach((node) => {
                         if (node.nodeType === Node.ELEMENT_NODE) {
                             this.processNewListings(node);

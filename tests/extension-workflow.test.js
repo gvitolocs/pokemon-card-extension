@@ -3233,6 +3233,52 @@ test('eBay overlay selected keys preserve RC collector and Radiant Collection ev
     assert.equal(searchMessage.title, 'Sylveon ex Generations Radiant Collection RC32/RC32');
 });
 
+test('eBay localized Sandstorm title prioritizes collector and expansion over broad ex', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.it/itm/zangoose-14', hostname: 'www.ebay.it', pathname: '/itm/zangoose-14' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /zangoose/i.test(String(title || '')) ? 'Zangoose' : null,
+                isEXCard: /\bex\b/i.test(String(title || '')),
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    const title = 'Carta Pokemon Zangoose 14/100 EX Tempesta di Sabbia Holo Rara LP/NM 2003 TCG';
+    processor.currentTitle = title;
+    processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(title);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = messages[0].ebayPayload;
+    assert.ok(selectedLabels.includes('Zangoose'), 'Pokemon name should be selected');
+    assert.ok(selectedLabels.includes('14/100'), 'slash collector should be selected');
+    assert.ok(selectedLabels.includes('EX Sandstorm'), 'Italian expansion alias should be selected');
+    assert.equal(selectedLabels.includes('ex'), false, 'EX inside EX Sandstorm should not become a broad variation');
+    assert.equal(payload.name, 'Zangoose');
+    assert.equal(payload.collectorNumber, '14/100');
+    assert.equal(payload.numericCollectorNumber, '14');
+    assert.equal(payload.expansion, 'EX Sandstorm');
+    assert.equal(payload.variation, '');
+    assert.equal(messages[0].title, 'Zangoose EX Sandstorm 14/100');
+});
+
 test('eBay overlay chip toggles invalidate stale rows and send selected-key payload', async () => {
     const messages = [];
     let resolveFirst;
@@ -3298,6 +3344,61 @@ test('eBay overlay chip toggles invalidate stale rows and send selected-key payl
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 2);
     assert.equal(messages[1].selectionRevision, 1);
     assert.ok(messages[1].ebayPayload.selectedClues.length > messages[0].ebayPayload.selectedClues.length);
+});
+
+test('eBay item page retries overlay injection after late title hydration', async () => {
+    const page = createDomElement('div');
+    const titleElement = createDomElement('h1', { 'data-testid': 'x-item-title__mainTitle' });
+    titleElement.textContent = 'Zangoose 14/100 EX Tempesta di Sabbia';
+    const timers = [];
+    const observers = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.it/itm/zangoose-14', hostname: 'www.ebay.it', pathname: '/itm/zangoose-14' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /zangoose/i.test(String(title || '')) ? 'Zangoose' : null,
+            }),
+        },
+        document: {
+            title: '',
+            querySelector: (selector) => {
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelector(selector);
+                return page.querySelector(selector);
+            },
+            querySelectorAll: (selector) => {
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelectorAll(selector);
+                return page.querySelectorAll(selector);
+            },
+            contains: (element) => page.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: page,
+        },
+        MutationObserver: class {
+            constructor(callback) {
+                this.callback = callback;
+                observers.push(this);
+            }
+            observe() {}
+        },
+        setTimeout: (callback) => {
+            timers.push(callback);
+            return callback;
+        },
+        clearTimeout: () => {},
+    });
+    const processor = new Processor();
+
+    processor.init();
+    assert.equal(page.querySelector('[data-pokoin-ebay-panel-host]'), null);
+
+    page.appendChild(titleElement);
+    observers[0].callback([{ type: 'childList', addedNodes: [titleElement] }]);
+    assert.equal(timers.length, 1);
+    timers[0]();
+    await Promise.resolve();
+
+    assert.ok(page.querySelector('[data-pokoin-ebay-panel-host]'), 'late eBay title should still get the overlay');
+    assert.ok(processor.selectedKeywordLabels().includes('14/100'));
 });
 
 test('eBay button sends same structured payload and preview rows to side panel', async () => {
@@ -3987,6 +4088,28 @@ test('background ranks eBay RC32 Radiant Collection above generic Sylveon ex row
     assert.equal(sorted.at(-1).card_id, 'tfe-212');
 });
 
+test('background ranks eBay Sandstorm collector above broad Zangoose ex rows', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard', 'collectorNumberMatchRank', 'expansionMatches']);
+    const rows = [
+        { card_id: 'broad-ex-ah', name: 'Zangoose ex', set_name: 'Ancient Horizons', card_number: '167/182', search_rank: 12000 },
+        { card_id: 'sandstorm-14', name: 'Zangoose', set_name: 'EX Sandstorm', card_number: '14/100', search_rank: 10 },
+        { card_id: 'sandstorm-15', name: 'Zangoose', set_name: 'EX Sandstorm', card_number: '15/100', search_rank: 9999 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, {
+        name: 'Zangoose',
+        searchName: 'Zangoose',
+        variation: '',
+        collectorNumber: '14/100',
+        numericCollectorNumber: '14',
+        expansion: 'EX Sandstorm',
+    });
+
+    assert.equal(sandbox.collectorNumberMatchRank('14/100', '14/100'), 0);
+    assert.equal(sandbox.expansionMatches('EX Sandstorm', 'Tempesta di Sabbia'), true);
+    assert.equal(sorted[0].card_id, 'sandstorm-14');
+    assert.equal(sorted.at(-1).card_id, 'broad-ex-ah');
+});
+
 test('background normalizes eBay payload for exact Magearna search', () => {
     const sandbox = loadBackgroundHelpers(['normalizeMarketplacePayload']);
 
@@ -4432,6 +4555,93 @@ test('Vinted side panel refresh keeps pinned overlay preview rows', async () => 
     assert.equal(response.success, true);
     assert.deepEqual(response.result.rows.map((row) => row.card_id), ['111', '222']);
     assert.ok(fetchCalls <= 2, 'refresh may only decorate pinned Vinted preview prices');
+});
+
+test('side panel refresh forwards stored eBay selected-key payload', async () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const makeElement = (id) => {
+        const element = {
+            id,
+            textContent: '',
+            hidden: false,
+            src: '',
+            classList: createClassListStub(),
+            replaceChildren() {
+                this.children = [];
+            },
+            appendChild(child) {
+                this.children = [...(this.children || []), child];
+                return child;
+            },
+            addEventListener(type, listener) {
+                if (id === 'refreshBtn' && type === 'click') {
+                    this.click = listener;
+                }
+            },
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const ebayPayload = {
+        source: 'ebay',
+        searchTitle: 'Zangoose EX Sandstorm 14/100',
+        name: 'Zangoose',
+        collectorNumber: '14/100',
+        numericCollectorNumber: '14',
+        expansion: 'EX Sandstorm',
+        selectedClues: ['Zangoose', 'EX Sandstorm', '14/100'],
+        primaryClues: ['Zangoose'],
+    };
+    const messages = [];
+    const sandbox = {
+        document: {
+            body: { classList: createClassListStub() },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: {
+                    get: async () => ({
+                        sidePanelState: {
+                            pageInfo: {
+                                title: 'Zangoose EX Sandstorm 14/100',
+                                selectedClues: ebayPayload.selectedClues,
+                                primaryClues: ebayPayload.primaryClues,
+                                ebayPayload,
+                                marketplacePayload: ebayPayload,
+                            },
+                        },
+                    }),
+                },
+                onChanged: { addListener() {} },
+            },
+            runtime: {
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    await elementsById.get('refreshBtn').click();
+
+    const refreshMessage = messages.find((message) => message.action === 'resolveActiveTabForSidePanel');
+    assert.deepEqual(refreshMessage.clues, ebayPayload.selectedClues);
+    assert.deepEqual(refreshMessage.primaryClues, ebayPayload.primaryClues);
+    assert.equal(refreshMessage.ebayPayload.collectorNumber, '14/100');
+    assert.equal(refreshMessage.marketplacePayload.source, 'ebay');
 });
 
 test('Vinted side panel Refresh reuses canonical overlay preview rows', async () => {

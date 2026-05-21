@@ -470,6 +470,7 @@ function cardmarketExpansionAliases() {
         { pattern: /^(?:DRS|Dragon\s+Selection)$/i, name: 'Dragon Selection' },
         { pattern: /\b(?:RC|Radiant\s+Collection)\b/i, name: 'Radiant Collection' },
         { pattern: /\bGenerations\s+Radiant\s+Collection\b/i, name: 'Generations Radiant Collection' },
+        { pattern: /\b(?:ex\s+)?(?:sandstorm|tempesta\s+di\s+sabbia)\b/i, name: 'EX Sandstorm' },
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
         { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
         { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
@@ -490,6 +491,7 @@ function normalizeExpansionAlias(value = '') {
             { pattern: /^(?:DRS|Dragon\s+Selection)$/i, name: 'Dragon Selection' },
             { pattern: /\b(?:RC|Radiant\s+Collection)\b/i, name: 'Radiant Collection' },
             { pattern: /\bGenerations\s+Radiant\s+Collection\b/i, name: 'Generations Radiant Collection' },
+            { pattern: /\b(?:ex\s+)?(?:sandstorm|tempesta\s+di\s+sabbia)\b/i, name: 'EX Sandstorm' },
             { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
             { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
             { pattern: /\bequilibrio\s+perfetto\b/i, name: 'Perfect Order' },
@@ -505,6 +507,10 @@ function normalizeExpansionAlias(value = '') {
 
 function parseCardmarketCollectorCode(value = '') {
     const cleanValue = String(value || '').replace(/\s+/g, ' ').trim();
+    if (/\b(?:NM|LP|MP|HP|DMG|GD|VG|PR)\s*\/\s*(?:NM|LP|MP|HP|DMG|GD|VG|PR)\b/i.test(cleanValue) ||
+        /\b(?:NM|LP|MP|HP|DMG|GD|VG|PR)\s+\d{4}\b/i.test(cleanValue)) {
+        return { collectorNumber: '', printedNumber: '' };
+    }
     if (/^\d{1,4}[a-z]?$/i.test(cleanValue)) {
         return { collectorNumber: cleanValue, printedNumber: cleanValue };
     }
@@ -660,7 +666,9 @@ function scrapeStructuredCardFields(title = '', context = null) {
         .trim();
 
     const prefixedSlashCollectorNumber = cleanTitle.match(/\b([A-Z][A-Z0-9-]{0,7})\s?(\d{1,4}[a-z]?)\s*\/\s*(?:([A-Z][A-Z0-9-]{0,7})\s?)?(\d{1,4}[a-z]?)\b/i);
-    const prefixedCollectorNumber = cleanTitle.match(/\b([A-Z0-9][A-Z0-9-]{1,7})\s+(\d{1,4}[a-z]?)\b/);
+    const prefixedCollectorNumber = (cleanTitle.match(/\b([A-Z0-9][A-Z0-9-]{1,7})\s+(\d{1,4}[a-z]?)\b/g) || [])
+        .map((value) => value.match(/\b([A-Z0-9][A-Z0-9-]{1,7})\s+(\d{1,4}[a-z]?)\b/))
+        .find((match) => match && parseCardmarketCollectorCode(match[0]).collectorNumber) || null;
     const compactPrefixedCollectorNumber = cleanTitle.match(/\b(BW|XY|SM|SWSH|SVP|SV-P)(\d{1,4}[a-z]?)\b/i);
     const prefixedSlashCollector = prefixedSlashCollectorNumber
         ? `${prefixedSlashCollectorNumber[1].toUpperCase()}${prefixedSlashCollectorNumber[2]}/${(prefixedSlashCollectorNumber[3] || prefixedSlashCollectorNumber[1]).toUpperCase()}${prefixedSlashCollectorNumber[4]}`
@@ -691,6 +699,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
     const expansionAliases = [
         { pattern: /\b(?:set\s+base|base\s+set)\b/i, name: 'Base Set' },
         { pattern: /\bevoluzioni\b/i, name: 'Evolutions' },
+        { pattern: /\b(?:ex\s+)?(?:sandstorm|tempesta\s+di\s+sabbia)\b/i, name: 'EX Sandstorm' },
     ];
     const aliasedExpansion = expansionAliases.find(({ pattern }) => pattern.test(cleanTitle))?.name || '';
     const expansionNoise = [
@@ -704,6 +713,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         'Generations Radiant Collection',
         'Radiant Collection',
         'Generations',
+        'EX Sandstorm',
         'Steam Siege',
         'Fates Collide',
         'Evolutions',
@@ -1324,6 +1334,8 @@ function expansionAliasCompacts(expansion = '') {
         radiantcollection: 'RC',
         generationsradiantcollection: 'Radiant Collection',
         generations: 'Radiant Collection',
+        exsandstorm: 'Sandstorm',
+        sandstorm: 'EX Sandstorm',
     };
     if (codeAliases[compactExpansion]) {
         variants.add(codeAliases[compactExpansion]);
@@ -3156,27 +3168,29 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     };
     const requestClues = normalizeRequestClues(requestContext.clues);
     const requestPrimaryClues = normalizeRequestClues(requestContext.primaryClues);
-    const vintedPayload = normalizeVintedPayload(requestContext.vintedPayload);
-    const effectiveRequestClues = vintedPayload?.selectedClues || requestClues;
-    const effectivePrimaryClues = vintedPayload?.primaryClues || requestPrimaryClues;
+    const marketplacePayload = normalizeMarketplacePayload(requestContext.vintedPayload || requestContext.ebayPayload || requestContext.marketplacePayload);
+    const effectiveRequestClues = marketplacePayload?.selectedClues || requestClues;
+    const effectivePrimaryClues = marketplacePayload?.primaryClues || requestPrimaryClues;
     let pageInfo;
     let pageInfoError = '';
-    if (vintedPayload) {
-        const hasSelectedVintedClues = vintedPayload.selectedClues?.length > 0;
-        const originalTitle = requestContext.originalTitle || vintedPayload.originalTitle || tab?.title || '';
-        const selectedTitle = hasSelectedVintedClues
+    if (marketplacePayload) {
+        const hasSelectedMarketplaceClues = marketplacePayload.selectedClues?.length > 0;
+        const originalTitle = requestContext.originalTitle || marketplacePayload.originalTitle || tab?.title || '';
+        const selectedTitle = hasSelectedMarketplaceClues
             ? buildPrimaryClueSearchTitle('', effectiveRequestClues, effectivePrimaryClues)
             : '';
         pageInfo = {
-            title: selectedTitle || vintedPayload.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues),
-            url: tab?.url || vintedPayload.listingKey || '',
+            title: selectedTitle || marketplacePayload.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues),
+            url: tab?.url || marketplacePayload.listingKey || '',
             hostname: tab?.url ? new URL(tab.url).hostname : '',
             originalTitle,
             clues: effectiveRequestClues,
             primaryClues: effectivePrimaryClues,
             selectedClues: effectiveRequestClues,
-            structuredCard: vintedPayload.structuredCard,
-            vintedPayload,
+            structuredCard: marketplacePayload.structuredCard,
+            vintedPayload: marketplacePayload.source === 'vinted' ? marketplacePayload : null,
+            ebayPayload: marketplacePayload.source === 'ebay' ? marketplacePayload : null,
+            marketplacePayload,
         };
     } else {
         try {
@@ -3202,11 +3216,13 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         pageInfo.clues = effectiveRequestClues;
         pageInfo.primaryClues = effectivePrimaryClues;
         pageInfo.selectedClues = effectiveRequestClues;
-        pageInfo.title = vintedPayload?.source === 'vinted'
+        pageInfo.title = marketplacePayload?.source && effectiveRequestClues.length > 0
             ? buildPrimaryClueSearchTitle('', effectiveRequestClues, effectivePrimaryClues)
-            : (vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues));
-        pageInfo.structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(pageInfo.title, cardmarketContextFromRequest({ clues: effectiveRequestClues }, pageInfo.url || tab?.url || ''));
-        pageInfo.vintedPayload = vintedPayload;
+            : (marketplacePayload?.searchTitle || buildPrimaryClueSearchTitle(originalTitle, effectiveRequestClues, effectivePrimaryClues));
+        pageInfo.structuredCard = marketplacePayload?.structuredCard || scrapeStructuredCardFields(pageInfo.title, cardmarketContextFromRequest({ clues: effectiveRequestClues }, pageInfo.url || tab?.url || ''));
+        pageInfo.vintedPayload = marketplacePayload?.source === 'vinted' ? marketplacePayload : null;
+        pageInfo.ebayPayload = marketplacePayload?.source === 'ebay' ? marketplacePayload : null;
+        pageInfo.marketplacePayload = marketplacePayload;
     }
     let rows = [];
     let error = pageInfoError;
@@ -3277,7 +3293,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     try {
                         const nameResolutionTitle = titleForNameResolution(
                             pageInfo.title,
-                            vintedPayload?.source === 'vinted' && effectiveRequestClues.length > 0 ? '' : (pageInfo.originalTitle || tab?.title || ''),
+                            marketplacePayload?.source && effectiveRequestClues.length > 0 ? '' : (pageInfo.originalTitle || tab?.title || ''),
                             pageInfo.clues
                         );
                         const nameResolution = await resolveNameFromCardvaultTitle(
@@ -3515,7 +3531,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     forceRefresh: Boolean(request.forceRefresh),
                     clues: request.clues,
                     primaryClues: request.primaryClues,
-                    vintedPayload: request.vintedPayload,
+                    vintedPayload: request.vintedPayload || request.ebayPayload || request.marketplacePayload,
                 });
             })
             .then((result) => sendResponse({ success: true, result }))
@@ -3527,13 +3543,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .then(() => {
                 const tab = sender.tab;
                 const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
-                const vintedPayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
-                const isSelectedVintedSearch = vintedPayload?.source === 'vinted' && vintedPayload.selectedClues?.length > 0;
-                const clues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
-                const primaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
-                const title = isSelectedVintedSearch
+                const marketplacePayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
+                const isSelectedOverlaySearch = ['vinted', 'ebay'].includes(marketplacePayload?.source) && marketplacePayload.selectedClues?.length > 0;
+                const clues = marketplacePayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
+                const primaryClues = marketplacePayload?.primaryClues || normalizeRequestClues(request.primaryClues);
+                const title = isSelectedOverlaySearch
                     ? buildPrimaryClueSearchTitle('', clues, primaryClues)
-                    : (vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues));
+                    : (marketplacePayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || request.title || tab?.title || '', clues, primaryClues));
                 const requestUrl = request.url || tab?.url || '';
                 const searchSignature = buildBackgroundSearchSignature({
                     title,
@@ -3562,7 +3578,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         return [];
                     }
                     const cardmarketContext = cardmarketContextFromRequest(request, requestUrl);
-                    const structuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(title, cardmarketContext);
+                    const structuredCard = marketplacePayload?.structuredCard || scrapeStructuredCardFields(title, cardmarketContext);
                     const exactIdentity = hasExactStructuredIdentity(structuredCard);
                     const exactFastPath = hasExactSearchFastPath(structuredCard);
                     let rows = [];
@@ -3575,7 +3591,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     if (rows.length === 0 || (exactIdentity && !hasGoodEnoughExactRows(rows, structuredCard))) {
                         const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
                         const nameResolution = await resolveNameFromCardvaultTitle(
-                            titleForNameResolution(title, isSelectedVintedSearch ? '' : (request.originalTitle || tab?.title || ''), [...clues, ...primaryClues]),
+                            titleForNameResolution(title, isSelectedOverlaySearch ? '' : (request.originalTitle || tab?.title || ''), [...clues, ...primaryClues]),
                             structuredContext
                         );
                         if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
@@ -3669,15 +3685,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }, 'open');
                 openOwner = owner;
                 await openSidePanelPromise;
-                const vintedPayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
-                const isSelectedVintedOpen = vintedPayload?.source === 'vinted' && vintedPayload.selectedClues?.length > 0;
-                const requestClues = vintedPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
-                const requestPrimaryClues = vintedPayload?.primaryClues || normalizeRequestClues(request.primaryClues);
-                const requestTitle = isSelectedVintedOpen
+                const marketplacePayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
+                const isSelectedOverlayOpen = ['vinted', 'ebay'].includes(marketplacePayload?.source) && marketplacePayload.selectedClues?.length > 0;
+                const requestClues = marketplacePayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
+                const requestPrimaryClues = marketplacePayload?.primaryClues || normalizeRequestClues(request.primaryClues);
+                const requestTitle = isSelectedOverlayOpen
                     ? buildPrimaryClueSearchTitle('', requestClues, requestPrimaryClues)
-                    : (vintedPayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues));
-                const requestStructuredCard = vintedPayload?.structuredCard ||
-                    scrapeStructuredCardFields(requestTitle || (isSelectedVintedOpen ? '' : currentTitle), cardmarketContextFromRequest(request, currentUrl));
+                    : (marketplacePayload?.searchTitle || buildPrimaryClueSearchTitle(request.originalTitle || currentTitle, requestClues, requestPrimaryClues));
+                const requestStructuredCard = marketplacePayload?.structuredCard ||
+                    scrapeStructuredCardFields(requestTitle || (isSelectedOverlayOpen ? '' : currentTitle), cardmarketContextFromRequest(request, currentUrl));
                 const selectedCandidateRow = selectedCandidateRowFromRequest(request);
                 const previewRows = previewRowsFromRequest(request);
                 const vintedCanonical = vintedCanonicalFromRequest(request, {
@@ -3752,7 +3768,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             primaryClues: requestPrimaryClues,
                             selectedClues: requestClues,
                             structuredCard: requestStructuredCard,
-                            vintedPayload,
+                            vintedPayload: marketplacePayload?.source === 'vinted' ? marketplacePayload : null,
+                            ebayPayload: marketplacePayload?.source === 'ebay' ? marketplacePayload : null,
+                            marketplacePayload,
                             selectedCandidateId: String(selectedCandidateRow.card_id),
                             selectionRevision: Number(request.selectionRevision || 0),
                         },
@@ -3801,7 +3819,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             primaryClues: requestPrimaryClues,
                             selectedClues: requestClues,
                             structuredCard: requestStructuredCard,
-                            vintedPayload,
+                            vintedPayload: marketplacePayload?.source === 'vinted' ? marketplacePayload : null,
+                            ebayPayload: marketplacePayload?.source === 'ebay' ? marketplacePayload : null,
+                            marketplacePayload,
                             previewSignature: request.previewSignature || '',
                             selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
                             selectionRevision: Number(request.selectionRevision || 0),
@@ -3830,8 +3850,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             previewSignature: request.previewSignature || '',
                             previewSource: request.previewSource || '',
                             selectionRevision: Number(request.selectionRevision || 0),
-                            vintedPayload: vintedPayload ? {
-                                selectedChipCategories: vintedPayload.selectedChipCategories || [],
+                            marketplacePayload: marketplacePayload ? {
+                                source: marketplacePayload.source,
+                                selectedChipCategories: marketplacePayload.selectedChipCategories || [],
                                 structuredCard: requestStructuredCard,
                             } : null,
                             error: '',
@@ -3884,7 +3905,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         primaryClues: requestPrimaryClues,
                         selectedClues: requestClues,
                         structuredCard: requestStructuredCard,
-                        vintedPayload,
+                        vintedPayload: marketplacePayload?.source === 'vinted' ? marketplacePayload : null,
+                        ebayPayload: marketplacePayload?.source === 'ebay' ? marketplacePayload : null,
+                        marketplacePayload,
                         previewSignature: request.previewSignature || '',
                         selectionRevision: Number(request.selectionRevision || 0),
                     },
@@ -3906,7 +3929,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     originalTitle: request.originalTitle || currentTitle,
                     clues: requestClues,
                     primaryClues: requestPrimaryClues,
-                    vintedPayload,
+                    vintedPayload: marketplacePayload?.source === 'vinted' ? marketplacePayload : null,
+                    ebayPayload: marketplacePayload?.source === 'ebay' ? marketplacePayload : null,
+                    marketplacePayload,
                     promoteVerifiedLink: isCardmarketUrl(currentUrl),
                     owner,
                 });
