@@ -94,7 +94,9 @@ function cardTraderNameFromUrlSlug(value = '') {
 
 function normalizeCardTraderDirectTitle(value = '') {
     return String(value || '')
+        .replace(/^(.+?)\s*\([^)]*(?:\||\d{1,4}\s*\/\s*\d{1,4}|©|Wizards|WOTC)[^)]*\).*$/i, '$1')
         .replace(/\s*\|\s*(?:CardTrader|Pok[eé]mon)\s*$/gi, '')
+        .replace(/\s*\|.*$/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }

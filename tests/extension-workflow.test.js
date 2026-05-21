@@ -2352,6 +2352,14 @@ test('CardTrader direct title cleanup drops expansion and site suffix', async ()
 
     assert.equal(
         sandbox.cleanCardTraderDirectName(
+            'Hypno (Cosmos Holo 008/062 | WOTC Employees-Only ©1999 Wizards)',
+            'https://www.cardtrader.com/en/cards/99999-hypno-cosmos-holo-wotc-employees-only',
+            '99999'
+        ),
+        'Hypno'
+    );
+    assert.equal(
+        sandbox.cleanCardTraderDirectName(
             'Hypno Wizards of the Coast Era Promos | Pokémon',
             'https://www.cardtrader.com/en/cards/99999-hypno-wizards-of-the-coast-era-promos',
             '99999'
@@ -2426,6 +2434,61 @@ test('CardTrader direct side panel state uses clean card name from URL slug', as
     assert.equal(finalState.debug.cardtraderBlueprintId, '12345');
 });
 
+test('CardTrader direct side panel state uses clean card name from parenthesized title', async () => {
+    const source = readRepoFile('config/background.js');
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            throw new Error('CardTrader direct path should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct path should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        storageWrites.push(payload);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    await sandbox.resolveActiveTabForSidePanel({
+        id: 7,
+        title: 'Hypno (Cosmos Holo 008/062 | WOTC Employees-Only ©1999 Wizards)',
+        url: 'https://www.cardtrader.com/en/cards/99999-hypno-cosmos-holo-wotc-employees-only',
+    });
+
+    const finalState = storageWrites.at(-1).sidePanelState;
+    assert.equal(finalState.pageInfo.title, 'Hypno');
+    assert.equal(finalState.pageInfo.structuredCard.name, 'Hypno');
+    assert.equal(finalState.best.name, 'Hypno');
+});
+
 test('side panel renders direct CardTrader card as full panel with clean header', () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
@@ -2498,6 +2561,77 @@ test('side panel renders direct CardTrader card as full panel with clean header'
     assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
     assert.equal(bodyClassList.contains('direct-card-view'), true);
     assert.equal(elementsById.get('candidatesSection').hidden, true);
+});
+
+test('side panel does not use direct full-panel classes for other marketplaces', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const classList = createClassListStub();
+        const element = {
+            id,
+            textContent: '',
+            hidden: false,
+            src: '',
+            classList,
+            replaceChildren() {
+                this.children = [];
+            },
+            appendChild(child) {
+                this.children = [...(this.children || []), child];
+                return child;
+            },
+            addEventListener() {},
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: {
+            title: 'Gengar & Mimikyu GX',
+            url: 'https://www.vinted.it/items/50-gengar-mimikyu-gx',
+            structuredCard: {},
+        },
+        best: {
+            card_id: '88888',
+            name: 'Gengar & Mimikyu GX',
+            source: 'background_card_search',
+        },
+        blueprintId: '88888',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/88888',
+        rows: [{ card_id: '88888', name: 'Gengar & Mimikyu GX', expansion_symbol_url: 'https://cdn.example/logo.png' }],
+    });
+
+    assert.equal(elementsById.get('cardName').textContent, 'Gengar & Mimikyu GX');
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), false);
+    assert.equal(bodyClassList.contains('direct-card-view'), false);
+    assert.equal(elementsById.get('candidatesSection').hidden, false);
 });
 
 test('side panel preserves API candidate order while rendering logos', () => {

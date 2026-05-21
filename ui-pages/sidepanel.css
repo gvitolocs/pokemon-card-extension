@@ -19,6 +19,10 @@ body {
         linear-gradient(180deg, #07111f 0%, #0f172a 44%, #111827 100%);
 }
 
+body.direct-card-view {
+    overflow: hidden;
+}
+
 .header {
     position: sticky;
     top: 0;
@@ -101,6 +105,12 @@ button:hover {
     min-height: calc(100vh - 67px);
 }
 
+body.direct-card-view .panel {
+    height: calc(100vh - 67px);
+    min-height: 0;
+    padding: 0;
+}
+
 .status {
     margin: 0 0 10px;
     padding: 10px 12px;
@@ -142,13 +152,10 @@ button:hover {
 }
 
 .frame-section-direct {
-    height: auto;
+    flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
     margin: 0;
-}
-
-body.direct-card-view .panel {
-    min-height: calc(100vh - 67px);
 }
 
 iframe {
@@ -158,6 +165,12 @@ iframe {
     border-radius: 18px;
     background: white;
     box-shadow: 0 18px 42px rgba(2, 6, 23, 0.35);
+}
+
+.frame-section-direct iframe {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
 }
 
 .candidate {
