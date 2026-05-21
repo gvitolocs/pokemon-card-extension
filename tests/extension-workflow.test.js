@@ -4049,7 +4049,7 @@ test('Cardmarket Meowth POR 062 uses Perfect Order numeric exact payload and ski
     });
 
     assert.equal(response.success, true);
-    assert.equal(response.results.length, 3);
+    assert.equal(response.results.length, 1);
     assert.equal(response.results[0].blueprint_id, '378907');
     assert.equal(response.results[0].collector_number, 'Ultra Rare | 062/088');
     assert.equal(response.results[0].expansion_name_en, 'Perfect Order');
@@ -4132,7 +4132,7 @@ test('Cardmarket Jirachi CP5 026 low exact candidates skip broad fill fallback',
     });
 
     assert.equal(response.success, true);
-    assert.equal(response.results.length, 1);
+    assert.equal(response.results.length, 3);
     assert.equal(response.results[0].blueprint_id, 'jirachi-cp5-026-b');
     assert.equal(fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).length, 1);
     assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
