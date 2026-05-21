@@ -72,34 +72,65 @@ function cardtraderBlueprintIdFromUrl(url = '') {
     }
 }
 
-function cleanCardTraderDirectName(value = '', url = '', blueprintId = '') {
-    const cleanValue = String(value || '')
-        .replace(/\s*\|\s*CardTrader\s*$/i, '')
+function titleCaseCardTraderSlugName(value = '') {
+    return String(value || '')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b(?:and)\b/gi, '&')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .replace(/\b(?:ex|gx|vmax|vstar|v|lv x)\b/gi, (match) => match.toUpperCase())
+        .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function cardTraderNameFromUrlSlug(value = '') {
+    try {
+        const pathname = new URL(value).pathname;
+        const slug = pathname.match(/\/(?:[a-z]{2}\/)?cards\/\d+(?:-|\/)([^/?#]+)/i)?.[1] || '';
+        return slug ? titleCaseCardTraderSlugName(decodeURIComponent(slug)) : '';
+    } catch (error) {
+        return '';
+    }
+}
+
+function normalizeCardTraderDirectTitle(value = '') {
+    return String(value || '')
+        .replace(/\s*\|\s*(?:CardTrader|Pok[eé]mon)\s*$/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
+}
+
+function stripCardTraderExpansionSuffix(value = '') {
+    return String(value || '')
+        .replace(/\s+\b(?:Wizards\s+of\s+the\s+Coast(?:\s+Era)?(?:\s+Promos)?|WOTC(?:\s+Promos)?|Black\s+Star\s+Promos?|Team\s+Up|Base\s+Set|Jungle|Fossil|Rocket|Gym\s+(?:Heroes|Challenge)|Neo\s+\w+|EX\s+\w+|Diamond\s+&\s+Pearl|Platinum|HeartGold\s+SoulSilver|Black\s+&\s+White|XY|Sun\s+&\s+Moon|Sword\s+&\s+Shield|Scarlet\s+&\s+Violet)\b.*$/i, '')
+        .replace(/\s+\b(?:Promo|Promos|Singles?|Cards?|Pok[eé]mon)\b.*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cleanCardTraderDirectName(value = '', url = '', blueprintId = '') {
+    const slugName = stripCardTraderExpansionSuffix(cardTraderNameFromUrlSlug(url || value));
+    const cleanValue = normalizeCardTraderDirectTitle(value);
     const looksLikeUrl = /^https?:\/\//i.test(cleanValue) ||
         /cardtrader\.com/i.test(cleanValue) ||
         /\/cards\/\d+/i.test(cleanValue);
 
     if (cleanValue && !looksLikeUrl) {
-        return cleanValue;
-    }
-
-    try {
-        const pathname = new URL(url || cleanValue).pathname;
-        const slug = pathname.match(/\/(?:[a-z]{2}\/)?cards\/\d+(?:-|\/)([^/?#]+)/i)?.[1] || '';
-        if (slug) {
-            return decodeURIComponent(slug)
-                .replace(/[-_]+/g, ' ')
-                .replace(/\s+/g, ' ')
-                .trim()
-                .replace(/\b(?:ex|gx|vmax|vstar|v|lv x)\b/gi, (match) => match.toUpperCase())
-                .replace(/\b\w/g, (match) => match.toUpperCase());
+        const slugPrefix = slugName
+            ? cleanValue.match(new RegExp(`^\\s*${slugName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'))?.[0] || ''
+            : '';
+        if (slugPrefix) {
+            return slugPrefix.replace(/\s+/g, ' ').trim();
         }
-    } catch (error) {
-        // Fall through to the stable blueprint fallback.
+        const titleName = stripCardTraderExpansionSuffix(scrapeStructuredCardFields(cleanValue).name);
+        if (titleName) {
+            return titleName;
+        }
+        return stripCardTraderExpansionSuffix(cleanValue) || cleanValue;
     }
 
+    if (slugName) {
+        return slugName;
+    }
     return blueprintId ? `CardTrader card ${blueprintId}` : '';
 }
 
@@ -275,6 +306,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         .replace(/\s*\|\s*Vinted\s*$/i, '')
         .replace(/\s*\|\s*Cardmarket\s*$/i, '')
         .replace(/\bvastro\b/gi, 'vstar')
+        .replace(/\bfull\s*-?\s*art\b|\bfullart\b/gi, 'illustration')
         .replace(/\s+/g, ' ')
         .trim();
     const cardmarketMatch = cleanTitle.match(/^(.+?)\s*\((?:[A-Z0-9]{2,6}\s*)?(\d{1,4}[a-z]?)\)\s*(?:[-–]\s*(.+?))?$/i);
@@ -315,7 +347,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         ? variationMatch[0].replace(/\s+/g, '').replace(/\./g, '').toLowerCase()
         : '';
 
-    const rarityMatch = cleanTitle.match(/\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|holo|promo|rare)\b/i);
+    const rarityMatch = cleanTitle.match(/\b(?:special illustration rare|illustration rare|illustration|secret rare|ultra rare|holo rare|holo|promo|rare)\b/i);
     const rarity = rarityMatch ? rarityMatch[0].replace(/\s+/g, ' ') : '';
 
     const hasEditionHint = /\b(?:1st|first|prima|primo|1)\s+(?:edition|edizione)\b/i.test(cleanTitle);
@@ -345,7 +377,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
     name = name
         .replace(/\b(?:set\s+base|base\s+set)\b/gi, ' ')
         .replace(/\b(?:Legendary|Treasure|Treasures|Promo|Promos)\b/gi, ' ')
-        .replace(/\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|holo|promo|rare)\b/gi, ' ')
+        .replace(/\b(?:special illustration rare|illustration rare|illustration|secret rare|ultra rare|holo rare|holo|promo|rare)\b/gi, ' ')
         .replace(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
         .replace(/\s+/g, ' ')
         .trim();
@@ -422,7 +454,13 @@ function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) 
         const variationClues = normalizedClues.filter((clue) =>
             /\b(?:vmax|vstar|ex|gx|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(clue)
         );
-        return buildTitleWithRequestClues('', [...normalizedPrimaryClues, ...variationClues]);
+        const expansionClues = normalizedClues.filter((clue) =>
+            /\b(?:base\s+set|set\s+base)\b/i.test(clue)
+        );
+        const rarityClues = normalizedClues.filter((clue) =>
+            /\billustration\b/i.test(clue)
+        );
+        return buildTitleWithRequestClues('', [...normalizedPrimaryClues, ...expansionClues, ...rarityClues, ...variationClues]);
     }
     return buildTitleWithRequestClues(title, clues);
 }
@@ -437,6 +475,12 @@ function isCardmarketUrl(url = '') {
 
 function compactSearchValue(value = '') {
     return removeMarketplaceSearchNoise(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '');
+}
+
+function compactSetValue(value = '') {
+    return String(value || '')
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '');
 }
@@ -678,6 +722,7 @@ function rowFromExtensionMatch(match) {
         card_palette: match.cardPalette,
         emoji: match.emoji,
         search_rank: match.score,
+        pokoin_price: match.pokoinPrice || match.pokoin_price || match.priceFormatted || match.price_formatted || '',
     };
 }
 
@@ -702,20 +747,27 @@ function rowMatchesStructuredName(row, structuredCard) {
 }
 
 function isAllowedBaseSetFamily(row) {
-    const setName = compactSearchValue(row?.set_name || '');
+    const setName = compactSetValue(row?.set_name || '');
     return setName === 'baseset' ||
         setName === 'baseset2' ||
-        setName === 'basesetshadowless';
+        setName === 'basesetshadowless' ||
+        setName === 'baseexpansionpack';
 }
 
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
-    const requestedExpansion = compactSearchValue(structuredCard.expansion || '');
+    const requestedExpansion = compactSetValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
     const hasEditionHint = Boolean(structuredCard.editionHint);
 
     return [...rows].sort((a, b) => {
-        const aExpansionPenalty = requestedExpansion && compactSearchValue(a.set_name || '') !== requestedExpansion ? 1 : 0;
-        const bExpansionPenalty = requestedExpansion && compactSearchValue(b.set_name || '') !== requestedExpansion ? 1 : 0;
+        const aExpansionMatch = requestedExpansion === 'baseset'
+            ? isAllowedBaseSetFamily(a)
+            : compactSetValue(a.set_name || '') === requestedExpansion;
+        const bExpansionMatch = requestedExpansion === 'baseset'
+            ? isAllowedBaseSetFamily(b)
+            : compactSetValue(b.set_name || '') === requestedExpansion;
+        const aExpansionPenalty = requestedExpansion && !aExpansionMatch ? 1 : 0;
+        const bExpansionPenalty = requestedExpansion && !bExpansionMatch ? 1 : 0;
         if (aExpansionPenalty !== bExpansionPenalty) {
             return aExpansionPenalty - bExpansionPenalty;
         }
@@ -801,7 +853,7 @@ async function searchExtensionCard(structuredCard) {
         .map(rowFromExtensionMatch)
         .filter(Boolean)
         .filter((row) => rowMatchesStructuredName(row, structuredCard))
-        .filter((row) => compactSearchValue(structuredCard.expansion || '') !== 'baseset' || isAllowedBaseSetFamily(row)));
+        .filter((row) => compactSetValue(structuredCard.expansion || '') !== 'baseset' || isAllowedBaseSetFamily(row)));
 
     return {
         rows: sortRowsForStructuredCard(rows, structuredCard),
@@ -829,6 +881,7 @@ function legacyResultFromRow(row) {
         preview_image_url: row.preview_image_url,
         source: row.source || 'background_card_search',
         search_score: row.search_rank,
+        pokoin_price: row.pokoin_price || row.pokoinPrice || row.price_formatted || row.priceFormatted || '',
     };
 }
 
@@ -847,6 +900,7 @@ function selectedCandidateRowFromRequest(request = {}) {
         expansion_symbol_url: selected.expansion_symbol_url || selected.expansionSymbolUrl || selected.symbolImageUrl || '',
         source: selected.source || 'selected_candidate',
         search_rank: selected.search_rank || selected.searchScore || selected.search_score || selected.relevanceScore || selected.score || 999999,
+        pokoin_price: selected.pokoin_price || selected.pokoinPrice || selected.price_formatted || selected.priceFormatted || '',
     };
 }
 
@@ -870,6 +924,82 @@ function sameUrlWithoutHash(a = '', b = '') {
 const sidePanelRefreshTimers = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
+const pokoinPriceCache = new Map();
+
+function extractPokoinListingPrice(payload = {}) {
+    const products = Array.isArray(payload.products) ? payload.products : [];
+    const firstPricedProduct = products.find((product) =>
+        product?.price?.non_layered_price_formatted ||
+        product?.price?.formatted ||
+        product?.price_formatted ||
+        (Number.isFinite(Number(product?.price_cents)) && product?.price_currency)
+    );
+
+    if (!firstPricedProduct) {
+        return '';
+    }
+
+    const formatted = firstPricedProduct.price?.non_layered_price_formatted ||
+        firstPricedProduct.price?.formatted ||
+        firstPricedProduct.price_formatted ||
+        '';
+    if (formatted) {
+        return formatted;
+    }
+
+    const cents = Number(firstPricedProduct.price_cents);
+    const currency = String(firstPricedProduct.price_currency || '').trim().toUpperCase();
+    if (!Number.isFinite(cents) || !currency) {
+        return '';
+    }
+
+    try {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency,
+        }).format(cents / 100);
+    } catch (error) {
+        return `${currency} ${(cents / 100).toFixed(2)}`;
+    }
+}
+
+async function fetchPokoinListingPrice(cardId) {
+    const stableCardId = String(cardId || '').trim();
+    if (!stableCardId) {
+        return '';
+    }
+    if (pokoinPriceCache.has(stableCardId)) {
+        return pokoinPriceCache.get(stableCardId);
+    }
+
+    const pricePromise = fetch(`${CARDVAULT_API_BASE_URL}/api/cardtrader-redirect?id=${encodeURIComponent(stableCardId)}`, {
+        headers: {
+            accept: 'application/json',
+        },
+    })
+        .then((response) => response.ok ? response.json() : null)
+        .then((payload) => payload ? extractPokoinListingPrice(payload) : '')
+        .catch(() => '');
+
+    pokoinPriceCache.set(stableCardId, pricePromise);
+    const price = await pricePromise;
+    pokoinPriceCache.set(stableCardId, price);
+    return price;
+}
+
+async function enrichRowsWithPokoinPrices(rows = [], limit = 8) {
+    const rowsToEnrich = rows.slice(0, limit);
+    await Promise.all(rowsToEnrich.map(async (row) => {
+        if (!row?.card_id || row.pokoin_price || row.pokoinPrice) {
+            return;
+        }
+        const price = await fetchPokoinListingPrice(row.card_id);
+        if (price) {
+            row.pokoin_price = price;
+        }
+    }));
+    return rows;
+}
 
 function stableSearchUrl(url = '') {
     try {

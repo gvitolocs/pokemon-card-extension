@@ -41,10 +41,18 @@ function nameFromCardTraderSlug(value = '') {
 
     return decodeURIComponent(slug)
         .replace(/[-_]+/g, ' ')
+        .replace(/\b(?:and)\b/gi, '&')
         .replace(/\s+/g, ' ')
         .trim()
         .replace(/\b(?:ex|gx|vmax|vstar|v|lv x)\b/gi, (match) => match.toUpperCase())
         .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function normalizeCardTraderDirectTitle(value = '') {
+    return String(value || '')
+        .replace(/\s*\|\s*(?:CardTrader|Pok[eé]mon)\s*$/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 function isSlugLikeCardName(value = '') {
@@ -54,19 +62,48 @@ function isSlugLikeCardName(value = '') {
         /\/cards\/\d+/i.test(cleanValue);
 }
 
+function escapeRegExp(value = '') {
+    return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripCardTraderExpansionSuffix(value = '') {
+    return String(value || '')
+        .replace(/\s+\b(?:Wizards\s+of\s+the\s+Coast(?:\s+Era)?(?:\s+Promos)?|WOTC(?:\s+Promos)?|Black\s+Star\s+Promos?|Team\s+Up|Base\s+Set|Jungle|Fossil|Rocket|Gym\s+(?:Heroes|Challenge)|Neo\s+\w+|EX\s+\w+|Diamond\s+&\s+Pearl|Platinum|HeartGold\s+SoulSilver|Black\s+&\s+White|XY|Sun\s+&\s+Moon|Sword\s+&\s+Shield|Scarlet\s+&\s+Violet)\b.*$/i, '')
+        .replace(/\s+\b(?:Promo|Promos|Singles?|Cards?|Pok[eé]mon)\b.*$/i, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function cleanCardTraderDisplayCandidate(value = '', slugName = '') {
+    const cleanValue = normalizeCardTraderDirectTitle(value);
+    if (!cleanValue || isSlugLikeCardName(cleanValue)) {
+        return '';
+    }
+
+    if (slugName) {
+        const slugPrefix = cleanValue.match(new RegExp(`^\\s*${escapeRegExp(slugName)}\\b`, 'i'))?.[0] || '';
+        if (slugPrefix) {
+            return slugPrefix.replace(/\s+/g, ' ').trim();
+        }
+    }
+
+    return stripCardTraderExpansionSuffix(cleanValue) || cleanValue;
+}
+
 function directCardDisplayName(pageInfo = {}, best = null, blueprintId = '') {
+    const slugName = stripCardTraderExpansionSuffix(nameFromCardTraderSlug(pageInfo.url || pageInfo.title || best?.name || ''));
     const structuredName = pageInfo.structuredCard?.name || '';
     const bestName = best?.name || '';
     const pageTitle = pageInfo.structuredCard?.title || pageInfo.title || '';
 
     for (const candidate of [bestName, structuredName, pageTitle]) {
-        const cleanCandidate = String(candidate || '').replace(/\s+/g, ' ').trim();
-        if (cleanCandidate && !isSlugLikeCardName(cleanCandidate)) {
+        const cleanCandidate = cleanCardTraderDisplayCandidate(candidate, slugName);
+        if (cleanCandidate) {
             return cleanCandidate;
         }
     }
 
-    return nameFromCardTraderSlug(pageInfo.url || pageTitle || bestName) || `Blueprint ${blueprintId}`;
+    return slugName || `Blueprint ${blueprintId}`;
 }
 
 const expansionLogoCache = new Map();

@@ -98,13 +98,16 @@ class VintedProcessor {
             'tcg', 'gioco', 'trading', 'collezione', 'collezionabile',
             'condizione', 'condizioni', 'condition', 'conditions', 'ottime', 'perfette', 'buone', 'nuova', 'nuovo',
             'near', 'mint', 'excellent', 'good', 'played', 'used', 'usata', 'usato',
-            'vendo', 'vendita', 'spedizione', 'scambio', 'lotto', 'lot', 'bundle',
+            'vendo', 'vendita', 'spedizione', 'scambio', 'scrivimi', 'lotto', 'lot', 'bundle',
             'originale', 'original', 'italiano', 'italiana', 'inglese', 'english', 'japanese', 'giapponese',
         ]);
     }
 
     addKeywordCandidate(candidates, value, source = 'description') {
-        const label = this.normalizeClueValue(value);
+        let label = this.normalizeClueValue(value);
+        if (/\bset\s+base\b/i.test(label)) {
+            label = label.replace(/\bset\s+base\b/gi, 'Base Set');
+        }
         const compact = this.compactClueValue(label);
         const stopWords = this.vintedKeywordStopWords();
         if (!label || compact.length < 2 || stopWords.has(label.toLowerCase()) || stopWords.has(compact)) {
@@ -145,16 +148,28 @@ class VintedProcessor {
         return /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(value));
     }
 
+    isIllustrationClue(value = '') {
+        return /\b(?:illustration|full\s*-?\s*art|fullart)\b/i.test(this.normalizeClueValue(value));
+    }
+
+    isBaseSetClue(value = '') {
+        return /\b(?:base\s+set|set\s+base)\b/i.test(this.normalizeClueValue(value));
+    }
+
     prepareVintedKeywordCandidates(candidates = []) {
         return candidates
             .map((candidate, index) => {
                 const nameLike = this.isPokemonNameLikeClue(candidate);
                 const variation = this.isVariationClue(candidate.label || candidate.value);
+                const baseSet = this.isBaseSetClue(candidate.label || candidate.value);
+                const illustration = this.isIllustrationClue(candidate.label || candidate.value);
                 return {
                     ...candidate,
                     nameLike,
                     variation,
-                    selectedByDefault: nameLike || variation,
+                    baseSet,
+                    illustration,
+                    selectedByDefault: nameLike || variation || baseSet || illustration,
                     _index: index,
                 };
             })
@@ -212,6 +227,13 @@ class VintedProcessor {
                 this.addKeywordCandidate(candidates, hint, 'expansion');
             }
         });
+        if (/\bset\s+base\b/i.test(sourceText)) {
+            this.addKeywordCandidate(candidates, 'Base Set', 'expansion');
+        }
+        const hasFullArtHint = /\bfull\s*-?\s*art\b|\bfullart\b/i.test(sourceText);
+        if (hasFullArtHint) {
+            this.addKeywordCandidate(candidates, 'illustration', 'rarity');
+        }
 
         const cluePatterns = [
             /\b(?:BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\b/gi,
@@ -227,6 +249,7 @@ class VintedProcessor {
         });
 
         const normalized = sourceText
+            .replace(/\bfull\s*-?\s*art\b|\bfullart\b/gi, ' ')
             .replace(/[()"'’`.,:;!?\\[\]{}|]+/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
@@ -266,6 +289,14 @@ class VintedProcessor {
 
     selectedVariationClues(clues = this.selectedKeywordLabels()) {
         return clues.filter((clue) => this.isVariationClue(clue));
+    }
+
+    selectedIllustrationClues(clues = this.selectedKeywordLabels()) {
+        return clues.filter((clue) => this.isIllustrationClue(clue));
+    }
+
+    selectedBaseSetClues(clues = this.selectedKeywordLabels()) {
+        return clues.filter((clue) => this.isBaseSetClue(clue));
     }
 
     currentVintedListingKey(url = window.location.href) {
@@ -345,8 +376,10 @@ class VintedProcessor {
     buildVintedSearchTitle(title = this.currentTitle, clues = this.selectedKeywordLabels()) {
         const primaryClues = this.selectedPrimaryClues(clues);
         const variationClues = this.selectedVariationClues(clues);
+        const baseSetClues = this.selectedBaseSetClues(clues);
+        const illustrationClues = this.selectedIllustrationClues(clues);
         const searchParts = primaryClues.length > 0
-            ? [...primaryClues, ...variationClues]
+            ? [...primaryClues, ...baseSetClues, ...illustrationClues, ...variationClues]
             : [this.removeVintedMarketplaceNoise(title), ...clues];
 
         return searchParts
@@ -1297,7 +1330,11 @@ class VintedProcessor {
         }
         this.setPokoinButtonLabel(this.currentButton);
         this.currentButton.setAttribute('data-pokemon-linker-fallback', 'true');
-        this.applyPokoinButtonStyles(this.currentButton, { background: '#6c757d' });
+        this.applyPokoinButtonStyles(this.currentButton, {
+            background: '#075985',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.18)',
+        });
         this.renderCandidatePreview([]);
     }
 
@@ -1332,19 +1369,23 @@ class VintedProcessor {
             font-family: Arial, sans-serif;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
         `;
-        this.applyPokoinButtonStyles(button, { background: '#6c757d' });
+        this.applyPokoinButtonStyles(button, {
+            background: '#075985',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.18)',
+        });
         
         // Hover effects (gray)
         button.addEventListener('mouseenter', () => {
-            button.style.background = '#5a6268';
+            button.style.background = '#0369a1';
             button.style.transform = 'scale(1.05)';
-            button.style.boxShadow = '0 6px 16px rgba(0,0,0,0.4)';
+            button.style.boxShadow = '0 6px 16px rgba(2, 132, 199, 0.28)';
         });
         
         button.addEventListener('mouseleave', () => {
-            button.style.background = '#6c757d';
+            button.style.background = '#075985';
             button.style.transform = 'scale(1)';
-            button.style.boxShadow = '0 4px 12px rgba(0,0,0,0.3)';
+            button.style.boxShadow = '0 4px 12px rgba(2, 132, 199, 0.18)';
         });
         
         if (typeof panel.prepend === 'function') {

@@ -996,6 +996,80 @@ test('Vinted selected Pokemon clue overrides noisy title terms', async () => {
     assert.deepEqual([...messages[1].primaryClues], ['reshiram']);
 });
 
+test('Vinted Base Set clue is selected and preserved with Pokemon primary clue', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/8970268220-pokemon-mewtwo-set-base', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^mewtwo$/i.test(String(title || '').trim()) ? 'Mewtwo' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pokémon Mewtwo set base';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+    await processor.openPokoinSidePanel();
+
+    assert.deepEqual([...messages[0].primaryClues], ['Mewtwo']);
+    assert.ok(messages[0].clues.some((clue) => /^Base Set$/i.test(clue)));
+    assert.equal(messages[0].title, 'Mewtwo Base Set');
+    assert.equal(messages[1].title, 'Mewtwo Base Set');
+});
+
+test('Vinted fullart title normalizes to illustration clue', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/91-froslass-fullart', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /^froslass$/i.test(String(title || '').trim()) ? 'Froslass' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pokémon Froslass Fullart';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Fullart Scrivimi');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'illustration' && keyword.selectedByDefault));
+    assert.ok(!processor.currentKeywords.some((keyword) => /Fullart Scrivimi/i.test(keyword.value)));
+    assert.deepEqual([...messages[0].primaryClues], ['Froslass']);
+    assert.ok(messages[0].clues.some((clue) => clue === 'illustration'));
+    assert.equal(messages[0].title, 'Froslass illustration');
+});
+
 test('Vinted selected keyword toggles shape background and side-panel messages', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -1343,7 +1417,7 @@ test('Vinted processing waits when only top skeleton title exists', () => {
     assert.equal(processor.processedPages.has('https://www.vinted.it/items/9-loading'), false);
 });
 
-test('Vinted background candidates keep button blue and render preview', async () => {
+test('Vinted background candidates use active blue styling and render preview', async () => {
     const appended = [];
     const button = createButtonStub();
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -1377,8 +1451,34 @@ test('Vinted background candidates keep button blue and render preview', async (
     processor.updateButtonWithResults([{ name_en: 'Dragonite V', search_score: 92, collector_number: 'SWSH154' }]);
 
     assert.equal(processor.currentButton.style.background, '#0ea5e9');
+    assert.equal(processor.currentButton.style.border, '2px solid #38bdf8');
+    assert.equal(processor.currentButton.innerHTML.includes('(1)'), true);
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], undefined);
     assert.equal(appended.at(-1).previewResults[0].name_en, 'Dragonite V');
+});
+
+test('Vinted unmatched button stays muted Pokoin blue', async () => {
+    const button = createButtonStub();
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelectorAll: () => [],
+            contains: (element) => element === button,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+        window: {
+            location: { href: 'https://www.vinted.it/items/3-dragonite', hostname: 'www.vinted.it' },
+        },
+    });
+    const processor = new Processor();
+    processor.currentButton = button;
+    processor.renderCandidatePreview = () => {};
+
+    processor.updateButtonWithoutResults();
+
+    assert.equal(processor.currentButton.style.background, '#075985');
+    assert.equal(processor.currentButton.style.border, '1px solid rgba(56, 189, 248, 0.35)');
+    assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], 'true');
 });
 
 test('Vinted candidate preview is scrollable, compact, and clickable', async () => {
@@ -1569,6 +1669,67 @@ test('Cardmarket structured parser keeps card name ahead of expansion', () => {
     assert.equal(structured.collectorNumber, '028');
     assert.equal(structured.expansion, 'Ascended Heroes');
     assert.deepEqual([...sandbox.buildCardvaultQueries(structured.name)], ['Camerupt']);
+});
+
+test('background parser maps fullart to illustration rarity', () => {
+    const source = readRepoFile('config/background.js');
+    const cleanCardmarketText = extractFunctionSource(source, 'cleanCardmarketText');
+    const removeNoise = extractFunctionSource(source, 'removeMarketplaceSearchNoise');
+    const scrapeStructured = extractFunctionSource(source, 'scrapeStructuredCardFields');
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(`${cleanCardmarketText}\n${removeNoise}\n${scrapeStructured}\nthis.scrapeStructuredCardFields = scrapeStructuredCardFields;`, sandbox);
+
+    const structured = sandbox.scrapeStructuredCardFields('Pokémon Froslass Fullart');
+
+    assert.equal(structured.name, 'Froslass');
+    assert.equal(structured.searchName, 'Froslass');
+    assert.equal(structured.rarity, 'illustration');
+});
+
+test('background keeps Base Set family above Expedition Base Set', () => {
+    const source = readRepoFile('config/background.js');
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.isAllowedBaseSetFamily = isAllowedBaseSetFamily; this.sortRowsForStructuredCard = sortRowsForStructuredCard;`, sandbox, { filename: 'config/background.js' });
+
+    const rows = [
+        { card_id: 'expedition', name: 'Mewtwo', set_name: 'Expedition Base Set', card_number: '056/165', search_rank: 9999 },
+        { card_id: 'base', name: 'Mewtwo', set_name: 'Base Set', card_number: '10/102', search_rank: 10 },
+        { card_id: 'shadowless', name: 'Mewtwo', set_name: 'Base Set Shadowless', card_number: '10/102', search_rank: 9 },
+        { card_id: 'base-jp', name: 'Mewtwo', set_name: 'Base Expansion Pack', card_number: '086/128', search_rank: 8 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, { name: 'Mewtwo', expansion: 'Base Set' });
+
+    assert.equal(sandbox.isAllowedBaseSetFamily(rows[0]), false);
+    assert.equal(sandbox.isAllowedBaseSetFamily(rows[1]), true);
+    assert.equal(sorted.slice(0, 3).map((row) => row.card_id).join(','), 'base,shadowless,base-jp');
+    assert.equal(sorted.at(-1).card_id, 'expedition');
 });
 
 test('Cardmarket background search payload uses structured card name first', async () => {

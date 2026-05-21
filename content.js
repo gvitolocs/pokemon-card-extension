@@ -401,6 +401,12 @@ function extractCardTraderBlueprintId(pathname = window.location.pathname) {
     return match ? match[1] : '';
 }
 
+function cardTraderDirectTitle() {
+    return (document.querySelector('.py-3.text-center.text-sm-left h2, h1, h2')?.textContent || document.title)
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function patchCardTraderCardPage() {
     if (!window.location.hostname.includes('cardtrader')) {
         return;
@@ -445,11 +451,19 @@ function patchCardTraderCardPage() {
         link.style.transform = 'translateY(0)';
         link.style.boxShadow = '0 2px 8px rgba(14, 165, 233, 0.28)';
     });
+    let isOpeningSidePanel = false;
     link.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
         event.stopImmediatePropagation();
-        openPokoinSidePanel();
+        if (isOpeningSidePanel) {
+            return;
+        }
+        isOpeningSidePanel = true;
+        Promise.resolve(openPokoinSidePanel())
+            .finally(() => {
+                isOpeningSidePanel = false;
+            });
     }, true);
 
     titleElement.insertAdjacentElement('afterend', link);
@@ -492,9 +506,7 @@ function notifySidePanelNavigation() {
 
 function openPokoinSidePanel() {
     const cardtraderBlueprintId = extractCardTraderBlueprintId();
-    const directTitle = cardtraderBlueprintId
-        ? (document.querySelector('.py-3.text-center.text-sm-left h2, h1, h2')?.textContent || document.title).replace(/\s+/g, ' ').trim()
-        : document.title;
+    const directTitle = cardtraderBlueprintId ? cardTraderDirectTitle() : document.title;
     return chrome.runtime.sendMessage({
         action: 'openSidePanelForCurrentTab',
         url: window.location.href,
@@ -510,8 +522,9 @@ function attachPokoinSidePanelClick(button) {
     button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
+        event.stopImmediatePropagation?.();
         openPokoinSidePanel();
-    });
+    }, true);
 }
 
 function watchMarketplaceNavigationForSidePanel() {
