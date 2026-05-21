@@ -1432,7 +1432,7 @@ class VintedProcessor {
             boxSizing: 'border-box',
             contain: 'layout style',
             colorScheme: 'light',
-            pointerEvents: 'auto',
+            pointerEvents: 'none',
             fontFamily: 'Arial, sans-serif',
         };
     }
@@ -1444,7 +1444,7 @@ class VintedProcessor {
                 box-sizing: border-box;
                 contain: layout style;
                 color-scheme: light;
-                pointer-events: auto;
+                pointer-events: none;
                 font-family: Arial, sans-serif;
             }
             *, *::before, *::after {
@@ -1502,7 +1502,7 @@ class VintedProcessor {
             flexDirection: 'column',
             alignItems: 'stretch',
             gap: '8px',
-            pointerEvents: 'auto',
+            pointerEvents: 'none',
             fontFamily: 'Arial, sans-serif',
             opacity: '0.96',
         };

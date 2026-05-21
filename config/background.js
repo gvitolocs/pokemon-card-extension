@@ -2813,13 +2813,15 @@ function vintedCanonicalFromRequest(request = {}, senderTab = {}) {
     };
 }
 
-function rememberVintedCanonicalPreview(canonical = null) {
+function rememberVintedCanonicalPreview(canonical = null, options = {}) {
     const cacheKey = vintedCanonicalCacheKey(canonical?.tabId, canonical?.url);
     if (!cacheKey) {
         return null;
     }
-    clearTimeout(vintedTokenWaitTimers.get(cacheKey));
-    vintedTokenWaitTimers.delete(cacheKey);
+    if (options.clearWaitTimer !== false) {
+        clearTimeout(vintedTokenWaitTimers.get(cacheKey));
+        vintedTokenWaitTimers.delete(cacheKey);
+    }
     latestVintedCanonicalByTabUrl.set(cacheKey, canonical);
     return canonical;
 }
@@ -2857,11 +2859,18 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
         const timeoutId = setTimeout(async () => {
             vintedTokenWaitTimers.delete(cacheKey);
             const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
-            const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
-            if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
+            if (owner && !isSidePanelOwnerCurrent(owner, tab?.url || '')) {
                 return;
             }
-            if (owner && !isSidePanelOwnerCurrent(owner, tab?.url || '')) {
+            const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
+            if (canonical?.previewRows?.length > 0) {
+                return;
+            }
+            if (canonical?.vintedPayload) {
+                await applyVintedCanonicalToSidePanel(tab, canonical, owner, {
+                    reason: `${reason}-token-ready-timeout`,
+                    forceRefresh: true,
+                });
                 return;
             }
             await setSidePanelState({
@@ -2890,6 +2899,37 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
     return writtenState;
 }
 
+function vintedPreviewRowIds(rows = []) {
+    return (Array.isArray(rows) ? rows : [])
+        .map((row) => String(row.card_id || row.blueprint_id || row.cardId || row.blueprintId || ''))
+        .filter(Boolean)
+        .join('|');
+}
+
+function isDuplicateVintedCanonicalState(state = {}, canonical = {}) {
+    if (!state?.pageInfo?.url || !canonical?.url || !sameUrlWithoutHash(state.pageInfo.url, canonical.url)) {
+        return false;
+    }
+    const stateSignature = state.pageInfo?.previewSignature || state.debug?.previewSignature || state.debug?.vintedPreviewSignature || '';
+    const canonicalSignature = canonical.previewSignature || '';
+    if (stateSignature && canonicalSignature && stateSignature !== canonicalSignature) {
+        return false;
+    }
+    const stateRevision = Number(state.pageInfo?.selectionRevision || state.debug?.selectionRevision || 0);
+    const canonicalRevision = Number(canonical.selectionRevision || 0);
+    if (Number.isFinite(stateRevision) && Number.isFinite(canonicalRevision) && stateRevision !== canonicalRevision) {
+        return false;
+    }
+    if (canonical.selectedCandidateId && String(state.pageInfo?.selectedCandidateId || '') !== String(canonical.selectedCandidateId)) {
+        return false;
+    }
+    const canonicalRows = vintedPreviewRowIds(canonical.previewRows);
+    if (canonicalRows) {
+        return Boolean(state.debug?.pinnedVintedPreview) && vintedPreviewRowIds(state.rows) === canonicalRows;
+    }
+    return Boolean(state.pageInfo?.vintedPayload && state.debug?.vintedTokenReadyDriven);
+}
+
 async function resolveVintedCanonicalTokensForSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
     const vintedPayload = normalizeVintedPayload(canonical.vintedPayload);
     if (!vintedPayload) {
@@ -2915,6 +2955,12 @@ async function resolveVintedCanonicalTokensForSidePanel(tab = {}, canonical = {}
 }
 
 async function applyVintedCanonicalToSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    if (!options.forceRefresh) {
+        const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+        if (isDuplicateVintedCanonicalState(sidePanelState, canonical)) {
+            return sidePanelState;
+        }
+    }
     if (canonical?.previewRows?.length > 0) {
         return applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, options);
     }
@@ -3505,6 +3551,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-canonical' : 'resolve-vinted-canonical');
                         return applyVintedCanonicalToSidePanel(tab, canonical, owner, {
                             reason: request.forceRefresh ? 'side-panel-refresh' : 'resolve-active-tab',
+                            forceRefresh: Boolean(request.forceRefresh),
                         });
                     }
                     const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-waiting' : 'resolve-vinted-waiting');
@@ -3978,13 +4025,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 if (!isVintedUrl(currentUrl) || !sameUrlWithoutHash(currentUrl, currentTab.url || currentUrl)) {
                     return { success: true, ignored: true, reason: 'stale-vinted-preview-url' };
                 }
-                const canonical = rememberVintedCanonicalPreview(vintedCanonicalFromRequest(request, {
+                const canonicalRequest = vintedCanonicalFromRequest(request, {
                     ...currentTab,
                     id: senderTab.id,
                     url: currentUrl,
-                }));
+                });
+                const hasPreviewRows = canonicalRequest?.previewRows?.length > 0;
+                const canonical = rememberVintedCanonicalPreview(canonicalRequest, {
+                    clearWaitTimer: hasPreviewRows,
+                });
                 if (!canonical) {
                     return { success: true, ignored: true, reason: 'missing-vinted-canonical-preview' };
+                }
+                if (!hasPreviewRows && request.tokensReady) {
+                    return { success: true, deferred: true, reason: 'awaiting-vinted-preview-rows' };
                 }
                 const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
                 const sidePanelUrl = sidePanelState?.pageInfo?.url || '';

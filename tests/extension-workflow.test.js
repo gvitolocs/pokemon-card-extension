@@ -2446,6 +2446,8 @@ test('Vinted overlay panel is fixed without a safe anchor', () => {
     assert.equal(processor.currentPanelHost.style.bottom, '24px');
     assert.equal(processor.currentPanelHost.style.right, 'auto');
     assert.equal(processor.currentPanelHost.style.maxHeight, 'calc(100vh - 72px)');
+    assert.equal(processor.currentPanelHost.style.pointerEvents, 'none');
+    assert.equal(panel.style.pointerEvents, 'auto');
     assert.equal(bodyAppends[0], processor.currentPanelHost);
 });
 
@@ -2485,6 +2487,8 @@ test('Vinted overlay collapse toggles chips and candidate preview', () => {
 
     processor.setVintedOverlayCollapsed(true);
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'true');
+    assert.equal(processor.currentPanelHost.style.pointerEvents, 'none');
+    assert.equal(processor.currentPanel.style.pointerEvents, 'auto');
     assert.equal(keywords.style.display, 'none');
     assert.equal(preview.style.display, 'none');
     assert.equal(toggle.attributes['aria-expanded'], 'false');
@@ -4890,7 +4894,7 @@ test('Vinted extension action waits for selected-key payload before searching', 
     assert.equal(scraped, false);
 });
 
-test('Vinted navigation waits for token scanner, then token-ready drives scoped side-panel search', async () => {
+test('Vinted navigation waits for preview rows and manual refresh can force token search', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
     const storage = {};
@@ -5006,7 +5010,8 @@ test('Vinted navigation waits for token scanner, then token-ready drives scoped 
         assert.equal(storage.sidePanelState.loading, true);
         assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
         const selectedClues = [expected.name, expected.collectorNumber];
-        const response = await new Promise((resolve) => {
+        const fetchCountBeforeTokenReady = fetchBodies.length;
+        const tokenResponse = await new Promise((resolve) => {
             messageListener(
                 {
                     action: 'marketplacePreviewReady',
@@ -5042,18 +5047,58 @@ test('Vinted navigation waits for token scanner, then token-ready drives scoped 
             );
         });
 
-        assert.equal(response.success, true);
-        assert.deepEqual([...response.result.rows.map((row) => row.card_id)], [expected.row.cardId]);
-        assert.equal(storage.sidePanelState.pageInfo.vintedPayload.name, expected.name);
-        assert.equal(storage.sidePanelState.pageInfo.vintedPayload.collectorNumber, expected.collectorNumber);
-        assert.equal(storage.sidePanelState.debug.vintedTokenReadyDriven, true);
+        assert.equal(tokenResponse.success, true);
+        assert.equal(tokenResponse.deferred, true);
+        assert.equal(tokenResponse.reason, 'awaiting-vinted-preview-rows');
+        assert.equal(storage.sidePanelState.loading, true);
+        assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+        const fetchCountAfterTokenReady = fetchBodies.length;
+        assert.equal(fetchCountAfterTokenReady, fetchCountBeforeTokenReady, 'token-ready should not refresh before preview rows arrive');
 
         const refreshResponse = await new Promise((resolve) => {
             messageListener({ action: 'resolveActiveTabForSidePanel', forceRefresh: true }, {}, resolve);
         });
+        assert.equal(fetchBodies.length, fetchCountAfterTokenReady + 1, 'manual refresh should force one selected-key search');
         assert.equal(refreshResponse.success, true);
+        assert.deepEqual([...refreshResponse.result.rows.map((row) => row.card_id)], [expected.row.cardId]);
         assert.equal(refreshResponse.result.pageInfo.vintedPayload.name, expected.name);
         assert.equal(refreshResponse.result.pageInfo.vintedPayload.collectorNumber, expected.collectorNumber);
+        assert.equal(storage.sidePanelState.debug.vintedTokenReadyDriven, true);
+
+        const previewResponse = await new Promise((resolve) => {
+            messageListener(
+                {
+                    action: 'marketplacePreviewReady',
+                    source: 'vinted',
+                    url,
+                    title: `${expected.name} ${expected.collectorNumber}`,
+                    originalTitle: `${expected.name} ${expected.collectorNumber}`,
+                    clues: selectedClues,
+                    selectedClues,
+                    primaryClues: [expected.name],
+                    previewSource: 'vinted_overlay',
+                    previewSignature: `vinted|${expected.name}|${expected.collectorNumber}`,
+                    vintedPayload: {
+                        source: 'vinted',
+                        listingKey: url,
+                        originalTitle: `${expected.name} ${expected.collectorNumber}`,
+                        searchTitle: `${expected.name} ${expected.collectorNumber}`,
+                        name: expected.name,
+                        collectorNumber: expected.collectorNumber,
+                        numericCollectorNumber: expected.collectorNumber.match(/\d+/)?.[0] || '',
+                        selectedClues,
+                        primaryClues: [expected.name],
+                    },
+                    previewRows: [
+                        { card_id: expected.row.cardId, name: expected.row.name, set_name: expected.row.expansionName, card_number: expected.row.collectorNumber },
+                    ],
+                },
+                { tab: activeTab },
+                resolve
+            );
+        });
+        assert.equal(previewResponse.success, true);
+        assert.deepEqual(previewResponse.result.rows.map((row) => row.card_id), [expected.row.cardId]);
     }
 
     assert.equal(scraped, false);
