@@ -941,6 +941,24 @@ function isLockedCardTraderDirectState(state = {}, url = '') {
     );
 }
 
+function sameCardTraderDirectBlueprint(a = '', b = '') {
+    const leftBlueprintId = cardtraderBlueprintIdFromUrl(a);
+    const rightBlueprintId = cardtraderBlueprintIdFromUrl(b);
+    return Boolean(leftBlueprintId && rightBlueprintId && leftBlueprintId === rightBlueprintId);
+}
+
+function isLockedCardTraderDirectState(state = {}, url = '') {
+    const stateUrl = state?.pageInfo?.url || '';
+    const stateBlueprintId = state?.pageInfo?.cardtraderBlueprintId || state?.debug?.cardtraderBlueprintId || state?.blueprintId || '';
+    const urlBlueprintId = cardtraderBlueprintIdFromUrl(url);
+    return Boolean(
+        urlBlueprintId &&
+        stateBlueprintId &&
+        String(stateBlueprintId) === String(urlBlueprintId) &&
+        sameUrlWithoutHash(stateUrl, url)
+    );
+}
+
 const sidePanelRefreshTimers = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
@@ -1220,6 +1238,21 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     const pokoinUrl = blueprintId ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${blueprintId}` : '';
     debug.rowCount = rows.length;
     debug.bestId = blueprintId;
+
+    if (requestContext.expectedUrl && !sameUrlWithoutHash(requestContext.expectedUrl, pageInfo.url || tab?.url || '')) {
+        console.log('ℹ️ [Background] Ignored stale side panel refresh for changed tab URL');
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+
+    const { sidePanelState: latestSidePanelState } = await chrome.storage.session.get('sidePanelState');
+    if (
+        isLockedCardTraderDirectState(latestSidePanelState, latestSidePanelState?.pageInfo?.url || '') &&
+        !pageInfo.cardtraderBlueprintId &&
+        !sameCardTraderDirectBlueprint(latestSidePanelState?.pageInfo?.url || '', pageInfo.url || tab?.url || '')
+    ) {
+        console.log('ℹ️ [Background] Ignored stale refresh behind CardTrader direct state');
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
 
     if (requestContext.expectedUrl && !sameUrlWithoutHash(requestContext.expectedUrl, pageInfo.url || tab?.url || '')) {
         console.log('ℹ️ [Background] Ignored stale side panel refresh for changed tab URL');

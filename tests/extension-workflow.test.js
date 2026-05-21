@@ -3031,6 +3031,333 @@ test('CardTrader direct URL change updates blueprint state', async () => {
     assert.equal(storageWrites.at(-1).sidePanelState.best.name, 'Charizard ex');
 });
 
+test('CardTrader direct state cannot be overwritten by delayed non-direct refresh', async () => {
+    const source = readRepoFile('config/background.js');
+    const storageWrites = [];
+    let activeState = null;
+    let releaseFetch;
+    const fetchGate = new Promise((resolve) => {
+        releaseFetch = resolve;
+    });
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url) => {
+            await fetchGate;
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    rows: [{ card_id: '2222', name: 'Boss\'s Orders', canonical_name: 'Boss\'s Orders', search_rank: 99 }],
+                    matches: [{ cardId: '2222', name: 'Boss\'s Orders', score: 99 }],
+                }),
+            };
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        title: 'Boss\'s Orders',
+                        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Rebel-Clash/Bosss-Orders',
+                        hostname: 'www.cardmarket.com',
+                        structuredCard: { name: 'Boss\'s Orders', searchName: 'Boss\'s Orders' },
+                    },
+                }],
+            },
+            storage: {
+                session: {
+                    get: async () => ({ sidePanelState: activeState }),
+                    set: async (payload) => {
+                        if (payload.sidePanelState) {
+                            activeState = payload.sidePanelState;
+                            storageWrites.push(payload);
+                        }
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const delayedRefresh = sandbox.resolveActiveTabForSidePanel({
+        id: 7,
+        title: 'Boss\'s Orders',
+        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Rebel-Clash/Bosss-Orders',
+    });
+
+    activeState = {
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: 'Air Balloon',
+            url: 'https://www.cardtrader.com/en/cards/9876-air-balloon',
+            hostname: 'www.cardtrader.com',
+            cardtraderBlueprintId: '9876',
+        },
+        rows: [{ card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' }],
+        best: { card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' },
+        blueprintId: '9876',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/9876',
+        error: '',
+        debug: { cardtraderBlueprintId: '9876', directCardTrader: true },
+    };
+    releaseFetch();
+
+    const result = await delayedRefresh;
+    assert.equal(result.stale, true);
+    assert.equal(activeState.blueprintId, '9876');
+    assert.equal(activeState.best.name, 'Air Balloon');
+    assert.equal(storageWrites.some((write) => write.sidePanelState?.blueprintId === '2222'), false);
+});
+
+test('scheduled stale refresh from previous page is ignored after CardTrader direct state', async () => {
+    const source = readRepoFile('config/background.js');
+    const storageWrites = [];
+    const timers = [];
+    let activeState = {
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: 'Air Balloon',
+            url: 'https://www.cardtrader.com/en/cards/9876-air-balloon',
+            hostname: 'www.cardtrader.com',
+            cardtraderBlueprintId: '9876',
+        },
+        rows: [{ card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' }],
+        best: { card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' },
+        blueprintId: '9876',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/9876',
+        error: '',
+        debug: { cardtraderBlueprintId: '9876', directCardTrader: true },
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout: (callback) => {
+            timers.push(callback);
+            return callback;
+        },
+        clearTimeout: () => {},
+        fetch: async () => {
+            throw new Error('stale refresh should not search');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                get: async () => ({
+                    id: 7,
+                    title: 'Air Balloon',
+                    url: 'https://www.cardtrader.com/en/cards/9876-air-balloon',
+                }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('stale refresh should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({ sidePanelState: activeState }),
+                    set: async (payload) => {
+                        if (payload.sidePanelState) {
+                            activeState = payload.sidePanelState;
+                            storageWrites.push(payload);
+                        }
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.scheduleSidePanelRefresh = scheduleSidePanelRefresh;`, sandbox, { filename: 'config/background.js' });
+
+    await sandbox.scheduleSidePanelRefresh({
+        id: 7,
+        title: 'Boss\'s Orders',
+        url: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/Rebel-Clash/Bosss-Orders',
+    });
+    assert.equal(timers.length, 1);
+    await timers[0]();
+
+    assert.equal(activeState.blueprintId, '9876');
+    assert.equal(storageWrites.length, 0);
+});
+
+test('scheduled same CardTrader direct URL refresh preserves blueprint lock', async () => {
+    const source = readRepoFile('config/background.js');
+    const timers = [];
+    const storageWrites = [];
+    let activeState = {
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: 'Air Balloon',
+            url: 'https://www.cardtrader.com/en/cards/9876-air-balloon',
+            hostname: 'www.cardtrader.com',
+            cardtraderBlueprintId: '9876',
+        },
+        rows: [{ card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' }],
+        best: { card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' },
+        blueprintId: '9876',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/9876',
+        error: '',
+        debug: { cardtraderBlueprintId: '9876', directCardTrader: true },
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout: (callback) => {
+            timers.push(callback);
+            return callback;
+        },
+        clearTimeout: () => {},
+        fetch: async () => {
+            throw new Error('locked direct refresh should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('locked direct refresh should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({ sidePanelState: activeState }),
+                    set: async (payload) => {
+                        if (payload.sidePanelState) {
+                            activeState = payload.sidePanelState;
+                            storageWrites.push(payload);
+                        }
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.scheduleSidePanelRefresh = scheduleSidePanelRefresh;`, sandbox, { filename: 'config/background.js' });
+
+    await sandbox.scheduleSidePanelRefresh({
+        id: 7,
+        title: 'Air Balloon',
+        url: 'https://www.cardtrader.com/en/cards/9876-air-balloon',
+    }, 'activated');
+
+    assert.equal(timers.length, 0);
+    assert.equal(storageWrites.length, 0);
+    assert.equal(activeState.blueprintId, '9876');
+});
+
+test('CardTrader direct URL change updates blueprint state', async () => {
+    const source = readRepoFile('config/background.js');
+    const storageWrites = [];
+    let activeState = {
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: 'Air Balloon',
+            url: 'https://www.cardtrader.com/en/cards/9876-air-balloon',
+            hostname: 'www.cardtrader.com',
+            cardtraderBlueprintId: '9876',
+        },
+        rows: [{ card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' }],
+        best: { card_id: '9876', name: 'Air Balloon', source: 'cardtrader_url' },
+        blueprintId: '9876',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/9876',
+        error: '',
+        debug: { cardtraderBlueprintId: '9876', directCardTrader: true },
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            throw new Error('CardTrader direct URL change should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct URL change should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async () => ({ sidePanelState: activeState }),
+                    set: async (payload) => {
+                        if (payload.sidePanelState) {
+                            activeState = payload.sidePanelState;
+                            storageWrites.push(payload);
+                        }
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel;`, sandbox, { filename: 'config/background.js' });
+
+    const result = await sandbox.resolveActiveTabForSidePanel({
+        id: 7,
+        title: 'Charizard ex',
+        url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+    });
+
+    assert.equal(result.blueprintId, '12345');
+    assert.equal(activeState.blueprintId, '12345');
+    assert.equal(storageWrites.at(-1).sidePanelState.pageInfo.cardtraderBlueprintId, '12345');
+    assert.equal(storageWrites.at(-1).sidePanelState.best.name, 'Charizard ex');
+});
+
 test('side panel renders direct CardTrader card as full panel with clean header', () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
