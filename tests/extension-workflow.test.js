@@ -1678,6 +1678,101 @@ test('Vinted multi-word Pokemon phrase keeps attached GX selected', async () => 
     assert.equal(messages[0].title, 'Gengar Mimikyu GX');
 });
 
+test('Vinted tag-team connector title defaults composite chip and keeps individual tokens', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/36-espeon-deoxys', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => {
+                const value = String(title || '').toLowerCase();
+                if (/espeon.*deoxys/.test(value)) {
+                    return { pokemonName: 'Espeon & Deoxys' };
+                }
+                if (/^espeon$/.test(value)) {
+                    return { pokemonName: 'Espeon' };
+                }
+                if (/^deoxys$/.test(value)) {
+                    return { pokemonName: 'Deoxys' };
+                }
+                return { pokemonName: null };
+            },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Espeon e deoxys ex';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const selectedLabels = processor.selectedKeywordLabels();
+    assert.ok(labels.includes('Espeon & Deoxys ex') || labels.includes('Espeon Deoxys ex'), 'composite tag-team chip should render');
+    assert.ok(labels.includes('Espeon'), 'individual title token should remain clickable');
+    assert.ok(labels.includes('deoxys') || labels.includes('Deoxys'), 'individual title token should remain clickable');
+    assert.ok(selectedLabels.some((label) => /Espeon.*Deoxys.*ex/i.test(label)), 'composite should default selected');
+    assert.equal(messages[0].vintedPayload.name, 'Espeon & Deoxys ex');
+    assert.deepEqual(Array.from(messages[0].primaryClues), ['Espeon & Deoxys ex', 'ex']);
+    assert.equal(messages[0].title, 'Espeon & Deoxys ex');
+});
+
+test('Vinted Mega Charizard X ex keeps Mega form selected in payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/37-mega-charizard-x', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /charizard/i.test(String(title || '')) ? 'Charizard' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Mega charizard X ex 13/94';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const selectedLabels = processor.selectedKeywordLabels();
+    assert.ok(labels.includes('X'), 'Mega form X should render as a chip');
+    assert.ok(selectedLabels.includes('Mega'), 'Mega modifier should default selected');
+    assert.ok(selectedLabels.includes('X'), 'Mega form X should default selected');
+    assert.ok(selectedLabels.includes('ex'), 'ex variation should default selected');
+    assert.ok(selectedLabels.includes('13/94'), 'collector should stay selected');
+    assert.match(messages[0].title, /Mega/);
+    assert.match(messages[0].title, /\bX\b/);
+    assert.match(messages[0].title, /\bex\b/);
+    assert.equal(messages[0].vintedPayload.variation, 'Mega ex X');
+    assert.equal(messages[0].vintedPayload.collectorNumber, '13/94');
+});
+
 test('Vinted keyword defaults select Pokemon-name-like and variation clues', () => {
     const appended = [];
     const chips = [];
@@ -2084,6 +2179,50 @@ test('background ranks Trainer Gallery slash collectors by full prefixed code', 
     assert.equal(sandbox.collectorNumberMatchRank('TG16/TG30', 'TG16/TG30'), 0);
     assert.equal(sandbox.collectorNumberMatches('16', 'TG16/TG30'), false);
     assert.equal(sorted[0].card_id, 'tg16');
+});
+
+test('background ranks selected tag-team composite above individual ex rows', () => {
+    const sandbox = loadBackgroundHelpers([
+        'sortRowsForStructuredCard',
+        'rowMatchesStructuredVariation',
+    ]);
+    const structuredCard = {
+        name: 'Espeon & Deoxys ex',
+        searchName: 'Espeon & Deoxys ex',
+        variation: 'ex',
+        variationTokens: ['ex'],
+    };
+    const rows = [
+        { card_id: 'espeon-ex', name: 'Espeon ex', set_name: 'Generic', card_number: '1', search_rank: 999 },
+        { card_id: 'deoxys-ex', name: 'Deoxys ex', set_name: 'Generic', card_number: '2', search_rank: 998 },
+        { card_id: 'tag-team', name: 'Espeon & Deoxys GX', set_name: 'Unified Minds', card_number: '72/236', search_rank: 50 },
+    ];
+
+    const sorted = sandbox.sortRowsForStructuredCard(rows, structuredCard);
+    assert.equal(sorted[0].card_id, 'tag-team');
+});
+
+test('background rejects plain Charizard ex when Mega X is selected', () => {
+    const sandbox = loadBackgroundHelpers([
+        'rowMatchesStructuredVariation',
+        'sortRowsForStructuredCard',
+    ]);
+    const structuredCard = {
+        name: 'Charizard',
+        searchName: 'Mega Charizard X ex',
+        variation: 'Mega ex X',
+        variationTokens: ['mega', 'ex', 'x'],
+        collectorNumber: '13/94',
+        numericCollectorNumber: '13',
+    };
+    const rows = [
+        { card_id: 'plain-charizard-ex', name: 'Charizard ex', set_name: 'EX FireRed & LeafGreen', card_number: '105', search_rank: 999 },
+        { card_id: 'mega-charizard-x-ex', name: 'Mega Charizard X EX', set_name: 'Flashfire', card_number: '13/94', search_rank: 50 },
+    ];
+
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[0], structuredCard), false);
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[1], structuredCard), true);
+    assert.equal(sandbox.sortRowsForStructuredCard(rows, structuredCard)[0].card_id, 'mega-charizard-x-ex');
 });
 
 test('database-observed collector formats stay atomic in marketplace parsers', () => {

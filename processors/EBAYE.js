@@ -52,13 +52,24 @@ class EbayProcessor {
             .replace(/[\u0300-\u036f]/g, '')
             .replace(/[’`]/g, "'")
             .replace(/\bvastro\b/gi, 'vstar')
-            .replace(/[^a-z0-9/'\s-]+/gi, (match) => match.includes('/') ? '/' : ' ')
+            .replace(/[^a-z0-9/'&+\s-]+/gi, ' ')
             .replace(/\s+/g, ' ')
             .trim();
     }
 
     compactClueValue(value = '') {
         return this.normalizeClueValue(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    }
+
+    normalizeCollectorText(value = '') {
+        return String(value || '')
+            .normalize('NFKD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[’`]/g, "'")
+            .replace(/\bvastro\b/gi, 'vstar')
+            .replace(/[^a-z0-9/\s-]+/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
     }
 
     ebayStopWords() {
@@ -91,8 +102,11 @@ class EbayProcessor {
         if (/\bsteam\b/i.test(label)) {
             label = 'Steam Siege';
         }
+        if (source !== 'text' && this.isCollectorNumberClue(label)) {
+            label = this.normalizeEbayCollectorNumber(label);
+        }
         const compact = this.compactClueValue(label);
-        if (!label || (compact.length < 2 && !this.isVariationClue(label)) || this.ebayStopWords().has(label.toLowerCase()) || this.ebayStopWords().has(compact)) {
+        if (!label || (compact.length < 2 && !this.isVariationClue(label) && !/^[XY]$/i.test(label)) || this.ebayStopWords().has(label.toLowerCase()) || this.ebayStopWords().has(compact)) {
             return;
         }
         if (!candidates.some((candidate) => candidate.compact === compact)) {
@@ -104,8 +118,18 @@ class EbayProcessor {
         return /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(value));
     }
 
+    isMegaFormClue(value = '', sourceText = '') {
+        const label = this.normalizeClueValue(typeof value === 'object' ? value.label || value.value : value);
+        if (!/^[XY]$/i.test(label)) {
+            return false;
+        }
+        const source = this.normalizeClueValue(sourceText);
+        return /\bmega\b[\s\S]{0,32}\b[xy]\b[\s\S]{0,16}\b(?:ex|gx)?\b/i.test(source) ||
+            /\b(?:charizard|mewtwo)\b\s+[xy]\b/i.test(source);
+    }
+
     isCollectorNumberClue(value = '') {
-        const label = this.normalizeClueValue(value);
+        const label = this.normalizeCollectorText(value);
         if (/^(?:PSA|BGS|CGC|SGC)\s+\d{1,2}$/i.test(label)) {
             return false;
         }
@@ -238,7 +262,7 @@ class EbayProcessor {
     }
 
     normalizeEbayCollectorNumber(value = '') {
-        const normalized = this.normalizeClueValue(value)
+        const normalized = this.normalizeCollectorText(value)
             .replace(/\s*\/\s*/g, '/')
             .replace(/\s+/g, ' ')
             .trim();
@@ -281,12 +305,40 @@ class EbayProcessor {
             });
     }
 
+    ebayTitleTokenSource(value = '') {
+        return String(value || '')
+            .replace(/([a-z])(\d{1,4}[a-z]?\s*\/\s*(?:[a-z]{0,6}\s*)?\d{1,4}[a-z]?)/gi, '$1 $2')
+            .replace(/(\d{1,4}[a-z]?\s*\/\s*(?:[a-z]{0,6}\s*)?\d{1,4}[a-z]?)([a-z])/gi, '$1 $2')
+            .replace(/\s+(?:&|\+|\/)\s+/g, ' ');
+    }
+
+    addCompositeConnectorCandidates(candidates, title = '') {
+        const source = this.normalizeClueValue(title)
+            .replace(/\s+(?:e|and|&|\+|\/)\s+/gi, ' & ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const pattern = /\b([A-Za-z][A-Za-z']*)\s+&\s+([A-Za-z][A-Za-z']*)(?:\s+(vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break))?\b/gi;
+        for (const match of source.matchAll(pattern)) {
+            const left = match[1].trim() || '';
+            const right = match[2].trim() || '';
+            const variation = match[3] || '';
+            if (!left || !right || this.ebayStopWords().has(left.toLowerCase()) || this.ebayStopWords().has(right.toLowerCase())) {
+                continue;
+            }
+            this.addKeywordCandidate(candidates, [left, '&', right, variation].filter(Boolean).join(' '), 'title-composite');
+            this.addKeywordCandidate(candidates, [left, right, variation].filter(Boolean).join(' '), 'title-composite');
+        }
+    }
+
     extractEbayKeywords(title = '', details = '', titleInfo = {}) {
-        const sourceText = `${title} ${details}`.replace(/\s+/g, ' ').trim();
+        const tokenizedTitle = this.ebayTitleTokenSource(title);
+        const tokenizedDetails = this.ebayTitleTokenSource(details);
+        const sourceText = `${tokenizedTitle} ${tokenizedDetails}`.replace(/\s+/g, ' ').trim();
         if (!sourceText) {
             return [];
         }
         const candidates = [];
+        this.addCompositeConnectorCandidates(candidates, tokenizedTitle);
         const expansionHints = [
             'Generations Radiant Collection',
             'Radiant Collection',
@@ -322,14 +374,14 @@ class EbayProcessor {
         if ((titleInfo?.expansion || titleInfo?.expansionName) && new RegExp(`\\b${String(titleInfo.expansion || titleInfo.expansionName).replace(/\s+/g, '\\s+')}\\b`, 'i').test(sourceText)) {
             this.addKeywordCandidate(candidates, titleInfo.expansion || titleInfo.expansionName, 'title-expansion');
         }
-        this.collectEbayCollectorClues(title).forEach((label) => this.addKeywordCandidate(candidates, label, 'title-pattern'));
-        this.collectEbayCollectorClues(details).forEach((label) => this.addKeywordCandidate(candidates, label, 'pattern'));
+        this.collectEbayCollectorClues(tokenizedTitle).forEach((label) => this.addKeywordCandidate(candidates, label, 'title-pattern'));
+        this.collectEbayCollectorClues(tokenizedDetails).forEach((label) => this.addKeywordCandidate(candidates, label, 'pattern'));
         [
             /\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|holo|promo|rare)\b/gi,
             /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
         ].forEach((pattern, patternIndex) => {
-            const titleSource = patternIndex === 1 ? this.stripKnownExpansionAliases(title) : title;
-            const detailsSource = patternIndex === 1 ? this.stripKnownExpansionAliases(details) : details;
+            const titleSource = patternIndex === 1 ? this.stripKnownExpansionAliases(tokenizedTitle) : tokenizedTitle;
+            const detailsSource = patternIndex === 1 ? this.stripKnownExpansionAliases(tokenizedDetails) : tokenizedDetails;
             for (const match of titleSource.matchAll(pattern)) {
                 this.addKeywordCandidate(candidates, match[0], 'title-pattern');
             }
@@ -337,6 +389,11 @@ class EbayProcessor {
                 this.addKeywordCandidate(candidates, match[0], 'pattern');
             }
         });
+        if (/\bmega\b/i.test(tokenizedTitle)) {
+            for (const match of tokenizedTitle.matchAll(/\b[XY]\b/gi)) {
+                this.addKeywordCandidate(candidates, match[0].toUpperCase(), 'title-pattern');
+            }
+        }
         const normalized = sourceText
             .replace(/\bfull\s*-?\s*art\b|\bfullart\b/gi, ' ')
             .replace(/[()".,:;!?\\[\]{}|]+/g, ' ')
@@ -373,7 +430,7 @@ class EbayProcessor {
             const collectorNumber = this.isCollectorNumberClue(label);
             const expansion = this.isExpansionClue(label);
             const feature = this.isFeatureClue(label);
-            const variation = this.isVariationClue(label) && !expansion && !feature;
+            const variation = (this.isVariationClue(label) || this.isMegaFormClue(label, sourceText)) && !expansion && !feature;
             const labelCompact = this.compactClueValue(label);
             const selectedByDefault =
                 nameLike ||

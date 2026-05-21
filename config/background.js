@@ -566,13 +566,20 @@ function cardmarketExpansionFromUrl(url = '') {
 }
 
 function titleCaseCardmarketSlug(value = '') {
-    return String(value || '')
+    let text = String(value || '')
         .replace(/[-_]+/g, ' ')
         .replace(/\bex|gx|vmax|vstar|lv x\b/gi, (match) => match.toUpperCase())
         .replace(/\bmc\b/gi, 'MC')
         .replace(/\b\w/g, (match) => match.toUpperCase())
+        .replace(/\bS\b/g, 's')
+        .replace(/\bEX\b/g, 'ex')
+        .replace(/\bGX\b/g, 'GX')
+        .replace(/\bVMAX\b/g, 'VMAX')
+        .replace(/\bVSTAR\b/g, 'VSTAR')
         .replace(/\s+/g, ' ')
         .trim();
+    text = text.replace(/\b([A-Z][a-z]+)s\s+([A-Z][a-z]+)\b/g, "$1's $2");
+    return text;
 }
 
 function cardmarketProductInfoFromUrl(url = '', title = '') {
@@ -643,7 +650,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
             trailingExpansion ||
             ''
         ));
-        const cleanName = removeMarketplaceSearchNoise(context?.details?.species || cardName);
+        const cleanName = removeMarketplaceSearchNoise(cardName);
 
         return {
             rawTitle: cleanTitle,
@@ -736,6 +743,7 @@ function scrapeStructuredCardFields(title = '', context = null) {
         .replace(/\b(?:Legendary|Treasure|Treasures|Promo|Promos)\b/gi, ' ')
         .replace(/\b(?:special illustration rare|illustration rare|illustration|secret rare|ultra rare|holo rare|holo|promo|rare)\b/gi, ' ')
         .replace(/\b(?:ex|gx|vmax|vstar|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
+        .replace(/\s+\d{1,4}[a-z]?\s*$/i, ' ')
         .replace(/\s+/g, ' ')
         .trim();
 
@@ -871,8 +879,9 @@ function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) 
             /\b(?:base\s+set|set\s+base|evolutions|evoluzioni|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(clue)
         );
         const collectorClues = normalizedClues.filter((clue) =>
-            /\b(?:BW|XY|SM|SWSH|SVP|PROMO)\s?\d{1,4}[a-z]?\b/i.test(clue) ||
-            /\b[A-Z]{1,6}\s?\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(clue) ||
+            /\b(?:BW|XY|SM|SWSH|SVP|SV-P|PROMO)\s?\d{1,4}[a-z]?\b/i.test(clue) ||
+            /\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/i.test(clue) ||
+            /\b[A-Z]{1,8}\s?\d{1,4}[a-z]?\s*\/\s*(?:[A-Z]{1,8}\s?)?\d{1,4}[a-z]?\b/i.test(clue) ||
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(clue)
         );
         const rarityClues = normalizedClues.filter((clue) =>
@@ -909,7 +918,9 @@ function resolvedCardNameFromRow(row, term = '') {
         return 'Nidoran';
     }
 
-    return row?.canonical_name || row?.name || '';
+    const canonical = row?.canonical_name || '';
+    const display = row?.name || '';
+    return compactSearchValue(display) === compactTerm ? display : (canonical || display);
 }
 
 function candidateNameTermsFromTitle(title = '', structuredCard = null) {
@@ -965,6 +976,9 @@ function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
     if (!resolvedName) {
         return false;
     }
+    if (requestedName && /[&'’]/.test(structuredCard?.name || '') && compactSearchValue(resolvedName).length < requestedName.length) {
+        return false;
+    }
     if (!rowMatchesStructuredVariation({ name: resolvedName }, structuredCard)) {
         return false;
     }
@@ -987,23 +1001,39 @@ function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
 }
 
 function searchNameWithVariation(name = '', variation = '') {
-    const compactName = compactSearchValue(name);
+    const cleanName = String(name || '').replace(/\s+\d{1,4}[a-z]?\s*$/i, '').trim();
+    const compactName = compactSearchValue(cleanName);
     const compactVariation = compactSearchValue(variation);
     if (!compactVariation || compactName.endsWith(compactVariation)) {
-        return name;
+        return cleanName;
     }
     const variationTokens = normalizedVariationTokens(variation);
     if (variationTokens.includes('mega')) {
         const suffixTokens = variationTokens.filter((token) => token !== 'mega');
-        return ['Mega', name, ...suffixTokens].filter(Boolean).join(' ');
+        return ['Mega', cleanName, ...suffixTokens].filter(Boolean).join(' ');
     }
-    return [name, variation].filter(Boolean).join(' ');
+    return [cleanName, variation].filter(Boolean).join(' ');
+}
+
+function possibleCompositeTitleTerms(title = '') {
+    const cleanTitle = removeMarketplaceSearchNoise(String(title || '')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/[’`]/g, "'")
+        .replace(/\s+/g, ' ')
+        .trim());
+    const possessive = cleanTitle.match(/\b([A-Za-z][A-Za-z]+['’]s\s+[A-Za-z][A-Za-z]+(?:\s+(?:ex|gx|vmax|vstar|v|mega))?)\b/i)?.[1] || '';
+    const connector = cleanTitle.match(/\b([A-Za-z][A-Za-z]+)\s+(?:&|and|e|\+|\/)\s+([A-Za-z][A-Za-z]+)(?:\s+(ex|gx|vmax|vstar|v|mega))?\b/i);
+    return [
+        possessive,
+        connector ? [connector[1], '&', connector[2], connector[3] || ''].filter(Boolean).join(' ') : '',
+        connector ? [connector[1], connector[2], connector[3] || ''].filter(Boolean).join(' ') : '',
+    ].filter(Boolean);
 }
 
 async function resolveNameFromCardvaultTitle(title = '', structuredCard = null) {
     const attemptedTerms = [];
 
-    for (const term of candidateNameTermsFromTitle(title, structuredCard)) {
+    for (const term of [...new Set([...possibleCompositeTitleTerms(title), ...candidateNameTermsFromTitle(title, structuredCard)])]) {
         const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
@@ -1289,6 +1319,9 @@ function rowMatchesStructuredName(row, structuredCard) {
         return rowName.startsWith('nidoran');
     }
 
+    if (structuredCard?.collectorNumberFirstRecovery) {
+        return true;
+    }
     if (hasStructuredCollectorIdentity(structuredCard) && !normalizeVariationValue(structuredCard?.variation || '')) {
         return rowName === requestedName;
     }
@@ -1480,8 +1513,12 @@ function normalizeVariationValue(value = '') {
 }
 
 function explicitVariationsFromName(value = '') {
-    const matches = String(value || '').match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi) || [];
-    return [...new Set(matches.map(normalizeVariationValue).filter(Boolean))];
+    const source = String(value || '');
+    const matches = source.match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi) || [];
+    const megaFormMatches = /\bmega\b/i.test(source)
+        ? (source.match(/\b[XY]\b/g) || [])
+        : [];
+    return [...new Set([...matches, ...megaFormMatches].map(normalizeVariationValue).filter(Boolean))];
 }
 
 function explicitVariationFromName(value = '') {
@@ -1513,6 +1550,9 @@ function rowMatchesStructuredVariation(row = {}, structuredCard = {}) {
     if (requestedTokens.length === 0) {
         return !structuredCard?.strictVariation || rowTokens.length === 0;
     }
+    if (compositeNameTokens(structuredCard.name || '').length >= 2 && rowHasAllNameTokens(row, compositeNameTokens(structuredCard.name || ''))) {
+        return true;
+    }
     if (requestedTokens.length === 1 && requestedTokens[0] === 'v' && !hasExplicitVariationStructuredRows([row], structuredCard)) {
         return false;
     }
@@ -1528,6 +1568,9 @@ function variationMatchRank(row = {}, structuredCard = {}) {
         return 0;
     }
     const rowTokens = explicitVariationsFromName(row?.name || row?.canonical_name || '');
+    if (compositeNameTokens(structuredCard.name || '').length >= 2 && rowHasAllNameTokens(row, compositeNameTokens(structuredCard.name || ''))) {
+        return 0;
+    }
     if (rowTokens.length === 0) {
         return 1;
     }
@@ -1537,6 +1580,8 @@ function variationMatchRank(row = {}, structuredCard = {}) {
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const requestedExpansion = compactSetValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
+    const requestedNameTokens = compositeNameTokens(structuredCard.name || '');
+    const expectsCompositeName = requestedNameTokens.length >= 2;
     const requestedCollectorNumber = structuredCard.collectorNumber ||
         structuredCard.printedCollectorNumber ||
         structuredCard.numericCollectorNumber ||
@@ -1586,8 +1631,33 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
             return aNamePenalty - bNamePenalty;
         }
 
+        const aCompositePenalty = expectsCompositeName && !rowHasAllNameTokens(a, requestedNameTokens) ? 1 : 0;
+        const bCompositePenalty = expectsCompositeName && !rowHasAllNameTokens(b, requestedNameTokens) ? 1 : 0;
+        if (aCompositePenalty !== bCompositePenalty) {
+            return aCompositePenalty - bCompositePenalty;
+        }
+
         return Number(b.search_rank || 0) - Number(a.search_rank || 0);
     });
+}
+
+function compositeNameTokens(value = '') {
+    const stopWords = new Set(['and', 'e', 'ex', 'gx', 'v', 'vmax', 'vstar', 'tag', 'team']);
+    const tokens = String(value || '')
+        .toLowerCase()
+        .replace(/[&+/]/g, ' ')
+        .split(/[^a-z0-9]+/)
+        .map((token) => token.trim())
+        .filter((token) => token.length >= 3 && !stopWords.has(token));
+    return [...new Set(tokens)];
+}
+
+function rowHasAllNameTokens(row = {}, tokens = []) {
+    if (tokens.length === 0) {
+        return true;
+    }
+    const rowName = compactSearchValue(row?.name || row?.canonical_name || '');
+    return tokens.every((token) => rowName.includes(compactSearchValue(token)));
 }
 
 function rowExpansionName(row = {}) {
@@ -1806,6 +1876,50 @@ function mergeAndRankStructuredRows(primaryRows = [], fallbackRows = [], structu
         sortRowsForStructuredCard(uniqueRowsById([...primaryRows, ...fallbackRows]), structuredCard),
         structuredCard
     );
+}
+
+function hasCollectorEvidence(structuredCard = {}) {
+    return Boolean(structuredCard?.collectorNumber || structuredCard?.printedCollectorNumber || structuredCard?.numericCollectorNumber);
+}
+
+function shouldUseCollectorFirstRecovery(structuredCard = {}) {
+    return hasCollectorEvidence(structuredCard) && !/[&'’]/.test(String(structuredCard?.name || ''));
+}
+
+function collectorOnlyStructuredCard(structuredCard = {}) {
+    return {
+        ...structuredCard,
+        name: '',
+        searchName: '',
+        collectorNumberFirstRecovery: true,
+    };
+}
+
+function inferStructuredNameFromCollectorRows(structuredCard = {}, rows = []) {
+    if (!hasCollectorEvidence(structuredCard) || rows.length === 0) {
+        return structuredCard;
+    }
+    const requestedCollectorNumber = structuredCard.collectorNumber ||
+        structuredCard.printedCollectorNumber ||
+        structuredCard.numericCollectorNumber ||
+        '';
+    const exactCollectorRows = rows.filter((row) =>
+        collectorNumberMatches(rowCollectorNumber(row), requestedCollectorNumber) &&
+        (!structuredCard.expansion || expansionMatches(rowExpansionName(row), structuredCard.expansion || '')) &&
+        rowMatchesStructuredVariation(row, structuredCard)
+    );
+    const candidateRows = exactCollectorRows.length > 0 ? exactCollectorRows : rows;
+    const firstName = candidateRows[0]?.name || '';
+    const allSameName = firstName && candidateRows.every((row) => compactSearchValue(row.name || '') === compactSearchValue(firstName));
+    if (!allSameName) {
+        return structuredCard;
+    }
+    return {
+        ...structuredCard,
+        name: firstName,
+        searchName: searchNameWithVariation(firstName, structuredCard.variation || ''),
+        collectorNumberRecoveredName: true,
+    };
 }
 
 function uniqueRowsById(rows = []) {
@@ -3336,6 +3450,21 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 }
 
                 if (!hasGoodEnoughExactRows(rows, pageInfo.structuredCard)) {
+                    if (shouldUseCollectorFirstRecovery(pageInfo.structuredCard)) {
+                        try {
+                            const collectorRecovery = await searchExtensionCard(collectorOnlyStructuredCard(pageInfo.structuredCard));
+                            if (collectorRecovery.rows.length > 0) {
+                                pageInfo.structuredCard = inferStructuredNameFromCollectorRows(pageInfo.structuredCard, collectorRecovery.rows);
+                                rows = mergeAndRankStructuredRows(rows, collectorRecovery.rows, pageInfo.structuredCard);
+                                debug.collectorNumberFirstRecovery = collectorRecovery.debug;
+                            }
+                        } catch (collectorRecoveryError) {
+                            debug.collectorNumberFirstRecovery = {
+                                endpoint: '/api/extension-card-search',
+                                error: collectorRecoveryError.message || 'Collector recovery failed.',
+                            };
+                        }
+                    }
                     try {
                         const nameResolutionTitle = titleForNameResolution(
                             pageInfo.title,
@@ -3636,6 +3765,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
 
                     if (rows.length === 0 || (exactIdentity && !hasGoodEnoughExactRows(rows, structuredCard))) {
+                        if (shouldUseCollectorFirstRecovery(structuredCard)) {
+                            try {
+                                const collectorRecovery = await searchExtensionCard(collectorOnlyStructuredCard(structuredCard));
+                                if (collectorRecovery.rows.length > 0) {
+                                    Object.assign(structuredCard, inferStructuredNameFromCollectorRows(structuredCard, collectorRecovery.rows));
+                                    rows = mergeAndRankStructuredRows(rows, collectorRecovery.rows, structuredCard);
+                                }
+                            } catch (collectorRecoveryError) {
+                                console.warn('⚠️ [Background] Collector-first recovery failed:', collectorRecoveryError);
+                            }
+                        }
                         const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
                         const nameResolution = await resolveNameFromCardvaultTitle(
                             titleForNameResolution(title, isSelectedOverlaySearch ? '' : (request.originalTitle || tab?.title || ''), [...clues, ...primaryClues]),
