@@ -1630,11 +1630,14 @@ function filterStrongExactRows(rows = [], structuredCard = {}) {
             return rowParts.primary === requestedParts.primary ||
                 (!requestedParts.primary.startsWith('0') && rowParts.numericPrimary === requestedParts.numericPrimary);
         });
+        const prefixedExactRows = requestedParts.prefix
+            ? exactRows.filter((row) => collectorNumberParts(rowCollectorNumber(row)).prefix === requestedParts.prefix)
+            : [];
+        if (prefixedExactRows.length > 0) {
+            return prefixedExactRows;
+        }
         const hasNameMismatch = rows.some((row) => !rowMatchesExactStructuredName(row, structuredCard));
-        const hasExpansionMismatch = rows.some((row) =>
-            structuredCard.expansion && !expansionMatches(rowExpansionName(row), structuredCard.expansion || '')
-        );
-        if ((!hasNameMismatch && !hasExpansionMismatch && !hasPrefixedRow) || !exactRowsHaveAllRequestedPrimary) {
+        if (!hasNameMismatch || !exactRowsHaveAllRequestedPrimary) {
             return rows;
         }
         return exactRows.length > 0 ? exactRows : rows;
