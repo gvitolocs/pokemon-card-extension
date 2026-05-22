@@ -9,6 +9,7 @@ class EbayProcessor {
         this.processedPages = new Set();
         this.latestResultsByUrl = new Map();
         this.latestTitleByUrl = new Map();
+        this.recentSearchResults = new Map();
         this.currentTitle = '';
         this.currentTitleElement = null;
         this.currentKeywords = [];
@@ -763,6 +764,14 @@ class EbayProcessor {
     }
 
     async searchCardWithBackground(title, ebayPayload = this.buildEbayPayload(title)) {
+        const signature = this.buildEbaySearchSignature(ebayPayload);
+        if (this.recentSearchResults.has(signature)) {
+            const cachedResults = this.recentSearchResults.get(signature);
+            this.recentSearchResults.delete(signature);
+            this.recentSearchResults.set(signature, cachedResults);
+            this.storeMatchedResults(window.location.href, title, cachedResults);
+            return cachedResults;
+        }
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: ebayPayload.searchTitle || title,
@@ -777,6 +786,7 @@ class EbayProcessor {
             url: window.location.href,
         });
         const results = response?.success && Array.isArray(response.results) ? response.results : [];
+        this.rememberRecentSearchResults(signature, results);
         this.storeMatchedResults(window.location.href, title, results);
         return results;
     }
@@ -800,6 +810,19 @@ class EbayProcessor {
         const key = this.stableUrl(url);
         this.latestTitleByUrl.set(key, title || document.title || '');
         this.latestResultsByUrl.set(key, Array.isArray(results) ? results : []);
+    }
+
+    rememberRecentSearchResults(signature, results = []) {
+        if (!signature) {
+            return;
+        }
+        if (this.recentSearchResults.has(signature)) {
+            this.recentSearchResults.delete(signature);
+        }
+        this.recentSearchResults.set(signature, Array.isArray(results) ? results : []);
+        while (this.recentSearchResults.size > 20) {
+            this.recentSearchResults.delete(this.recentSearchResults.keys().next().value);
+        }
     }
 
     buildSidePanelPreviewRowsPayload(url = window.location.href, results = this.latestResultsByUrl.get(this.stableUrl(url)) || []) {
@@ -960,10 +983,12 @@ class EbayProcessor {
         host.setAttribute('data-pokoin-ebay-panel-host', 'true');
         Object.assign(host.style, {
             position: 'fixed',
-            left: '16px',
-            bottom: '18px',
+            left: '12px',
+            top: '12px',
+            bottom: 'auto',
             zIndex: '2147483646',
             width: 'min(340px, calc(100vw - 32px))',
+            maxHeight: 'calc(100vh - 24px)',
             pointerEvents: 'none',
         });
         let root = host;
@@ -1207,6 +1232,7 @@ class EbayProcessor {
             console.log('🚫 [EBAYE] Ignored stale eBay overlay search response');
             return;
         }
+        this.searchResultsBySignature.set(searchSignature, backgroundResults);
         this.applyEbaySearchResults(searchSignature, backgroundResults, { trigger });
     }
 

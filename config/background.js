@@ -15,6 +15,7 @@ const MAX_PENDING_CARDMARKET_OBSERVATIONS = 20;
 const CARDVAULT_FETCH_TIMEOUT_MS = 6000;
 const CARDVAULT_FETCH_RETRY_DELAY_MS = 250;
 const VINTED_TOKEN_READY_TIMEOUT_MS = 6000;
+const RECENT_SEARCH_CACHE_LIMIT = 20;
 
 let stats = {
     cardsProcessed: 0,
@@ -817,7 +818,10 @@ function normalizeMarketplacePayload(payload = null) {
         .trim();
     const selectedSearchTitle = buildPrimaryClueSearchTitle('', selectedClues, primaryClues) ||
         removeMarketplaceSearchNoise(payload.searchTitle || '');
-    const variationTokens = normalizedVariationTokens(payload.variation || '');
+    const structuredVariation = structuredVariationFromPayload(payload, primaryClues);
+    const variationTokens = normalizedVariationTokens(structuredVariation);
+    const rarity = removeMarketplaceSearchNoise(payload.rarity || (features.includes('illustration') ? 'illustration' : ''));
+    const rarityAliases = rarityAliasesForRarity(rarity, features);
     const structuredCard = {
         rawTitle: payload.source === 'vinted'
             ? selectedSearchTitle
@@ -828,7 +832,8 @@ function normalizeMarketplacePayload(payload = null) {
         printedCollectorNumber: collectorNumber,
         numericCollectorNumber,
         expansion: removeMarketplaceSearchNoise(payload.expansion || ''),
-        rarity: removeMarketplaceSearchNoise(payload.rarity || (features.includes('illustration') ? 'illustration' : '')),
+        rarity,
+        rarityAliases,
         variation: removeMarketplaceSearchNoise(payload.variation || ''),
         variationTokens,
         strictVariation: payload.source === 'vinted' && !payload.variation,
@@ -844,6 +849,76 @@ function normalizeMarketplacePayload(payload = null) {
         numericCollectorNumber,
         structuredCard,
     };
+}
+
+function recentSearchCacheGet(cache, key = '') {
+    if (!key || !cache?.has(key)) {
+        return null;
+    }
+    const value = cache.get(key);
+    cache.delete(key);
+    cache.set(key, value);
+    return value;
+}
+
+function recentSearchCacheSet(cache, key = '', value = null, limit = RECENT_SEARCH_CACHE_LIMIT) {
+    if (!key || !cache) {
+        return value;
+    }
+    if (cache.has(key)) {
+        cache.delete(key);
+    }
+    cache.set(key, value);
+    while (cache.size > limit) {
+        const oldestKey = cache.keys().next().value;
+        cache.delete(oldestKey);
+    }
+    return value;
+}
+
+function recentSearchStableParts(values = []) {
+    return values
+        .map((value) => compactSearchValue(value))
+        .filter(Boolean)
+        .sort()
+        .join(',');
+}
+
+function recentMarketplaceSearchIdentity({
+    source = '',
+    url = '',
+    listingKey = '',
+    title = '',
+    originalTitle = '',
+    clues = [],
+    primaryClues = [],
+    payload = null,
+    previewSignature = '',
+    selectionRevision = '',
+} = {}) {
+    const marketplacePayload = normalizeMarketplacePayload(payload);
+    const identitySource = marketplacePayload?.source || source || 'marketplace';
+    const identityUrl = stableSearchUrl(marketplacePayload?.listingKey || listingKey || url);
+    const selectedClues = marketplacePayload?.selectedClues || normalizeRequestClues(clues);
+    const selectedPrimaryClues = marketplacePayload?.primaryClues || normalizeRequestClues(primaryClues);
+    const structuredCard = marketplacePayload?.structuredCard || {};
+    return [
+        identitySource,
+        identityUrl,
+        compactSearchValue(marketplacePayload?.searchTitle || title),
+        compactSearchValue(marketplacePayload?.originalTitle || originalTitle),
+        recentSearchStableParts(selectedClues),
+        recentSearchStableParts(selectedPrimaryClues),
+        compactSearchValue(structuredCard.name || marketplacePayload?.name || ''),
+        compactSearchValue(structuredCard.variation || marketplacePayload?.variation || ''),
+        compactSearchValue(structuredCard.collectorNumber || marketplacePayload?.collectorNumber || ''),
+        compactSearchValue(structuredCard.numericCollectorNumber || marketplacePayload?.numericCollectorNumber || ''),
+        compactSearchValue(structuredCard.expansion || marketplacePayload?.expansion || ''),
+        compactSearchValue(previewSignature || ''),
+        selectionRevision === '' || selectionRevision === null || selectionRevision === undefined
+            ? ''
+            : String(selectionRevision),
+    ].join('|');
 }
 
 function buildTitleWithRequestClues(title = '', clues = []) {
@@ -866,6 +941,20 @@ function buildTitleWithRequestClues(title = '', clues = []) {
             return true;
         })
         .join(' ');
+}
+
+function rarityAliasesForRarity(rarity = '', features = []) {
+    const values = [
+        rarity,
+        ...(Array.isArray(features) ? features : []),
+    ].map((value) => String(value || '').toLowerCase());
+    const wantsIllustration = values.some((value) =>
+        /\billustration\b|\bfull\s*-?\s*art\b|\bfullart\b|\bsir\b|\bir\b/.test(value)
+    );
+    if (!wantsIllustration) {
+        return [];
+    }
+    return ['Illustration Rare', 'Special Illustration Rare', 'full art', 'illustration'];
 }
 
 function buildPrimaryClueSearchTitle(title = '', clues = [], primaryClues = []) {
@@ -1023,8 +1112,13 @@ function possibleCompositeTitleTerms(title = '') {
         .trim());
     const possessive = cleanTitle.match(/\b([A-Za-z][A-Za-z]+['’]s\s+[A-Za-z][A-Za-z]+(?:\s+(?:ex|gx|vmax|vstar|v|mega))?)\b/i)?.[1] || '';
     const connector = cleanTitle.match(/\b([A-Za-z][A-Za-z]+)\s+(?:&|and|e|\+|\/)\s+([A-Za-z][A-Za-z]+)(?:\s+(ex|gx|vmax|vstar|v|mega))?\b/i);
+    const teamRocketOwner = cleanTitle.match(/\b([A-Za-z][A-Za-z']*)\s+(?:del|della|di|de|of)\s+Team\s+Rocket\b/i)?.[1] ||
+        cleanTitle.match(/\bTeam\s+Rocket(?:'s)?\s+([A-Za-z][A-Za-z']*)\b/i)?.[1] ||
+        '';
     return [
         possessive,
+        teamRocketOwner ? `Team Rocket's ${teamRocketOwner}` : '',
+        teamRocketOwner ? `Team Rocket ${teamRocketOwner}` : '',
         connector ? [connector[1], '&', connector[2], connector[3] || ''].filter(Boolean).join(' ') : '',
         connector ? [connector[1], connector[2], connector[3] || ''].filter(Boolean).join(' ') : '',
     ].filter(Boolean);
@@ -1225,7 +1319,12 @@ function buildStructuredFallbackQueries(structuredCard = {}, title = '') {
     const collectorNumber = structuredCard.collectorNumber || structuredCard.printedCollectorNumber || '';
     const numericCollectorNumber = structuredCard.numericCollectorNumber || '';
     const expansion = structuredCard.expansion || '';
+    const rarityAliases = Array.isArray(structuredCard.rarityAliases) ? structuredCard.rarityAliases : [];
     return [
+        ...rarityAliases.flatMap((rarity) => [
+            [name, rarity, collectorNumber, expansion].filter(Boolean).join(' '),
+            [name, rarity, expansion, collectorNumber].filter(Boolean).join(' '),
+        ]),
         [name, collectorNumber].filter(Boolean).join(' '),
         [name, collectorNumber, expansion].filter(Boolean).join(' '),
         [name, expansion, collectorNumber].filter(Boolean).join(' '),
@@ -1529,6 +1628,22 @@ function normalizedVariationTokens(value = '') {
     return explicitVariationsFromName(value);
 }
 
+function structuredVariationFromPayload(payload = {}, primaryClues = []) {
+    const variationParts = [payload.variation || ''];
+    for (const clue of primaryClues) {
+        const clueTokens = explicitVariationsFromName(clue);
+        if (clueTokens.length === 0) {
+            continue;
+        }
+        const resolvedNameCompact = compactSearchValue(payload.name || '');
+        const clueCompact = compactSearchValue(clue);
+        if (!resolvedNameCompact || clueCompact.includes(resolvedNameCompact)) {
+            variationParts.push(clue);
+        }
+    }
+    return variationParts.join(' ');
+}
+
 function requestedVariationTokens(structuredCard = {}) {
     const tokens = Array.isArray(structuredCard?.variationTokens)
         ? structuredCard.variationTokens
@@ -1577,6 +1692,29 @@ function variationMatchRank(row = {}, structuredCard = {}) {
     return requestedTokens.every((token) => rowTokens.includes(token)) ? 0 : 99;
 }
 
+function rarityMatchRank(row = {}, structuredCard = {}) {
+    const aliases = Array.isArray(structuredCard?.rarityAliases) ? structuredCard.rarityAliases : [];
+    if (aliases.length === 0) {
+        return 0;
+    }
+    const rowRarity = compactSearchValue(row?.rarity || '');
+    const rowText = compactSearchValue([
+        row?.rarity,
+        row?.name,
+        row?.set_name,
+        row?.card_number,
+        row?.product_type,
+        row?.item_kind,
+    ].filter(Boolean).join(' '));
+    if (aliases.some((alias) => rowRarity && rowRarity === compactSearchValue(alias))) {
+        return 0;
+    }
+    if (aliases.some((alias) => rowText.includes(compactSearchValue(alias)))) {
+        return 1;
+    }
+    return 9;
+}
+
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const requestedExpansion = compactSetValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
@@ -1593,6 +1731,12 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
         const bVariationRank = variationMatchRank(b, structuredCard);
         if (aVariationRank !== bVariationRank) {
             return aVariationRank - bVariationRank;
+        }
+
+        const aRarityRank = rarityMatchRank(a, structuredCard);
+        const bRarityRank = rarityMatchRank(b, structuredCard);
+        if (aRarityRank !== bRarityRank) {
+            return aRarityRank - bRarityRank;
         }
 
         const aExpansionRank = requestedExpansion ? expansionMatchRank(rowExpansionName(a), structuredCard.expansion || '') : 0;
@@ -1946,6 +2090,7 @@ async function searchExtensionCard(structuredCard) {
         printedCollectorNumber: structuredCard.printedCollectorNumber,
         expansion: structuredCard.expansion,
         rarity: structuredCard.rarity,
+        rarityAliases: structuredCard.rarityAliases,
         variation: structuredCard.variation,
         editionHint: structuredCard.editionHint,
         language: 'en',
@@ -2321,12 +2466,12 @@ function clearBackgroundSearchCachesForUrl(url = '') {
         return;
     }
     for (const key of [...backgroundSearchInFlight.keys()]) {
-        if (key.startsWith(`${stableUrl}|`)) {
+        if (key.includes(`|${stableUrl}|`) || key.startsWith(`background|${stableUrl}|`)) {
             backgroundSearchInFlight.delete(key);
         }
     }
     for (const key of [...backgroundSearchResultCache.keys()]) {
-        if (key.startsWith(`${stableUrl}|`)) {
+        if (key.includes(`|${stableUrl}|`) || key.startsWith(`background|${stableUrl}|`)) {
             backgroundSearchResultCache.delete(key);
         }
     }
@@ -2340,6 +2485,7 @@ const sidePanelOwnersByTab = new Map();
 const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
 const latestVintedCanonicalByTabUrl = new Map();
+const recentVintedCanonicalPreviewCache = new Map();
 const vintedTokenWaitTimers = new Map();
 const cardvaultNameResolutionCache = new Map();
 const pokoinPriceCache = new Map();
@@ -2376,6 +2522,7 @@ async function ensureRuntimeStorageCurrent() {
     }
     backgroundSearchInFlight.clear();
     backgroundSearchResultCache.clear();
+    recentVintedCanonicalPreviewCache.clear();
     for (const timeoutId of vintedTokenWaitTimers.values()) {
         clearTimeout(timeoutId);
     }
@@ -2873,6 +3020,24 @@ function vintedCanonicalCacheKey(tabId, url = '') {
     return tabId && stableUrl ? `${tabId}|${stableUrl}` : '';
 }
 
+function vintedRecentCanonicalCacheKey(canonical = {}) {
+    if (!canonical?.url) {
+        return '';
+    }
+    return recentMarketplaceSearchIdentity({
+        source: 'vinted',
+        url: canonical.url,
+        listingKey: canonical.listingKey,
+        title: canonical.title,
+        originalTitle: canonical.originalTitle,
+        clues: canonical.clues,
+        primaryClues: canonical.primaryClues,
+        payload: canonical.vintedPayload,
+        previewSignature: canonical.previewSignature,
+        selectionRevision: canonical.selectionRevision,
+    });
+}
+
 function vintedCanonicalFromPinnedState(state = {}, tab = {}) {
     if (!samePinnedVintedPreviewState(state, tab?.url || '')) {
         return null;
@@ -2937,6 +3102,10 @@ function rememberVintedCanonicalPreview(canonical = null, options = {}) {
         vintedTokenWaitTimers.delete(cacheKey);
     }
     latestVintedCanonicalByTabUrl.set(cacheKey, canonical);
+    const recentKey = vintedRecentCanonicalCacheKey(canonical);
+    if (recentKey) {
+        recentSearchCacheSet(recentVintedCanonicalPreviewCache, recentKey, canonical);
+    }
     return canonical;
 }
 
@@ -2944,6 +3113,19 @@ function latestVintedCanonicalPreview(tab = {}, state = null) {
     const cacheKey = vintedCanonicalCacheKey(tab?.id, tab?.url || '');
     return (cacheKey && latestVintedCanonicalByTabUrl.get(cacheKey)) ||
         vintedCanonicalFromPinnedState(state, tab);
+}
+
+function latestRecentVintedCanonicalPreview(request = {}, tab = {}) {
+    const canonical = vintedCanonicalFromRequest(request, tab);
+    const cacheKey = vintedRecentCanonicalCacheKey(canonical);
+    if (!cacheKey) {
+        return null;
+    }
+    const cached = recentSearchCacheGet(recentVintedCanonicalPreviewCache, cacheKey);
+    if (!cached?.url || !sameUrlWithoutHash(cached.url, canonical.url)) {
+        return null;
+    }
+    return cached;
 }
 
 async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-vinted-preview', owner = null) {
@@ -3207,6 +3389,37 @@ function buildBackgroundSearchSignature({ title = '', originalTitle = '', clues 
         compactSearchValue(originalTitle),
         normalizeRequestClues(clues).map(compactSearchValue).sort().join(','),
         normalizeRequestClues(primaryClues).map(compactSearchValue).sort().join(','),
+    ].join('|');
+}
+
+function buildBackgroundRecentSearchKey({
+    title = '',
+    originalTitle = '',
+    clues = [],
+    primaryClues = [],
+    url = '',
+    payload = null,
+    previewSignature = '',
+    selectionRevision = '',
+} = {}) {
+    const marketplacePayload = normalizeMarketplacePayload(payload);
+    if (marketplacePayload) {
+        return recentMarketplaceSearchIdentity({
+            source: marketplacePayload.source,
+            url,
+            listingKey: marketplacePayload.listingKey,
+            title,
+            originalTitle,
+            clues,
+            primaryClues,
+            payload: marketplacePayload,
+            previewSignature,
+            selectionRevision,
+        });
+    }
+    return [
+        'background',
+        buildBackgroundSearchSignature({ title, originalTitle, clues, primaryClues, url }),
     ].join('|');
 }
 
@@ -3734,12 +3947,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     primaryClues,
                     url: requestUrl,
                 });
-                if (backgroundSearchResultCache.has(searchSignature)) {
-                    sendResponse({ success: true, results: backgroundSearchResultCache.get(searchSignature) });
+                const recentSearchKey = buildBackgroundRecentSearchKey({
+                    title,
+                    originalTitle: request.originalTitle || request.title || tab?.title || '',
+                    clues,
+                    primaryClues,
+                    url: requestUrl,
+                    payload: marketplacePayload,
+                    previewSignature: request.previewSignature || '',
+                    selectionRevision: request.selectionRevision ?? marketplacePayload?.selectionRevision ?? '',
+                });
+                const cachedResults = recentSearchCacheGet(backgroundSearchResultCache, recentSearchKey);
+                if (cachedResults) {
+                    sendResponse({ success: true, results: cachedResults });
                     return;
                 }
-                if (!backgroundSearchInFlight.has(searchSignature)) {
-                    backgroundSearchInFlight.set(searchSignature, Promise.resolve()
+                if (!backgroundSearchInFlight.has(recentSearchKey)) {
+                    backgroundSearchInFlight.set(recentSearchKey, Promise.resolve()
                 .then(async () => {
                     if (directCardTraderBlueprintId) {
                         const directName = cleanCardTraderDirectName(title || tab?.title || '', request.url || tab?.url || '', directCardTraderBlueprintId);
@@ -3829,14 +4053,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return legacyRows;
                 })
                 .then((results) => {
-                    backgroundSearchResultCache.set(searchSignature, results);
+                    recentSearchCacheSet(backgroundSearchResultCache, recentSearchKey, results);
                     return results;
                 })
                 .finally(() => {
-                    backgroundSearchInFlight.delete(searchSignature);
+                    backgroundSearchInFlight.delete(recentSearchKey);
                 }));
                 }
-                backgroundSearchInFlight.get(searchSignature)
+                backgroundSearchInFlight.get(recentSearchKey)
                     .then((results) => sendResponse({ success: true, results }))
                     .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
             })
@@ -3888,6 +4112,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     id: senderTab.id,
                     url: currentUrl || tab.url || senderTab.url || '',
                 });
+                const recentVintedCanonical = previewRows.length === 0
+                    ? latestRecentVintedCanonicalPreview(request, {
+                        ...tab,
+                        id: senderTab.id,
+                        url: currentUrl || tab.url || senderTab.url || '',
+                    })
+                    : null;
+                if (
+                    recentVintedCanonical?.previewRows?.length > 0 &&
+                    !request.forceRefresh
+                ) {
+                    return applyVintedCanonicalToSidePanel({
+                        ...tab,
+                        id: senderTab.id,
+                        url: currentUrl || tab.url || senderTab.url || '',
+                        title: request.title || currentTitle || tab.title || '',
+                    }, recentVintedCanonical, owner, { reason: 'open-recent-vinted-cache' });
+                }
                 if (vintedCanonical) {
                     rememberVintedCanonicalPreview({
                         ...vintedCanonical,

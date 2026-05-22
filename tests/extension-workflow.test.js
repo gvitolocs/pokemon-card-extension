@@ -609,6 +609,98 @@ test('Vinted process renders button, clue chips, and candidate preview once', as
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
 });
 
+test('Vinted catalogue search stays quiet and SPA item navigation remounts overlay', async () => {
+    const body = createDomElement('main');
+    const catalogueTitle = createDomElement('h1', { 'data-testid': 'catalog-title' });
+    catalogueTitle.textContent = 'Flareon';
+    body.appendChild(catalogueTitle);
+    const { details, title, description } = createVintedProductDom();
+    title.textContent = 'Carta Pokemon Flareon';
+    description.textContent = 'Flareon EX 10/108';
+    const location = {
+        href: 'https://www.vinted.it/catalog?search_text=flareon&search_by_image_uuid=&search_by_image_id=&page=1&time=123',
+        hostname: 'www.vinted.it',
+        pathname: '/catalog',
+    };
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location,
+            extractTitleInfo: (value) => ({
+                pokemonName: /flareon/i.test(String(value || '')) ? 'Flareon' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Flareon EX', search_score: 95 }] };
+                },
+            },
+        },
+        document: {
+            querySelector: (selector) => {
+                if (selector === '[data-testid="item-description"]') return location.pathname.startsWith('/items/') ? description : null;
+                if (selector === '[data-pokoin-vinted-panel-host]') return body.querySelector(selector);
+                if (selector === '[data-testid="item-details"]') return location.pathname.startsWith('/items/') ? details : null;
+                return body.querySelector(selector);
+            },
+            querySelectorAll: (selector) => {
+                if (selector === '[data-pokoin-vinted-panel-host]') return body.querySelectorAll(selector);
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    const activeTitle = location.pathname.startsWith('/items/') ? title : catalogueTitle;
+                    return [activeTitle].filter((element) => element.matches(selector) || selector === 'h1');
+                }
+                return body.querySelectorAll(selector);
+            },
+            contains: (element) => body.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: body,
+            body,
+        },
+    });
+    const processor = new Processor();
+
+    processor.processProductPage();
+    processor.processProductPage();
+
+    assert.equal(body.querySelector('[data-pokoin-vinted-panel-host]'), null);
+    assert.equal(body.querySelectorAll('[data-pokemon-linker-button]').length, 0);
+    assert.equal(body.querySelectorAll('[data-pokoin-vinted-keywords]').length, 0);
+    assert.equal(body.querySelectorAll('[data-pokoin-candidate-preview]').length, 0);
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 0);
+    assert.equal(
+        processor.vintedDiagnostics.filter((entry) => entry.event === 'catalogue-warmup').length,
+        1,
+        'catalogue search_text should be parsed once without repeated listing searches'
+    );
+
+    location.href = 'https://www.vinted.it/items/77-flareon-ex';
+    location.pathname = '/items/77-flareon-ex';
+    body.children = [];
+    body.appendChild(details);
+    processor.processProductPage();
+    await Promise.resolve();
+    await processor.inFlightSearches.values().next().value;
+    await Promise.resolve();
+
+    const itemHost = body.querySelector('[data-pokoin-vinted-panel-host]');
+    assert.ok(itemHost, 'product navigation should mount the Vinted overlay');
+    assert.equal(itemHost.shadowRoot.querySelectorAll('[data-pokemon-linker-button]').length, 1);
+    assert.equal(itemHost.shadowRoot.querySelectorAll('[data-pokoin-candidate-preview]').length, 1);
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
+
+    location.href = 'https://www.vinted.it/catalog?search_text=flareon&page=2';
+    location.pathname = '/catalog';
+    body.appendChild(catalogueTitle);
+    processor.processProductPage();
+    processor.processProductPage();
+
+    assert.equal(body.querySelector('[data-pokoin-vinted-panel-host]'), null, 'returning to catalogue should remove the product overlay');
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1, 'catalogue revisits should not trigger listing search');
+});
+
 test('Vinted search and overlay mount without details anchor', async () => {
     const details = createDomElement('section', { 'data-testid': 'item-details' });
     const earlyTitle = createDomElement('h1', { 'data-testid': 'item-title' });
@@ -1419,6 +1511,324 @@ test('background Vinted selected keys keep unselected title words out of search'
     assert.ok(fetchBodies.every((entry) => !JSON.stringify(entry.body).match(/\bvolo\b/i)));
 });
 
+test('background Vinted recent search cache reuses same selected payload', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'cleffa-20', name: 'Cleffa', expansionName: 'Neo Genesis', collectorNumber: '20/111', score: 99 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const request = {
+        action: 'searchCardForTitle',
+        title: 'Cleffa 20/111',
+        originalTitle: 'Cleffa 20/111',
+        url: 'https://www.vinted.it/items/20-cleffa',
+        selectedClues: ['Cleffa', '20/111'],
+        clues: ['Cleffa', '20/111'],
+        primaryClues: ['Cleffa'],
+        previewSignature: 'vinted|cleffa|20-111',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/20-cleffa',
+            originalTitle: 'Cleffa 20/111',
+            searchTitle: 'Cleffa 20/111',
+            name: 'Cleffa',
+            collectorNumber: '20/111',
+            numericCollectorNumber: '20',
+            selectedClues: ['Cleffa', '20/111'],
+            primaryClues: ['Cleffa'],
+        },
+    };
+    const sender = { tab: { id: 20, title: 'Cleffa 20/111', url: request.url } };
+
+    const first = await new Promise((resolve) => messageListener(request, sender, resolve));
+    const fetchesAfterFirst = fetchBodies.length;
+    const second = await new Promise((resolve) => messageListener({ ...request }, sender, resolve));
+
+    assert.equal(first.success, true);
+    assert.equal(second.success, true);
+    assert.deepEqual([...second.results.map((row) => row.blueprint_id)], ['cleffa-20']);
+    assert.equal(fetchBodies.length, fetchesAfterFirst, 'same Vinted payload should reuse recent search cache');
+});
+
+test('background Vinted recent search cache changes key for clue or URL changes', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: `${body.name || 'card'}-${body.collectorNumber || fetchBodies.length}`, name: body.name || 'Card', collectorNumber: body.collectorNumber || '', score: 99 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const sender = { tab: { id: 21, title: 'Cleffa 20/111', url: 'https://www.vinted.it/items/21-cleffa' } };
+    const basePayload = {
+        source: 'vinted',
+        listingKey: sender.tab.url,
+        originalTitle: 'Cleffa 20/111',
+        searchTitle: 'Cleffa 20/111',
+        name: 'Cleffa',
+        collectorNumber: '20/111',
+        numericCollectorNumber: '20',
+        selectedClues: ['Cleffa', '20/111'],
+        primaryClues: ['Cleffa'],
+    };
+    const baseRequest = {
+        action: 'searchCardForTitle',
+        title: 'Cleffa 20/111',
+        originalTitle: 'Cleffa 20/111',
+        url: sender.tab.url,
+        selectedClues: ['Cleffa', '20/111'],
+        clues: ['Cleffa', '20/111'],
+        primaryClues: ['Cleffa'],
+        previewSignature: 'vinted|cleffa|20-111',
+        selectionRevision: 1,
+        vintedPayload: basePayload,
+    };
+
+    await new Promise((resolve) => messageListener(baseRequest, sender, resolve));
+    const afterBase = fetchBodies.length;
+    await new Promise((resolve) => messageListener({
+        ...baseRequest,
+        title: 'Cleffa promo 20/111',
+        selectedClues: ['Cleffa', 'promo', '20/111'],
+        clues: ['Cleffa', 'promo', '20/111'],
+        previewSignature: 'vinted|cleffa|promo|20-111',
+        selectionRevision: 2,
+        vintedPayload: {
+            ...basePayload,
+            searchTitle: 'Cleffa promo 20/111',
+            selectedClues: ['Cleffa', 'promo', '20/111'],
+        },
+    }, sender, resolve));
+    const afterClueChange = fetchBodies.length;
+    await new Promise((resolve) => messageListener({
+        ...baseRequest,
+        url: 'https://www.vinted.it/items/22-cleffa',
+        vintedPayload: {
+            ...basePayload,
+            listingKey: 'https://www.vinted.it/items/22-cleffa',
+        },
+    }, { tab: { ...sender.tab, url: 'https://www.vinted.it/items/22-cleffa' } }, resolve));
+
+    assert.ok(afterBase > 0);
+    assert.ok(afterClueChange > afterBase, 'changed selected clue should miss recent cache');
+    assert.ok(fetchBodies.length > afterClueChange, 'changed listing URL should miss recent cache');
+});
+
+test('background recent search cache evicts entries beyond last 20', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/cardtrader-redirect')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: `${body.name}-${body.collectorNumber}`, name: body.name, collectorNumber: body.collectorNumber, score: 99 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const makeRequest = (index) => {
+        const name = `Cleffa${index}`;
+        const collectorNumber = `${index}/111`;
+        const url = `https://www.vinted.it/items/${index}-cleffa`;
+        return {
+            action: 'searchCardForTitle',
+            title: `${name} ${collectorNumber}`,
+            originalTitle: `${name} ${collectorNumber}`,
+            url,
+            selectedClues: [name, collectorNumber],
+            clues: [name, collectorNumber],
+            primaryClues: [name],
+            previewSignature: `vinted|${name}|${collectorNumber}`,
+            selectionRevision: 1,
+            vintedPayload: {
+                source: 'vinted',
+                listingKey: url,
+                originalTitle: `${name} ${collectorNumber}`,
+                searchTitle: `${name} ${collectorNumber}`,
+                name,
+                collectorNumber,
+                numericCollectorNumber: String(index),
+                selectedClues: [name, collectorNumber],
+                primaryClues: [name],
+            },
+        };
+    };
+
+    for (let index = 1; index <= 21; index += 1) {
+        const request = makeRequest(index);
+        await new Promise((resolve) => messageListener(
+            request,
+            { tab: { id: index, title: request.title, url: request.url } },
+            resolve
+        ));
+    }
+    const fetchesAfterWarmup = fetchBodies.length;
+
+    const newestRequest = makeRequest(21);
+    await new Promise((resolve) => messageListener(
+        newestRequest,
+        { tab: { id: 21, title: newestRequest.title, url: newestRequest.url } },
+        resolve
+    ));
+    assert.equal(fetchBodies.length, fetchesAfterWarmup, 'newest cached entry should remain in the last 20');
+
+    const oldestRequest = makeRequest(1);
+    await new Promise((resolve) => messageListener(
+        oldestRequest,
+        { tab: { id: 1, title: oldestRequest.title, url: oldestRequest.url } },
+        resolve
+    ));
+    assert.ok(fetchBodies.length > fetchesAfterWarmup, 'oldest entry should be evicted after 20 newer searches');
+});
+
 test('background Vinted Mega Latias ex rejects non-Mega Latias rows', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -1773,6 +2183,89 @@ test('Vinted Mega Charizard X ex keeps Mega form selected in payload', async () 
     assert.equal(messages[0].vintedPayload.collectorNumber, '13/94');
 });
 
+test('Vinted Mega Charizard chip alone keeps Mega identity without X or ex requirements', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/37-mega-charizard-x', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /charizard/i.test(String(title || '')) ? 'Charizard' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Mega charizard X ex 13/94';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    const megaCharizard = processor.currentKeywords.find((keyword) => keyword.compact === 'megacharizard');
+    assert.ok(megaCharizard, 'Mega Charizard chip should render');
+    processor.selectedKeywordValues = new Set([megaCharizard.compact]);
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = messages[0].vintedPayload;
+    assert.deepEqual(Array.from(selectedLabels, (label) => label.toLowerCase()), ['mega charizard']);
+    assert.equal(selectedLabels.includes('X'), false, 'X should not be selected');
+    assert.equal(selectedLabels.includes('ex'), false, 'ex should not be selected');
+    assert.equal(payload.name, 'Charizard');
+    assert.equal(payload.variation, 'Mega');
+    assert.deepEqual(Array.from(payload.primaryClues).map((label) => label.toLowerCase()), ['mega charizard']);
+    assert.deepEqual(Array.from(payload.selectedClues).map((label) => label.toLowerCase()), ['mega charizard']);
+    assert.equal(messages[0].title.toLowerCase(), 'mega charizard');
+});
+
+test('Vinted Team Rocket owner title defaults composite Mimikyu payload', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/38-mimikyu-team-rocket', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /mimikyu/i.test(String(title || '')) ? 'Mimikyu' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Mimikyu del Team Rocket Full Art pokemon';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const selectedLabels = processor.selectedKeywordLabels();
+    assert.ok(labels.includes("Team Rocket's Mimikyu"), 'owner/team composite chip should render');
+    assert.ok(labels.includes('Team Rocket'), 'Team Rocket expansion/context chip should remain visible');
+    assert.ok(labels.includes('Mimikyu'), 'individual species chip should remain clickable');
+    assert.ok(selectedLabels.includes("Team Rocket's Mimikyu"), 'owner/team composite should default selected');
+    assert.equal(selectedLabels.includes('Mimikyu'), false, 'generic species should be shadowed by owner/team composite');
+    assert.equal(messages[0].vintedPayload.name, "Team Rocket's Mimikyu");
+    assert.equal(messages[0].vintedPayload.rarity, 'illustration');
+    assert.deepEqual(Array.from(messages[0].primaryClues), ["Team Rocket's Mimikyu"]);
+    assert.equal(messages[0].title, "Team Rocket's Mimikyu illustration");
+});
+
 test('Vinted keyword defaults select Pokemon-name-like and variation clues', () => {
     const appended = [];
     const chips = [];
@@ -1999,6 +2492,60 @@ test('Vinted fullart title defaults illustration clue on', async () => {
     assert.equal(messages[0].title, 'Froslass illustration');
 });
 
+test('Vinted Holo stays a weak feature and cannot outrank Espeon name', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/92-espeon-holo-neo', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => {
+                const value = String(title || '').trim().toLowerCase();
+                if (value === 'espeon' || value === 'espeon holo') {
+                    return { pokemonName: 'Espeon' };
+                }
+                if (value === 'holo') {
+                    return { pokemonName: 'Holon' };
+                }
+                return { pokemonName: null };
+            },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Espeon Holo neo discovery';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Olografia tenuta perfettamente');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const holoKeyword = processor.currentKeywords.find((keyword) => keyword.compact === 'holo');
+    processor.selectedKeywordValues.add(holoKeyword.compact);
+    const payloadWithHolo = processor.buildVintedPayload(processor.currentTitle, processor.selectedKeywordLabels());
+    assert.ok(labels.includes('Espeon'), 'Espeon should remain the name chip');
+    assert.ok(labels.includes('Holo'), 'Holo should remain available as a feature chip');
+    assert.ok(labels.includes('Neo Discovery'), 'Neo Discovery should be expansion evidence');
+    assert.equal(holoKeyword?.category, 'feature');
+    assert.equal(holoKeyword?.nameLike, false);
+    assert.deepEqual([...messages[0].primaryClues], ['Espeon']);
+    assert.equal(messages[0].vintedPayload.name, 'Espeon');
+    assert.equal(messages[0].vintedPayload.expansion, 'Neo Discovery');
+    assert.equal(payloadWithHolo.name, 'Espeon');
+    assert.equal(payloadWithHolo.features.includes('Holo'), true);
+    assert.doesNotMatch(messages[0].title, /Holon/i);
+});
+
 test('Vinted selected keyword toggles shape background and side-panel messages', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -2202,6 +2749,28 @@ test('background ranks selected tag-team composite above individual ex rows', ()
     assert.equal(sorted[0].card_id, 'tag-team');
 });
 
+test('background ranks Team Rocket owner composite above generic Mimikyu rows', () => {
+    const sandbox = loadBackgroundHelpers([
+        'sortRowsForStructuredCard',
+        'rowMatchesStructuredName',
+        'possibleCompositeTitleTerms',
+    ]);
+    const structuredCard = {
+        name: "Team Rocket's Mimikyu",
+        searchName: "Team Rocket's Mimikyu",
+        variation: '',
+    };
+    const rows = [
+        { card_id: 'generic-mimikyu', name: 'Mimikyu', set_name: 'Guardians Rising', card_number: '58/145', search_rank: 999 },
+        { card_id: 'team-rocket-mimikyu', name: "Team Rocket's Mimikyu", set_name: 'Destined Rivals', card_number: '245/182', search_rank: 50 },
+    ];
+
+    assert.ok(sandbox.possibleCompositeTitleTerms('Mimikyu del Team Rocket Full Art').includes("Team Rocket's Mimikyu"));
+    assert.equal(sandbox.rowMatchesStructuredName(rows[0], structuredCard), false);
+    assert.equal(sandbox.rowMatchesStructuredName(rows[1], structuredCard), true);
+    assert.equal(sandbox.sortRowsForStructuredCard(rows, structuredCard)[0].card_id, 'team-rocket-mimikyu');
+});
+
 test('background rejects plain Charizard ex when Mega X is selected', () => {
     const sandbox = loadBackgroundHelpers([
         'rowMatchesStructuredVariation',
@@ -2223,6 +2792,42 @@ test('background rejects plain Charizard ex when Mega X is selected', () => {
     assert.equal(sandbox.rowMatchesStructuredVariation(rows[0], structuredCard), false);
     assert.equal(sandbox.rowMatchesStructuredVariation(rows[1], structuredCard), true);
     assert.equal(sandbox.sortRowsForStructuredCard(rows, structuredCard)[0].card_id, 'mega-charizard-x-ex');
+});
+
+test('background accepts Mega Charizard descendants when only Mega Charizard is selected', () => {
+    const sandbox = loadBackgroundHelpers([
+        'normalizeMarketplacePayload',
+        'rowMatchesStructuredName',
+        'rowMatchesStructuredVariation',
+        'sortRowsForStructuredCard',
+    ]);
+    const marketplacePayload = sandbox.normalizeMarketplacePayload({
+        source: 'vinted',
+        name: 'Charizard',
+        searchTitle: 'Mega Charizard',
+        selectedClues: ['Mega Charizard'],
+        primaryClues: ['Mega Charizard'],
+        variation: 'Mega',
+    });
+    const structuredCard = marketplacePayload.structuredCard;
+    const rows = [
+        { card_id: 'plain-charizard-ex', name: 'Charizard ex', set_name: 'EX FireRed & LeafGreen', card_number: '105', search_rank: 999999 },
+        { card_id: 'mega-charizard-y-ex', name: 'Mega Charizard Y EX', set_name: 'Flashfire', card_number: '69/106', search_rank: 50 },
+        { card_id: 'mega-charizard-x-ex', name: 'Mega Charizard X EX', set_name: 'Flashfire', card_number: '13/94', search_rank: 40 },
+    ];
+    const acceptedRows = rows
+        .filter((row) => sandbox.rowMatchesStructuredName(row, structuredCard))
+        .filter((row) => sandbox.rowMatchesStructuredVariation(row, structuredCard));
+    const sorted = sandbox.sortRowsForStructuredCard(rows, structuredCard);
+
+    assert.equal(structuredCard.variation, 'Mega');
+    assert.deepEqual(Array.from(structuredCard.variationTokens), ['mega']);
+    assert.deepEqual(acceptedRows.map((row) => row.card_id), ['mega-charizard-y-ex', 'mega-charizard-x-ex']);
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[0], structuredCard), false);
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[1], structuredCard), true);
+    assert.equal(sorted[0].card_id, 'mega-charizard-y-ex');
+    assert.equal(sorted[1].card_id, 'mega-charizard-x-ex');
+    assert.equal(sorted.at(-1).card_id, 'plain-charizard-ex');
 });
 
 test('database-observed collector formats stay atomic in marketplace parsers', () => {
@@ -2580,11 +3185,11 @@ test('Vinted overlay panel is fixed without a safe anchor', () => {
 
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(processor.currentPanelHost.style.position, 'fixed');
-    assert.equal(processor.currentPanelHost.style.left, '16px');
-    assert.equal(processor.currentPanelHost.style.top, '48px');
-    assert.equal(processor.currentPanelHost.style.bottom, '24px');
+    assert.equal(processor.currentPanelHost.style.left, '12px');
+    assert.equal(processor.currentPanelHost.style.top, '12px');
+    assert.equal(processor.currentPanelHost.style.bottom, 'auto');
     assert.equal(processor.currentPanelHost.style.right, 'auto');
-    assert.equal(processor.currentPanelHost.style.maxHeight, 'calc(100vh - 72px)');
+    assert.equal(processor.currentPanelHost.style.maxHeight, 'calc(100vh - 24px)');
     assert.equal(processor.currentPanelHost.style.pointerEvents, 'none');
     assert.equal(panel.style.pointerEvents, 'auto');
     assert.equal(bodyAppends[0], processor.currentPanelHost);
@@ -2621,8 +3226,7 @@ test('Vinted overlay collapse toggles chips and candidate preview', () => {
     assert.match(toggle.style.cssText, /width:\s*40px/);
     assert.match(toggle.style.cssText, /height:\s*40px/);
     assert.match(processor.currentButton.style.cssText, /flex:\s*1 1 auto/i);
-    assert.match(processor.currentButton.innerHTML, /Pokoin\.com/);
-    assert.doesNotMatch(processor.currentButton.innerHTML, /\(\d+\)/);
+    assert.match(processor.currentButton.innerHTML, /Pokoin\.com \(1 match\)/);
 
     processor.setVintedOverlayCollapsed(true);
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'true');
@@ -2640,8 +3244,7 @@ test('Vinted overlay collapse toggles chips and candidate preview', () => {
     assert.equal(preview.style.display, '');
     assert.equal(toggle.attributes['aria-expanded'], 'true');
     assert.equal(toggle.textContent, 'X');
-    assert.match(processor.currentButton.innerHTML, /Pokoin\.com/);
-    assert.doesNotMatch(processor.currentButton.innerHTML, /1 match/);
+    assert.match(processor.currentButton.innerHTML, /Pokoin\.com \(1 match\)/);
 });
 
 test('Vinted candidate preview uses viewport height and remains scrollable', () => {
@@ -2994,8 +3597,8 @@ test('Vinted background candidates use active blue styling and render preview', 
 
     assert.equal(processor.currentButton.style.background, '#0ea5e9');
     assert.equal(processor.currentButton.style.border, '2px solid #38bdf8');
-    assert.equal(processor.currentButton.innerHTML.includes('Pokoin.com'), true);
-    assert.equal(processor.currentButton.innerHTML.includes('(1)'), false);
+    assert.equal(processor.currentButton.innerHTML.includes('Pokoin.com (1 match)'), true);
+    assert.equal(processor.currentButton.attributes['data-pokoin-match-count'], '1');
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], undefined);
     assert.equal(appended.at(-1).previewResults[0].name_en, 'Dragonite V');
 });
@@ -3022,6 +3625,81 @@ test('Vinted unmatched button stays muted Pokoin blue', async () => {
     assert.equal(processor.currentButton.style.background, '#075985');
     assert.equal(processor.currentButton.style.border, '1px solid rgba(56, 189, 248, 0.35)');
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], 'true');
+    assert.equal(processor.currentButton.attributes['data-pokoin-match-count'], '0');
+});
+
+test('Vinted Mega Charizard overlay label counts found candidates only', async () => {
+    const messages = [];
+    const panel = createDomElement('div', { 'data-pokoin-vinted-panel': 'true' });
+    const button = createButtonStub();
+    button.contains = (target) => target === button;
+    panel.appendChild(button);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/223-mega-charizard-ex',
+                hostname: 'www.vinted.it',
+                pathname: '/items/223-mega-charizard-ex',
+            },
+            extractTitleInfo: (title) => ({
+                pokemonName: /charizard/i.test(String(title || '')) ? 'Charizard' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            querySelectorAll: () => [],
+            contains: (element) => panel.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: panel,
+        },
+    });
+    const processor = new Processor();
+    processor.currentPanel = panel;
+    processor.currentButton = button;
+    processor.currentTitle = 'Mega Charizard ex';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    const results = [
+        { blueprint_id: 'mega-charizard-ex-223', name_en: 'Mega Charizard ex', expansion_name_en: 'MEGA Dream ex', collector_number: '223', search_score: 99 },
+        { blueprint_id: 'mega-charizard-ex-766', name_en: 'Mega Charizard ex', expansion_name_en: 'MEGA Start Deck 100 Battle Collection', collector_number: '766', search_score: 98 },
+        { blueprint_id: 'mega-charizard-ex-085', name_en: 'Mega Charizard ex', expansion_name_en: 'MEGA Start Deck 100 Battle Collection', collector_number: '085', search_score: 97 },
+    ];
+
+    const searchSignature = processor.buildVintedSearchSignature(processor.currentTitle);
+    processor.applyVintedSearchResults(searchSignature, results, {
+        title: processor.currentTitle,
+        trigger: 'mega-charizard-regression',
+    });
+
+    const clueChips = processor.currentKeywords.length;
+    assert.ok(clueChips > results.length, 'test fixture should include extra title/context chips');
+    assert.equal(processor.currentMatchCount, 3);
+    assert.equal(processor.currentButton.attributes['data-pokoin-match-count'], '3');
+    assert.match(processor.currentButton.innerHTML, /Pokoin\.com \(3 matches\)/);
+    assert.doesNotMatch(processor.currentButton.innerHTML, new RegExp(`${clueChips}\\s+matches`));
+
+    processor.setVintedOverlayCollapsed(true);
+    assert.match(processor.currentButton.innerHTML, />3 matches</);
+    assert.doesNotMatch(processor.currentButton.innerHTML, /Pokoin\.com \(3 matches\)/);
+
+    await processor.openPokoinSidePanel();
+    const openMessage = messages.at(-1);
+    assert.equal(openMessage.action, 'openSidePanelForCurrentTab');
+    assert.deepEqual(openMessage.previewRows.map((row) => row.card_id), ['mega-charizard-ex-223', 'mega-charizard-ex-766', 'mega-charizard-ex-085']);
+    assert.deepEqual(openMessage.previewRows.map((row) => row.card_number), ['223', '766', '085']);
 });
 
 test('Vinted Pokoin button icon stays compact inside overlay reset', () => {
@@ -3364,6 +4042,12 @@ test('eBay overlay selected keys preserve RC collector and Radiant Collection ev
     const selectedLabels = processor.selectedKeywordLabels();
 
     assert.ok(host, 'eBay overlay host should render');
+    assert.equal(host.style.position, 'fixed');
+    assert.equal(host.style.left, '12px');
+    assert.equal(host.style.top, '12px');
+    assert.equal(host.style.bottom, 'auto');
+    assert.equal(host.style.maxHeight, 'calc(100vh - 24px)');
+    assert.equal(host.style.pointerEvents, 'none');
     assert.ok(panel.querySelectorAll('[data-pokoin-ebay-keyword]').length > 0, 'eBay key chips should render');
     assert.ok(selectedLabels.includes('Sylveon'), 'Pokemon name key should be selected');
     assert.ok(selectedLabels.includes('ex'), 'explicit variation key should be selected');
@@ -4028,6 +4712,39 @@ test('background parser maps fullart to illustration rarity', () => {
     assert.equal(structured.name, 'Froslass');
     assert.equal(structured.searchName, 'Froslass');
     assert.equal(structured.rarity, 'illustration');
+});
+
+test('background expands selected illustration rarity into backend aliases', () => {
+    const sandbox = loadBackgroundHelpers([
+        'normalizeMarketplacePayload',
+        'buildStructuredFallbackQueries',
+        'sortRowsForStructuredCard',
+        'rarityMatchRank',
+    ]);
+    const marketplacePayload = sandbox.normalizeMarketplacePayload({
+        source: 'vinted',
+        name: 'Sprigatito',
+        searchTitle: 'Sprigatito illustration',
+        selectedClues: ['Sprigatito', 'illustration'],
+        primaryClues: ['Sprigatito'],
+        features: ['illustration'],
+        rarity: 'illustration',
+    });
+    const structuredCard = marketplacePayload.structuredCard;
+    const queries = sandbox.buildStructuredFallbackQueries(structuredCard, 'Sprigatito illustration');
+    const rows = [
+        { card_id: 'generic', name: 'Sprigatito', set_name: 'Scarlet Violet', card_number: '13/198', rarity: 'Common', search_rank: 999 },
+        { card_id: 'illustration-rare', name: 'Sprigatito', set_name: 'Scarlet Violet', card_number: '196/198', rarity: 'Illustration Rare', search_rank: 20 },
+        { card_id: 'special-illustration', name: 'Sprigatito', set_name: 'Promo', card_number: '204/191', rarity: 'Special Illustration Rare', search_rank: 10 },
+    ];
+
+    assert.deepEqual(Array.from(structuredCard.rarityAliases), ['Illustration Rare', 'Special Illustration Rare', 'full art', 'illustration']);
+    assert.ok(queries.includes('Sprigatito Illustration Rare'));
+    assert.ok(queries.includes('Sprigatito Special Illustration Rare'));
+    assert.equal(sandbox.rarityMatchRank(rows[1], structuredCard), 0);
+    assert.equal(sandbox.rarityMatchRank(rows[0], structuredCard), 9);
+    assert.equal(sandbox.sortRowsForStructuredCard(rows, structuredCard)[0].card_id, 'illustration-rare');
+    assert.equal(sandbox.sortRowsForStructuredCard(rows, structuredCard).at(-1).card_id, 'generic');
 });
 
 test('background keeps Base Set family above Expedition Base Set', () => {
