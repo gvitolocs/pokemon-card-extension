@@ -9,7 +9,7 @@ The extension is now centered on a selected-key-first workflow:
 - Vinted and eBay render a top-left transparent overlay with a Pokoin button, selectable clue chips, and preview candidates.
 - Selected chips are the canonical first search layer. Raw title scraping and autocomplete fallback happen only after selected-key search is unavailable or insufficient.
 - Vinted/eBay selected payloads carry structured fields: `name`, `variation`, `variationTokens`, `collectorNumber`, `numericCollectorNumber`, `expansion`, `features`, `rarity`, and now `rarityAliases`.
-- Cardvault `POST /api/marketplace-autocomplete` is now the fast name-index canonicalization path for missing, ambiguous, or misspelled names. The background resolver caches by normalized query/language/source/selected clue signature and skips standalone context tokens such as `holo`, `delta`, `illustration`, level text, expansion names, condition words, and collector numbers.
+- The background tries `POST /api/searchbar-token-predict` as the lightweight name-token step before heavier `POST /api/marketplace-autocomplete` canonicalization. The autocomplete resolver caches by normalized query/language/source/selected clue signature and skips standalone context tokens such as `holo`, `delta`, `illustration`, level text, expansion names, condition words, and collector numbers.
 - Cardmarket uses a readiness-gated product parser and sends scrape observations to Pokoin after matching.
 - CardTrader direct URLs use the blueprint id from the URL and bypass generic search.
 

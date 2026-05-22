@@ -8,8 +8,6 @@ const elements = {
     pokoinFrame: document.getElementById('pokoinFrame'),
     candidatesSection: document.getElementById('candidatesSection'),
     candidateList: document.getElementById('candidateList'),
-    runtimeInfo: document.getElementById('runtimeInfo'),
-    debugInfo: document.getElementById('debugInfo'),
 };
 
 function setStatus(message, isError = false) {
@@ -44,6 +42,65 @@ function cardUrl(rowOrBlueprintId) {
 
 function cardTraderUrl(blueprintId) {
     return `${CARDVAULT_API_BASE_URL}/api/cardtrader-redirect?id=${encodeURIComponent(blueprintId)}`;
+}
+
+function canonicalFrameUrlKey(pathOrUrl = '') {
+    const absoluteUrl = absolutePokoinUrl(pathOrUrl);
+    if (!absoluteUrl) {
+        return '';
+    }
+
+    try {
+        const parsed = new URL(absoluteUrl);
+        const hostname = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+        const pathname = parsed.pathname.replace(/\/+$/, '') || '/';
+
+        const pokoinCardId = pathname.match(/^\/marketplace\/(?:[a-z]{2}\/)?cards\/([^/]+)/i)?.[1] || '';
+        if (hostname === 'pokoin.com' && pokoinCardId) {
+            return `pokoin-card:${decodeURIComponent(pokoinCardId)}`;
+        }
+
+        const cardTraderRedirectId = hostname === 'pokoin.com' && pathname === '/api/cardtrader-redirect'
+            ? parsed.searchParams.get('id') || ''
+            : '';
+        if (cardTraderRedirectId) {
+            return `pokoin-card:${cardTraderRedirectId}`;
+        }
+
+        const cardTraderBlueprintId = hostname.includes('cardtrader')
+            ? pathname.match(/^\/(?:[a-z]{2}\/)?cards\/(\d+)(?:-|\/|$)/i)?.[1] || ''
+            : '';
+        if (cardTraderBlueprintId) {
+            return `pokoin-card:${cardTraderBlueprintId}`;
+        }
+
+        const sortedSearch = [...parsed.searchParams.entries()]
+            .sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue))
+            .map(([key, value]) => `${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
+            .join('&');
+        return `${parsed.protocol}//${hostname}${pathname}${sortedSearch ? `?${sortedSearch}` : ''}`;
+    } catch (error) {
+        return absoluteUrl;
+    }
+}
+
+function updatePokoinFrameUrl(pathOrUrl = '') {
+    const nextUrl = absolutePokoinUrl(pathOrUrl);
+    const nextKey = canonicalFrameUrlKey(nextUrl);
+    const dataset = elements.pokoinFrame.dataset || (elements.pokoinFrame.dataset = {});
+    const currentUrl = dataset.pokoinUrl || elements.pokoinFrame.getAttribute?.('src') || elements.pokoinFrame.src || '';
+    const currentKey = dataset.pokoinUrlKey || canonicalFrameUrlKey(currentUrl);
+
+    if (nextKey && currentKey === nextKey) {
+        dataset.pokoinUrl = nextUrl;
+        dataset.pokoinUrlKey = nextKey;
+        return false;
+    }
+
+    elements.pokoinFrame.src = nextUrl;
+    dataset.pokoinUrl = nextUrl;
+    dataset.pokoinUrlKey = nextKey;
+    return true;
 }
 
 function nameFromCardTraderSlug(value = '') {
@@ -300,40 +357,17 @@ function renderCandidate(row, isBest = false) {
     return link;
 }
 
-function formatPhaseTimings(phaseTimings = {}) {
-    const labels = [
-        ['pageInfoMs', 'page'],
-        ['extensionSearchMs', 'exact'],
-        ['nameResolutionMs', 'name'],
-        ['extensionSearchAfterResolutionMs', 'post-name'],
-        ['autocompleteFallbackMs', 'fallback'],
-        ['totalMs', 'total'],
-    ];
-    return labels
-        .filter(([key]) => Number.isFinite(Number(phaseTimings[key])))
-        .map(([key, label]) => `${label} ${Math.round(Number(phaseTimings[key]))}ms`)
-        .join(' · ');
-}
-
 function renderState(state) {
     const pageInfo = state?.pageInfo || {};
     const best = state?.best || null;
     const blueprintId = state?.blueprintId || best?.card_id || '';
     const isCardTraderDirect = Boolean(pageInfo.cardtraderBlueprintId || best?.source === 'cardtrader_url');
-    const buildMarker = state?.debug?.buildMarker || pageInfo.debug?.buildMarker || '';
-    const extensionVersion = state?.debug?.extensionVersion || pageInfo.debug?.extensionVersion || '';
 
     elements.frameSection.hidden = true;
     elements.candidatesSection.hidden = true;
     elements.frameSection.classList.toggle('frame-section-direct', false);
     document.body.classList.toggle('direct-card-view', false);
     elements.candidateList.replaceChildren();
-    elements.runtimeInfo.textContent = [extensionVersion && `v${extensionVersion}`, buildMarker].filter(Boolean).join(' · ');
-    elements.runtimeInfo.hidden = !elements.runtimeInfo.textContent;
-    if (elements.debugInfo) {
-        elements.debugInfo.textContent = formatPhaseTimings(state?.debug?.phaseTimings);
-        elements.debugInfo.hidden = !elements.debugInfo.textContent;
-    }
 
     if (state?.error) {
         elements.cardName.textContent = 'No card loaded';
@@ -365,7 +399,7 @@ function renderState(state) {
     elements.cardName.textContent = isCardTraderDirect
         ? directCardDisplayName(pageInfo, best, blueprintId)
         : best.name || `Blueprint ${blueprintId}`;
-    elements.pokoinFrame.src = pokoinUrl;
+    updatePokoinFrameUrl(pokoinUrl);
 
     elements.frameSection.hidden = false;
     elements.frameSection.classList.toggle('frame-section-direct', isCardTraderDirect);

@@ -128,36 +128,6 @@ body.direct-card-view .panel {
     color: #fecaca;
 }
 
-.runtime-info {
-    margin: 0;
-    color: rgba(148, 163, 184, 0.8);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    font-size: 10px;
-    line-height: 1.35;
-}
-
-.panel-footer {
-    margin-top: auto;
-    padding: 10px 2px 0;
-    color: rgba(148, 163, 184, 0.72);
-}
-
-.panel-footer .runtime-info + .runtime-info {
-    margin-top: 3px;
-}
-
-body.direct-card-view .panel-footer {
-    position: fixed;
-    right: 10px;
-    bottom: 8px;
-    z-index: 1;
-    max-width: calc(100vw - 20px);
-    padding: 4px 7px;
-    border-radius: 999px;
-    background: rgba(2, 6, 23, 0.58);
-    pointer-events: none;
-}
-
 .candidates {
     margin: 10px 0 0;
     padding: 14px;

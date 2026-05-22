@@ -11357,7 +11357,11 @@ test('side panel renders direct CardTrader card as full panel with clean header'
         document: {
             body: { classList: bodyClassList },
             getElementById: (id) => elementsById.get(id),
-            createElement: (tagName) => createDomElement(tagName),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
         },
         chrome: {
             storage: {
@@ -11394,6 +11398,182 @@ test('side panel renders direct CardTrader card as full panel with clean header'
     assert.equal(elementsById.get('cardName').textContent, 'Charizard EX');
     assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/12345');
     assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+});
+
+test('side panel keeps Pokoin iframe alive for same cached URL updates', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const srcWrites = [];
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const frame = elementsById.get('pokoinFrame');
+    let frameSrc = '';
+    Object.defineProperty(frame, 'src', {
+        get: () => frameSrc,
+        set: (value) => {
+            srcWrites.push(value);
+            frameSrc = value;
+        },
+    });
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    const pokoinUrl = 'https://pokoin.com/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates';
+    sandbox.renderState({
+        pageInfo: { title: 'Mew ex 232/091', url: 'https://www.vinted.it/items/50-mew-ex' },
+        best: { card_id: '548832', name: 'Mew ex', pokoin_price: '10 PKN' },
+        blueprintId: '548832',
+        pokoinUrl,
+        rows: [{ card_id: '548832', name: 'Mew ex', pokoin_price: '10 PKN' }],
+        debug: { phaseTimings: { totalMs: 100 } },
+    });
+    sandbox.renderState({
+        pageInfo: { title: 'Mew ex 232/091', url: 'https://www.vinted.it/items/50-mew-ex' },
+        best: { card_id: '548832', name: 'Mew ex', pokoin_price: '12 PKN' },
+        blueprintId: '548832',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/548832',
+        rows: [
+            { card_id: '548832', name: 'Mew ex', pokoin_price: '12 PKN' },
+            { card_id: '999999', name: 'Mew ex alternate', pokoin_price: '8 PKN' },
+        ],
+        debug: { phaseTimings: { totalMs: 25 } },
+    });
+    sandbox.renderState({
+        pageInfo: { title: 'Charizard V', url: 'https://www.vinted.it/items/51-charizard-v' },
+        best: { card_id: '777777', name: 'Charizard V' },
+        blueprintId: '777777',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/777777/charizard-v',
+        rows: [{ card_id: '777777', name: 'Charizard V' }],
+    });
+
+    assert.deepEqual(srcWrites, [
+        pokoinUrl,
+        'https://pokoin.com/marketplace/en/cards/777777/charizard-v',
+    ]);
+    assert.equal(elementsById.get('pokoinFrame'), frame, 'same iframe node should remain mounted');
+    assert.equal(elementsById.get('candidateList').children[0].href, 'https://pokoin.com/marketplace/en/cards/777777');
+    assert.equal(elementsById.get('frameSection').hidden, false);
+});
+
+test('side panel keeps direct CardTrader iframe alive for same blueprint URL', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const srcWrites = [];
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const frame = elementsById.get('pokoinFrame');
+    let frameSrc = '';
+    Object.defineProperty(frame, 'src', {
+        get: () => frameSrc,
+        set: (value) => {
+            srcWrites.push(value);
+            frameSrc = value;
+        },
+    });
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    const directState = {
+        pageInfo: {
+            title: 'https://www.cardtrader.com/en/cards/12345-charizard-v',
+            url: 'https://www.cardtrader.com/en/cards/12345-charizard-v',
+            structuredCard: {},
+            cardtraderBlueprintId: '12345',
+        },
+        best: {
+            card_id: '12345',
+            name: 'https://www.cardtrader.com/en/cards/12345-charizard-v',
+            source: 'cardtrader_url',
+        },
+        blueprintId: '12345',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/12345',
+        rows: [],
+    };
+    sandbox.renderState(directState);
+    sandbox.renderState({
+        ...directState,
+        debug: { phaseTimings: { totalMs: 10 } },
+        pokoinUrl: 'https://www.cardtrader.com/en/cards/12345-charizard-v',
+        rows: [{ card_id: '12345', name: 'Charizard V', pokoin_price: '22 PKN' }],
+    });
+
+    assert.deepEqual(srcWrites, ['https://pokoin.com/marketplace/en/cards/12345']);
+    assert.equal(elementsById.get('pokoinFrame'), frame, 'direct view should reuse the iframe node');
     assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
     assert.equal(bodyClassList.contains('direct-card-view'), true);
     assert.equal(elementsById.get('candidatesSection').hidden, true);
@@ -12089,13 +12269,14 @@ test('visible Best candidates headings are removed from side panel and Vinted pr
     assert.match(vintedSource, /results\.slice\(0,\s*8\)/, 'candidate preview should still render candidates');
 });
 
-test('side panel runtime marker is footer metadata', () => {
+test('side panel runtime marker is not rendered visibly', () => {
     const sidePanelHtml = readRepoFile('ui-pages/sidepanel.html');
     const sidePanelCss = readRepoFile('ui-pages/sidepanel.css');
+    const sidePanelSource = readRepoFile('ui-pages/sidepanel.js');
 
-    assert.match(sidePanelHtml, /<footer class="panel-footer"[^>]*>[\s\S]*id="runtimeInfo"[\s\S]*id="debugInfo"[\s\S]*<\/footer>/);
-    assert.match(sidePanelCss, /\.panel-footer\s*\{[^}]*margin-top:\s*auto/s);
-    assert.doesNotMatch(sidePanelHtml, /<section id="status"[\s\S]*id="runtimeInfo"[\s\S]*<section id="candidatesSection"/);
+    assert.doesNotMatch(sidePanelHtml, /id="runtimeInfo"|id="debugInfo"|class="panel-footer"|Build information/i);
+    assert.doesNotMatch(sidePanelCss, /\.runtime-info|\.panel-footer/);
+    assert.doesNotMatch(sidePanelSource, /runtimeInfo|debugInfo|formatPhaseTimings/);
 });
 
 test('all marketplace buttons use the side panel message workflow', () => {
