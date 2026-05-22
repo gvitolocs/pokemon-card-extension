@@ -115,6 +115,52 @@ class EbayProcessor {
         }
     }
 
+    createManualEbayKeyword(value = '') {
+        const candidates = [];
+        this.addKeywordCandidate(candidates, value, 'manual-input');
+        const keyword = candidates[0];
+        if (!keyword) {
+            return null;
+        }
+        const label = keyword.label || keyword.value || '';
+        const nameLike = this.isPokemonNameLikeClue(label);
+        const collectorNumber = this.isCollectorNumberClue(label);
+        const expansion = this.isExpansionClue(label);
+        const feature = this.isFeatureClue(label);
+        const variation = (this.isVariationClue(label) || this.isMegaFormClue(label, `${this.currentTitle} ${label}`)) && !expansion && !feature;
+        return {
+            ...keyword,
+            manual: true,
+            nameLike,
+            variation,
+            collectorNumber,
+            expansion,
+            feature,
+            selectedByDefault: true,
+            category: nameLike ? 'name' : collectorNumber ? 'collector' : expansion ? 'expansion' : variation ? 'variation' : feature ? 'feature' : 'context',
+        };
+    }
+
+    addManualEbayKeyword(value = '') {
+        const keyword = this.createManualEbayKeyword(value);
+        if (!keyword) {
+            return false;
+        }
+        const existing = this.currentKeywords.find((candidate) => candidate.compact === keyword.compact);
+        if (existing) {
+            this.selectedKeywordValues.add(existing.compact);
+            return false;
+        }
+        this.currentKeywords = [...this.currentKeywords, keyword];
+        this.selectedKeywordValues.add(keyword.compact);
+        return true;
+    }
+
+    triggerEbaySelectionRefresh(trigger = 'keyword-toggle') {
+        this.invalidateEbayPreviewForSelectionChange();
+        return this.runEbaySearch(this.currentTitle, trigger);
+    }
+
     isVariationClue(value = '') {
         return /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(value));
     }
@@ -839,9 +885,15 @@ class EbayProcessor {
                     set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
                     card_number: result.card_number || result.collector_number || result.collectorNumber || '',
                     expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                    preview_image_url: result.preview_image_url || result.previewImageUrl || result.image_url || result.imageUrl || result.cdn_image_url || '',
+                    image_url: result.image_url || result.imageUrl || result.cdn_image_url || result.cdnImageUrl || '',
                     source: result.source || 'ebay_overlay_preview',
                     search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
                     pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                    canonicalUrl: result.canonicalUrl || result.canonical_url || '',
+                    marketplaceUrl: result.marketplaceUrl || result.marketplace_url || '',
+                    canonicalPath: result.canonicalPath || result.canonical_path || '',
+                    marketplacePath: result.marketplacePath || result.marketplace_path || '',
                 };
             })
             .filter(Boolean);
@@ -861,9 +913,15 @@ class EbayProcessor {
                 set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
                 card_number: result.card_number || result.collector_number || result.collectorNumber || '',
                 expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                preview_image_url: result.preview_image_url || result.previewImageUrl || result.image_url || result.imageUrl || result.cdn_image_url || '',
+                image_url: result.image_url || result.imageUrl || result.cdn_image_url || result.cdnImageUrl || '',
                 source: result.source || 'ebay_overlay',
                 search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
                 pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                canonicalUrl: result.canonicalUrl || result.canonical_url || '',
+                marketplaceUrl: result.marketplaceUrl || result.marketplace_url || '',
+                canonicalPath: result.canonicalPath || result.canonical_path || '',
+                marketplacePath: result.marketplacePath || result.marketplace_path || '',
             },
         };
     }
@@ -1137,12 +1195,64 @@ class EbayProcessor {
                     this.selectedKeywordValues.add(keyword.compact);
                 }
                 this.applyKeywordChipStyle(chip, !isSelected);
-                this.invalidateEbayPreviewForSelectionChange();
-                this.runEbaySearch(this.currentTitle, 'keyword-toggle');
+                this.triggerEbaySelectionRefresh('keyword-toggle');
             }, true);
             container.appendChild(chip);
         });
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.setAttribute('data-pokoin-ebay-manual-clue-input', 'true');
+        input.setAttribute('aria-label', 'Add Pokoin search clue');
+        input.placeholder = 'Add clue...';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.style.cssText = `
+            flex: 0 1 120px;
+            width: 120px;
+            min-width: 92px;
+            max-width: 140px;
+            height: 26px;
+            box-sizing: border-box;
+            padding: 4px 8px;
+            border: 1px solid rgba(148, 163, 184, 0.55);
+            border-radius: 999px;
+            background: rgba(2, 6, 23, 0.78);
+            color: #f8fafc;
+            font: 12px/1.2 Arial, sans-serif;
+            outline: none;
+            pointer-events: auto;
+        `;
+        const submitManualClue = () => {
+            const value = input.value || '';
+            input.value = '';
+            const beforeSignature = this.buildEbaySearchSignature(this.buildSelectedEbayPayload(this.currentTitle || document.title));
+            this.addManualEbayKeyword(value);
+            const afterSignature = this.buildEbaySearchSignature(this.buildSelectedEbayPayload(this.currentTitle || document.title));
+            if (afterSignature === beforeSignature) {
+                return;
+            }
+            this.renderKeywordTogglesFromCurrent();
+            this.triggerEbaySelectionRefresh('manual-clue');
+        };
+        input.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            submitManualClue();
+        }, true);
+        input.addEventListener('blur', submitManualClue, true);
+        container.appendChild(input);
         this.ensureEbayPanel().appendChild(container);
+    }
+
+    renderKeywordTogglesFromCurrent() {
+        this.removeOwnedPanelChildren('[data-pokoin-ebay-keywords]');
+        if (!this.currentButton || this.currentKeywords.length === 0) {
+            return;
+        }
+        this.renderKeywordToggles(this.currentTitle || document.title, this.extractEbayDetails());
     }
 
     compactCandidateMeta(result = {}) {

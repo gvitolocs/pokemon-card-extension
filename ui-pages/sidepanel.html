@@ -20,8 +20,6 @@
 
     <main class="panel">
         <section id="status" class="status">Finding Pokoin matches...</section>
-        <p id="runtimeInfo" class="runtime-info" hidden></p>
-        <p id="debugInfo" class="runtime-info debug-info" hidden></p>
 
         <section id="candidatesSection" class="candidates" aria-label="Candidate cards" hidden>
             <div id="candidateList"></div>
@@ -31,6 +29,10 @@
             <iframe id="pokoinFrame" title="Pokoin card detail"></iframe>
         </section>
 
+        <footer class="panel-footer" aria-label="Build information">
+            <p id="runtimeInfo" class="runtime-info" hidden></p>
+            <p id="debugInfo" class="runtime-info debug-info" hidden></p>
+        </footer>
     </main>
 
     <script src="sidepanel.js"></script>

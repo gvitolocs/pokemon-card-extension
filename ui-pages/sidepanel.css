@@ -129,11 +129,33 @@ body.direct-card-view .panel {
 }
 
 .runtime-info {
-    margin: -4px 2px 8px;
+    margin: 0;
     color: rgba(148, 163, 184, 0.8);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-size: 10px;
     line-height: 1.35;
+}
+
+.panel-footer {
+    margin-top: auto;
+    padding: 10px 2px 0;
+    color: rgba(148, 163, 184, 0.72);
+}
+
+.panel-footer .runtime-info + .runtime-info {
+    margin-top: 3px;
+}
+
+body.direct-card-view .panel-footer {
+    position: fixed;
+    right: 10px;
+    bottom: 8px;
+    z-index: 1;
+    max-width: calc(100vw - 20px);
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: rgba(2, 6, 23, 0.58);
+    pointer-events: none;
 }
 
 .candidates {
@@ -183,7 +205,7 @@ iframe {
 
 .candidate {
     display: grid;
-    grid-template-columns: 44px minmax(0, 1fr);
+    grid-template-columns: 52px minmax(0, 1fr);
     align-items: center;
     gap: 12px;
     width: 100%;
@@ -206,15 +228,15 @@ iframe {
     background: rgba(14, 165, 233, 0.12);
 }
 
-.candidate-logo-slot {
-    width: 42px;
-    height: 42px;
+.candidate-media-slot {
+    width: 48px;
+    height: 48px;
     display: grid;
     place-items: center;
     flex: 0 0 auto;
 }
 
-.candidate-logo-empty::before {
+.candidate-media-empty::before {
     content: "";
     width: 28px;
     height: 28px;
@@ -226,6 +248,13 @@ iframe {
 .candidate-logo {
     max-width: 42px;
     max-height: 42px;
+    object-fit: contain;
+}
+
+.candidate-preview-image {
+    max-width: 48px;
+    max-height: 48px;
+    border-radius: 8px;
     object-fit: contain;
 }
 
@@ -256,17 +285,22 @@ iframe {
 
 @media (max-width: 360px) {
     .candidate {
-        grid-template-columns: 34px 1fr;
+        grid-template-columns: 38px 1fr;
     }
 
-    .candidate-logo-slot {
-        width: 32px;
-        height: 32px;
+    .candidate-media-slot {
+        width: 34px;
+        height: 34px;
     }
 
     .candidate-logo {
         max-width: 32px;
         max-height: 32px;
+    }
+
+    .candidate-preview-image {
+        max-width: 34px;
+        max-height: 34px;
     }
 
 }

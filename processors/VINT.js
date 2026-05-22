@@ -169,6 +169,7 @@ class VintedProcessor {
             'near', 'mint', 'excellent', 'good', 'played', 'used', 'usata', 'usato',
             'vendo', 'vendita', 'spedizione', 'scambio', 'scrivimi', 'lotto', 'lot', 'bundle',
             'originale', 'original', 'italiano', 'italiana', 'inglese', 'english', 'japanese', 'giapponese',
+            'liv', 'lv', 'level', 'specie',
         ]);
     }
 
@@ -235,7 +236,7 @@ class VintedProcessor {
     }
 
     isVariationClue(value = '') {
-        return /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/i.test(this.normalizeClueValue(value));
+        return /\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break|delta(?:\s+species)?|species\s+delta|specie\s+delta)\b/i.test(this.normalizeClueValue(value));
     }
 
     displayVariationToken(value = '') {
@@ -254,13 +255,17 @@ class VintedProcessor {
             break: 'BREAK',
             x: 'X',
             y: 'Y',
+            delta: 'Delta Species',
+            deltaspecies: 'Delta Species',
+            speciesdelta: 'Delta Species',
+            speciedelta: 'Delta Species',
         };
         return labels[compact] || value;
     }
 
     variationClueValuesFromPhrase(value = '') {
         const source = this.normalizeClueValue(value);
-        const matches = source.match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi) || [];
+        const matches = source.match(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break|delta(?:\s+species)?|species\s+delta|specie\s+delta)\b/gi) || [];
         const megaFormMatches = /\bmega\b/i.test(source)
             ? (source.match(/\b[XY]\b/g) || [])
             : [];
@@ -278,7 +283,7 @@ class VintedProcessor {
     }
 
     vintedVariationCompacts() {
-        return ['vmax', 'vstar', 'ex', 'gx', 'v', 'lvx', 'mega', 'radiant', 'shining', 'prime', 'break', 'x', 'y'];
+        return ['vmax', 'vstar', 'ex', 'gx', 'v', 'lvx', 'mega', 'radiant', 'shining', 'prime', 'break', 'x', 'y', 'delta', 'deltaspecies', 'speciesdelta', 'speciedelta'];
     }
 
     isMegaFormClue(value = '', sourceText = '') {
@@ -304,7 +309,7 @@ class VintedProcessor {
                 return resolvedName;
             }
             const withoutVariation = normalized
-                .replace(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi, ' ')
+                .replace(/\b(?:vmax|vstar|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break|delta(?:\s+species)?|species\s+delta|specie\s+delta)\b/gi, ' ')
                 .replace(/\s+/g, ' ')
                 .trim();
             if (withoutVariation && withoutVariation !== normalized) {
@@ -360,6 +365,24 @@ class VintedProcessor {
         });
     }
 
+    addDeltaSpeciesCandidates(candidates, title = '') {
+        const source = this.normalizeClueValue(title)
+            .replace(/\bspecie\s+delta\b/gi, 'Delta Species')
+            .replace(/\bspecies\s+delta\b/gi, 'Delta Species')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (!/\bdelta(?:\s+species)?\b/i.test(source)) {
+            return;
+        }
+        const beforeDelta = source.match(/\b([A-Za-z][A-Za-z']*)\s+(?:delta(?:\s+species)?|Delta\s+Species)\b/i)?.[1] || '';
+        const afterDelta = source.match(/\b(?:delta(?:\s+species)?|Delta\s+Species)\s+([A-Za-z][A-Za-z']*)\b/i)?.[1] || '';
+        const name = this.normalizeClueValue(beforeDelta || afterDelta);
+        if (name && !this.vintedKeywordStopWords().has(name.toLowerCase())) {
+            this.addKeywordCandidate(candidates, `${name} Delta Species`, 'title-composite');
+        }
+        this.addKeywordCandidate(candidates, 'Delta Species', 'title-pattern');
+    }
+
     vintedTitleTokenSource(value = '') {
         return String(value || '')
             .replace(/([a-z])(\d{1,4}[a-z]?\s*\/\s*(?:[a-z]{0,6}\s*)?\d{1,4}[a-z]?)/gi, '$1 $2')
@@ -385,6 +408,81 @@ class VintedProcessor {
         }
     }
 
+    isManualVintedKeyword(keyword = {}) {
+        return keyword?.source === 'manual-input';
+    }
+
+    createManualVintedKeyword(value = '') {
+        const label = this.normalizeClueValue(value)
+            .replace(/\bspecie\s+delta\b/gi, 'Delta Species')
+            .replace(/\bspecies\s+delta\b/gi, 'Delta Species')
+            .replace(/\b(?:liv|lv|level)\.?\s*(\d{1,4}[a-z]?)\b/gi, 'Lv. $1')
+            .replace(/\btesori\s+misteriosi\b/gi, 'Mysterious Treasures')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const compact = this.compactClueValue(label);
+        if (!label || compact.length < 2) {
+            return null;
+        }
+
+        const manualKeyword = {
+            label,
+            value: label,
+            compact,
+            source: 'manual-input',
+            selectedByDefault: true,
+            manual: true,
+        };
+        const nameLike = this.isPokemonNameLikeClue(manualKeyword);
+        const variation = this.isVariationClue(label);
+        const collectorNumber = this.isCollectorNumberClue(label);
+        const levelNumber = this.isLevelNumberClue(label);
+        const expansion = this.isExpansionClue(label);
+        const illustration = this.isIllustrationClue(label) || this.isRarityFeatureClue(label);
+        return {
+            ...manualKeyword,
+            nameLike,
+            variation,
+            collectorNumber,
+            levelNumber,
+            expansion,
+            illustration,
+            attachedNamePhrase: this.isAttachedNamePhraseClue(manualKeyword),
+            attachedVariation: false,
+            category: this.vintedKeywordCategory({
+                ...manualKeyword,
+                nameLike,
+                variation,
+                collectorNumber,
+                levelNumber,
+                expansion,
+                illustration,
+                attachedNamePhrase: this.isAttachedNamePhraseClue(manualKeyword),
+            }),
+        };
+    }
+
+    addManualVintedKeyword(value = '') {
+        const keyword = this.createManualVintedKeyword(value);
+        if (!keyword) {
+            return false;
+        }
+        const existing = this.currentKeywords.find((candidate) => candidate.compact === keyword.compact);
+        if (existing) {
+            this.selectedKeywordValues.add(existing.compact);
+            return false;
+        }
+        this.currentKeywords = [...this.currentKeywords, keyword];
+        this.selectedKeywordValues.add(keyword.compact);
+        return true;
+    }
+
+    triggerVintedSelectionRefresh(trigger = 'keyword-toggle') {
+        this.invalidateVintedPreviewForSelectionChange();
+        this.sendVintedTokensReady(trigger);
+        return this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle, trigger);
+    }
+
     hasAttachedVariationForName(name = '', sourceText = '') {
         const nameCompact = this.compactClueValue(name);
         const normalizedSource = this.normalizeClueValue(sourceText);
@@ -398,7 +496,7 @@ class VintedProcessor {
         const aliasPatterns = Object.entries(this.targetedVintedNameAliases())
             .filter(([, canonicalName]) => this.compactClueValue(canonicalName) === nameCompact)
             .map(([alias]) => alias.split('').join('\\s*'));
-        const variationPattern = '(?:vmax|vstar|ex|gx|v|lv\\.?\\s*x|mega|radiant|shining|prime|break)';
+        const variationPattern = '(?:vmax|vstar|ex|gx|v|lv\\.?\\s*x|mega|radiant|shining|prime|break|delta(?:\\s+species)?|species\\s+delta|specie\\s+delta)';
         return [namePattern, ...aliasPatterns]
             .filter(Boolean)
             .some((pattern) => new RegExp(`\\b${pattern}\\s*${variationPattern}\\b`, 'i').test(normalizedSource));
@@ -503,6 +601,14 @@ class VintedProcessor {
             /\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i.test(label);
     }
 
+    isLevelNumberClue(value = '') {
+        return /\b(?:liv|lv|level)\.?\s*(\d{1,4}[a-z]?)\b/i.test(this.normalizeCollectorText(value));
+    }
+
+    normalizeVintedLevelNumber(value = '') {
+        return this.normalizeCollectorText(value).match(/\b(?:liv|lv|level)\.?\s*(\d{1,4}[a-z]?)\b/i)?.[1] || '';
+    }
+
     vintedCollectorNumberPatterns() {
         return [
             /\bPROMO\s+\d{1,4}[a-z]?\b/gi,
@@ -592,12 +698,13 @@ class VintedProcessor {
             { pattern: /\bevoluzioni\b/i, label: 'Evolutions' },
             { pattern: /\borigine\s+perduta\b/i, label: 'Lost Origin' },
             { pattern: /\bneo\s+discovery\b/i, label: 'Neo Discovery' },
+            { pattern: /\btesori\s+misteriosi\b/i, label: 'Mysterious Treasures' },
         ];
     }
 
     isExpansionClue(value = '') {
         return this.isBaseSetClue(value) ||
-            /\b(?:evolutions|evoluzioni|lost\s+origin|origine\s+perduta|neo\s+discovery|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
+            /\b(?:evolutions|evoluzioni|lost\s+origin|origine\s+perduta|neo\s+discovery|mysterious\s+treasures|tesori\s+misteriosi|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
     }
 
     sourceContainsClue(value = '', sourceText = '') {
@@ -614,6 +721,7 @@ class VintedProcessor {
     vintedKeywordCategory(keyword = {}) {
         if (keyword.nameLike || keyword.attachedNamePhrase) return 'name';
         if (keyword.collectorNumber) return 'collector';
+        if (keyword.levelNumber) return 'level';
         if (keyword.expansion) return 'expansion';
         if (keyword.variation || keyword.attachedVariation) return 'variation';
         if (keyword.illustration) return 'feature';
@@ -623,7 +731,7 @@ class VintedProcessor {
     limitVintedKeywords(keywords = [], limit = 10) {
         const limited = keywords.slice(0, limit);
         keywords
-            .filter((keyword) => keyword.illustration)
+            .filter((keyword) => keyword.illustration || keyword.levelNumber)
             .forEach((keyword) => {
                 if (limited.some((candidate) => candidate.compact === keyword.compact)) {
                     return;
@@ -632,6 +740,10 @@ class VintedProcessor {
                     .map((candidate, index) => ({ candidate, index }))
                     .reverse()
                     .find(({ candidate }) => !candidate.selectedByDefault && candidate.category === 'context')?.index ??
+                    [...limited]
+                        .map((candidate, index) => ({ candidate, index }))
+                        .reverse()
+                        .find(({ candidate }) => candidate.category === 'context')?.index ??
                     limited.length - 1;
                 if (replaceIndex >= 0) {
                     limited[replaceIndex] = keyword;
@@ -657,6 +769,7 @@ class VintedProcessor {
                     this.isMegaFormClue(compositeNormalizedCandidate, sourceText);
                 const baseSet = this.isBaseSetClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
                 const collectorNumber = this.isCollectorNumberClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
+                const levelNumber = this.isLevelNumberClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
                 const expansion = this.isExpansionClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
                 const illustration = this.isIllustrationClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value) ||
                     this.isRarityFeatureClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
@@ -664,9 +777,12 @@ class VintedProcessor {
                 const selectedNameLike = nameLike &&
                     (compositeName || !this.hasAttachedVariationForName(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value, sourceText));
                 const selectedHighConfidenceContext =
-                    (collectorNumber || expansion) &&
+                    (collectorNumber || levelNumber || expansion) &&
                     /^(?:title|title-pattern|title-expansion)$/.test(candidate.source || '') &&
-                    this.sourceContainsClue(candidate.label || candidate.value, sourceText);
+                    (
+                        this.sourceContainsClue(candidate.label || candidate.value, sourceText) ||
+                        (levelNumber && sourceText.includes(this.normalizeVintedLevelNumber(candidate.label || candidate.value)))
+                    );
                 const selectedIllustrationContext = illustration &&
                     (candidate.source === 'title-illustration' || /\bpromo\b/i.test(sourceText));
                 return {
@@ -676,6 +792,7 @@ class VintedProcessor {
                     variation,
                     baseSet,
                     collectorNumber,
+                    levelNumber,
                     expansion,
                     illustration,
                     attachedNamePhrase,
@@ -778,6 +895,9 @@ class VintedProcessor {
                 if (left.collectorNumber !== right.collectorNumber) {
                     return left.collectorNumber ? -1 : 1;
                 }
+                if (left.levelNumber !== right.levelNumber) {
+                    return left.levelNumber ? -1 : 1;
+                }
                 if (left.illustration !== right.illustration) {
                     return left.illustration ? -1 : 1;
                 }
@@ -824,10 +944,11 @@ class VintedProcessor {
         const candidates = [];
         this.addCompositeConnectorCandidates(candidates, tokenizedTitle);
         this.addOwnerTeamCompositeCandidates(candidates, tokenizedTitle);
+        this.addDeltaSpeciesCandidates(candidates, tokenizedTitle);
         const expansionHints = [
             'Base Set', 'Base Set 2', 'Base Set Shadowless', 'Jungle', 'Fossil', 'Team Rocket',
             'Evolutions',
-            'Legendary Treasures', 'Black Star Promos', 'Evolving Skies', 'Fusion Strike',
+            'Legendary Treasures', 'Mysterious Treasures', 'Black Star Promos', 'Evolving Skies', 'Fusion Strike',
             'Paldean Fates', 'Pokemon 151', 'Scarlet Violet', 'Obsidian Flames', 'Crown Zenith',
             'Chilling Reign', 'Silver Tempest', 'Brilliant Stars', 'Astral Radiance',
         ];
@@ -863,9 +984,16 @@ class VintedProcessor {
         ];
         collectorClues.forEach(({ label, source }) => this.addKeywordCandidate(candidates, label, source));
 
+        for (const match of tokenizedTitle.matchAll(/\b(?:liv|lv|level)\.?\s*(\d{1,4}[a-z]?)\b/gi)) {
+            this.addKeywordCandidate(candidates, `Lv. ${match[1]}`, 'title-pattern');
+        }
+        for (const match of tokenizedDescription.matchAll(/\b(?:liv|lv|level)\.?\s*(\d{1,4}[a-z]?)\b/gi)) {
+            this.addKeywordCandidate(candidates, `Lv. ${match[1]}`, 'pattern');
+        }
+
         const cluePatterns = [
             /\b(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|holo|promo|rare)\b/gi,
-            /\b(?:vmax|vstar|vastro|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break)\b/gi,
+            /\b(?:vmax|vstar|vastro|ex|gx|v|lv\.?\s*x|mega|radiant|shining|prime|break|delta(?:\s+species)?|species\s+delta|specie\s+delta)\b/gi,
         ];
         cluePatterns.forEach((pattern) => {
             for (const match of tokenizedTitle.matchAll(pattern)) {
@@ -894,6 +1022,16 @@ class VintedProcessor {
         const collectorCompacts = collectorClues.map(({ label }) => this.compactClueValue(label)).filter(Boolean);
         const collectorTokenCompacts = collectorClues
             .flatMap(({ label }) => label.split(/\s+/).map((token) => this.compactClueValue(token)).filter(Boolean));
+        const protectedEvidenceCompacts = [
+            ...collectorTokenCompacts,
+            ...candidates
+                .filter((candidate) => this.isLevelNumberClue(candidate.label || candidate.value))
+                .flatMap((candidate) => [
+                    this.compactClueValue(candidate.label || candidate.value),
+                    this.compactClueValue(this.normalizeVintedLevelNumber(candidate.label || candidate.value)),
+                ])
+                .filter(Boolean),
+        ];
         const phraseOverlapsCollector = (phrase) => {
             const compactPhrase = this.compactClueValue(phrase);
             return collectorCompacts.some((collectorCompact) =>
@@ -904,7 +1042,7 @@ class VintedProcessor {
                 phrase.split(/\s+/)
                     .map((token) => this.compactClueValue(token))
                     .filter(Boolean)
-                    .some((token) => collectorTokenCompacts.includes(token) && !collectorCompacts.includes(compactPhrase));
+                    .some((token) => protectedEvidenceCompacts.includes(token) && !collectorCompacts.includes(compactPhrase));
         };
 
         for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
@@ -933,7 +1071,12 @@ class VintedProcessor {
         const selectedCompacts = new Set(
             this.currentKeywords
                 .filter((keyword) => this.selectedKeywordValues.has(keyword.compact))
-                .filter((keyword) => keyword.nameLike || keyword.attachedNamePhrase || keyword.attachedVariation)
+                .filter((keyword) =>
+                    keyword.nameLike ||
+                    keyword.attachedNamePhrase ||
+                    keyword.attachedVariation ||
+                    (this.isManualVintedKeyword(keyword) && !keyword.collectorNumber && !keyword.expansion && !keyword.illustration)
+                )
                 .map((keyword) => keyword.compact)
         );
 
@@ -989,17 +1132,26 @@ class VintedProcessor {
         const nameKeyword = selectedKeywords.find((keyword) => keyword.nameLike) ||
             selectedKeywords.find((keyword) => keyword.attachedNamePhrase);
         const collectorKeyword = keywordFor('collector');
+        const levelKeyword = keywordFor('level');
         const expansionKeyword = keywordFor('expansion');
         const featureKeywords = selectedKeywords.filter((keyword) => keyword.category === 'feature');
         const variationKeywords = selectedKeywords.filter((keyword) => keyword.category === 'variation');
+        const levelNumber = levelKeyword ? this.normalizeVintedLevelNumber(levelKeyword.value) : '';
         const variationValues = [
             ...variationKeywords.map((keyword) => keyword.value),
             ...selectedKeywords
                 .filter((keyword) => keyword.attachedNamePhrase)
                 .flatMap((keyword) => this.variationClueValuesFromPhrase(keyword.value)),
-        ].filter((value, index, all) =>
-            all.findIndex((candidate) => this.compactClueValue(candidate) === this.compactClueValue(value)) === index
-        );
+        ].filter((value, index, all) => {
+            const compact = this.compactClueValue(value);
+            if (!compact) {
+                return false;
+            }
+            if (compact === 'delta' || compact === 'speciedelta' || compact === 'speciesdelta') {
+                return !all.some((candidate) => this.compactClueValue(candidate) === 'deltaspecies');
+            }
+            return all.findIndex((candidate) => this.compactClueValue(candidate) === compact) === index;
+        });
         const name = nameKeyword
             ? (this.knownVintedCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
             : (primaryClues.find((clue) => !this.isVariationClue(clue)) || primaryClues[0] || '');
@@ -1023,6 +1175,7 @@ class VintedProcessor {
             numericCollectorNumber: collectorNumber ? this.numericVintedCollectorNumber(collectorNumber) : '',
             expansion: expansionKeyword?.value || '',
             features: featureKeywords.map((keyword) => keyword.value),
+            levelNumber,
             rarity: featureKeywords.some((keyword) => this.isIllustrationClue(keyword.value)) ? 'illustration' : '',
         };
     }
@@ -1156,11 +1309,18 @@ class VintedProcessor {
             .map((clue) => this.compactClueValue(clue))
             .filter(Boolean)
             .sort();
+        const payload = this.buildVintedPayload(title, clues);
         return [
             this.currentVintedListingKey(),
             this.compactClueValue(this.buildVintedSearchTitle(title, clues)),
             selectedClues.join(','),
             primaryClues.join(','),
+            this.compactClueValue(payload.name || ''),
+            this.compactClueValue(payload.variation || ''),
+            this.compactClueValue(payload.collectorNumber || ''),
+            this.compactClueValue(payload.expansion || ''),
+            this.compactClueValue(payload.levelNumber || ''),
+            String(this.currentSelectionRevision || 0),
         ].join('|');
     }
 
@@ -1525,9 +1685,15 @@ class VintedProcessor {
                 set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
                 card_number: result.card_number || result.collector_number || result.collectorNumber || '',
                 expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                preview_image_url: result.preview_image_url || result.previewImageUrl || result.image_url || result.imageUrl || result.cdn_image_url || '',
+                image_url: result.image_url || result.imageUrl || result.cdn_image_url || result.cdnImageUrl || '',
                 source: result.source || 'vinted_overlay',
                 search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
                 pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                canonicalUrl: result.canonicalUrl || result.canonical_url || '',
+                marketplaceUrl: result.marketplaceUrl || result.marketplace_url || '',
+                canonicalPath: result.canonicalPath || result.canonical_path || '',
+                marketplacePath: result.marketplacePath || result.marketplace_path || '',
             },
         };
     }
@@ -1546,9 +1712,15 @@ class VintedProcessor {
                     set_name: result.set_name || result.expansion_name_en || result.expansionName || result.expansion_name || '',
                     card_number: result.card_number || result.collector_number || result.collectorNumber || '',
                     expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
+                    preview_image_url: result.preview_image_url || result.previewImageUrl || result.image_url || result.imageUrl || result.cdn_image_url || '',
+                    image_url: result.image_url || result.imageUrl || result.cdn_image_url || result.cdnImageUrl || '',
                     source: result.source || 'vinted_overlay_preview',
                     search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
                     pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                    canonicalUrl: result.canonicalUrl || result.canonical_url || '',
+                    marketplaceUrl: result.marketplaceUrl || result.marketplace_url || '',
+                    canonicalPath: result.canonicalPath || result.canonical_path || '',
+                    marketplacePath: result.marketplacePath || result.marketplace_path || '',
                 };
             })
             .filter(Boolean);
@@ -2364,14 +2536,76 @@ class VintedProcessor {
                     this.selectedKeywordValues.add(keyword.compact);
                 }
                 this.applyKeywordChipStyle(chip, !isSelected);
-                this.invalidateVintedPreviewForSelectionChange();
-                this.sendVintedTokensReady('keyword-toggle');
-                this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle, 'keyword-toggle');
+                this.triggerVintedSelectionRefresh('keyword-toggle');
             });
             container.appendChild(chip);
         });
 
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.setAttribute('data-pokoin-vinted-manual-clue-input', 'true');
+        input.setAttribute('aria-label', 'Add Pokoin search clue');
+        input.placeholder = 'Add clue...';
+        input.autocomplete = 'off';
+        input.spellcheck = false;
+        input.style.cssText = `
+            flex: 0 1 120px;
+            width: 120px;
+            min-width: 92px;
+            max-width: 140px;
+            height: 26px;
+            box-sizing: border-box;
+            padding: 4px 8px;
+            border: 1px solid rgba(148, 163, 184, 0.55);
+            border-radius: 999px;
+            background: rgba(2, 6, 23, 0.78);
+            color: #f8fafc;
+            font: 12px/1.2 Arial, sans-serif;
+            outline: none;
+            pointer-events: auto;
+        `;
+        const submitManualClue = () => {
+            const value = input.value || '';
+            input.value = '';
+            const beforeSignature = this.buildVintedSearchSignature(this.currentTitle, this.selectedKeywordLabels());
+            this.addManualVintedKeyword(value);
+            const afterSignature = this.buildVintedSearchSignature(this.currentTitle, this.selectedKeywordLabels());
+            if (afterSignature === beforeSignature) {
+                return;
+            }
+            this.renderKeywordTogglesFromCurrent();
+            this.triggerVintedSelectionRefresh('manual-clue');
+        };
+        input.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter') {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            submitManualClue();
+        });
+        input.addEventListener('blur', submitManualClue);
+        container.appendChild(input);
+
         this.ensureVintedPanel(this.currentTitleElement).appendChild(container);
+    }
+
+    renderKeywordTogglesFromCurrent() {
+        this.removeOwnedPanelChildren('[data-pokoin-vinted-keywords]');
+        if (!this.currentButton || this.currentKeywords.length === 0) {
+            return;
+        }
+        const existingKeywords = this.currentKeywords;
+        const existingSelection = new Set(this.selectedKeywordValues);
+        this.currentKeywords = existingKeywords;
+        this.selectedKeywordValues = existingSelection;
+        const originalPrepare = this.prepareVintedKeywords;
+        this.prepareVintedKeywords = () => {};
+        try {
+            this.renderKeywordToggles(this.currentTitle, '');
+        } finally {
+            this.prepareVintedKeywords = originalPrepare;
+        }
     }
 
     applyKeywordChipStyle(chip, selected) {

@@ -93,6 +93,67 @@ function loadBackgroundHelpers(helperNames = []) {
     return sandbox;
 }
 
+function loadBackgroundMessageHarness(overrides = {}) {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = overrides.storage || {};
+    const sandbox = {
+        console: overrides.console || { log() {}, warn() {}, error() {} },
+        document: { querySelector: () => null, querySelectorAll: () => [], title: '' },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: overrides.fetch || (async () => ({ ok: true, json: async () => ({}) })),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                get: async () => ({}),
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+                ...(overrides.tabs || {}),
+            },
+            scripting: { executeScript: async () => [], ...(overrides.scripting || {}) },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') {
+                            return { [key]: storage[key] };
+                        }
+                        if (Array.isArray(key)) {
+                            return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        }
+                        return { ...storage };
+                    },
+                    set: async (payload) => Object.assign(storage, payload),
+                    ...(overrides.sessionStorage || {}),
+                },
+                local: { set: async () => {}, ...(overrides.localStorage || {}) },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }), ...(overrides.sidePanel || {}) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} }, ...(overrides.action || {}) },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+    assert.equal(typeof messageListener, 'function', 'background should install a message listener');
+    return {
+        sandbox,
+        storage,
+        sendMessage: (request, sender = { tab: { id: 1, title: request.title || '', url: request.url || '' } }) =>
+            new Promise((resolve) => messageListener(request, sender, resolve)),
+    };
+}
+
 function loadPokoinAuthBridge(overrides = {}) {
     const source = readRepoFile('pokoin-auth-bridge.js');
     const messages = [];
@@ -404,8 +465,14 @@ function createDomElement(tagName = 'div', attributes = {}) {
             if (selector.startsWith('[data-pokoin-vinted-keyword]')) {
                 return this.attributes['data-pokoin-vinted-keyword'] !== undefined;
             }
+            if (selector.startsWith('[data-pokoin-vinted-manual-clue-input]')) {
+                return this.attributes['data-pokoin-vinted-manual-clue-input'] !== undefined;
+            }
             if (selector.startsWith('[data-pokoin-ebay-keyword]')) {
                 return this.attributes['data-pokoin-ebay-keyword'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-ebay-manual-clue-input]')) {
+                return this.attributes['data-pokoin-ebay-manual-clue-input'] !== undefined;
             }
             return false;
         },
@@ -1425,7 +1492,7 @@ test('background Vinted selected keys keep unselected title words out of search'
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -1511,6 +1578,426 @@ test('background Vinted selected keys keep unselected title words out of search'
     assert.ok(fetchBodies.every((entry) => !JSON.stringify(entry.body).match(/\bvolo\b/i)));
 });
 
+test('background autocomplete resolver canonicalizes misspelled selected name before exact retry', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/searchbar-token-predict')) {
+                return { ok: true, json: async () => ({ ok: true, predictions: [] }) };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                if (body.name === 'Zecrom') {
+                    return { ok: true, json: async () => ({ matches: [] }) };
+                }
+                assert.equal(body.name, 'Zekrom');
+                assert.equal(body.collectorNumber, '050/99');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'zekrom-050', name: 'Zekrom', expansionName: 'Next Destinies', collectorNumber: '050/99', score: 99 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                if (body.result_limit === 20) {
+                    assert.equal(body.search_term, 'Zecrom');
+                    assert.equal(body.pool_limit, 1000);
+                    assert.equal(body.search_language, 'en');
+                    assert.ok(body.search_session_id);
+                }
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: [
+                            { card_id: 'zekrom-name', name: 'Zekrom', canonical_name: 'Zekrom', search_rank: 100 },
+                        ],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+
+    const response = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'Zecrom 050/99',
+        originalTitle: 'Zecrom holo50/99',
+        url: 'https://www.vinted.it/items/501-zecrom-050-99',
+        selectedClues: ['Zecrom', '050/99'],
+        clues: ['Zecrom', '050/99'],
+        primaryClues: ['Zecrom'],
+        previewSignature: 'vinted|zecrom|050-99',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/501-zecrom-050-99',
+            originalTitle: 'Zecrom holo50/99',
+            searchTitle: 'Zecrom 050/99',
+            name: 'Zecrom',
+            collectorNumber: '050/99',
+            numericCollectorNumber: '050',
+            selectedClues: ['Zecrom', '050/99'],
+            primaryClues: ['Zecrom'],
+        },
+    }, { tab: { id: 501, title: 'Zecrom holo50/99', url: 'https://www.vinted.it/items/501-zecrom-050-99' } });
+
+    assert.equal(response.success, true, JSON.stringify(response));
+    assert.equal(response.results[0].blueprint_id, 'zekrom-050');
+    const extensionNames = fetchBodies
+        .filter((entry) => entry.url.includes('/api/extension-card-search'))
+        .map((entry) => entry.body.name)
+        .filter(Boolean);
+    assert.deepEqual(extensionNames, ['Zecrom', 'Zekrom']);
+});
+
+test('background uses searchbar token prediction before heavy autocomplete name resolver', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/searchbar-token-predict')) {
+                assert.equal(body.query, 'Mewt');
+                assert.equal(body.search_language, 'en');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        ok: true,
+                        predictions: [{
+                            display_token: 'Mewtwo',
+                            normalized_token: 'mewtwo',
+                            confidence: 94,
+                            source_rank: 1,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                if (body.name === 'Mewt') {
+                    return { ok: true, json: async () => ({ matches: [] }) };
+                }
+                assert.equal(body.name, 'Mewtwo');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            cardId: 'mewtwo-150',
+                            name: 'Mewtwo',
+                            expansionName: 'Base Set',
+                            collectorNumber: '150',
+                            score: 99,
+                        }],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                throw new Error('token prediction should avoid heavy autocomplete resolver');
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+
+    const response = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'Mewt 150',
+        originalTitle: 'Mewt 150',
+        url: 'https://www.vinted.it/items/150-mewt',
+        selectedClues: ['Mewt', '150'],
+        clues: ['Mewt', '150'],
+        primaryClues: ['Mewt'],
+        previewSignature: 'vinted|mewt|150',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/150-mewt',
+            originalTitle: 'Mewt 150',
+            searchTitle: 'Mewt 150',
+            name: 'Mewt',
+            collectorNumber: '150',
+            numericCollectorNumber: '150',
+            selectedClues: ['Mewt', '150'],
+            primaryClues: ['Mewt'],
+        },
+    }, { tab: { id: 150, title: 'Mewt 150', url: 'https://www.vinted.it/items/150-mewt' } });
+
+    assert.equal(response.success, true, JSON.stringify(response));
+    assert.equal(response.results[0].blueprint_id, 'mewtwo-150');
+    assert.ok(fetchBodies.some((entry) => entry.url.includes('/api/searchbar-token-predict')));
+    assert.equal(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), false);
+});
+
+test('background autocomplete resolver skips standalone feature and context clues', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/searchbar-token-predict')) {
+                return { ok: true, json: async () => ({ ok: true, predictions: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return { ok: true, json: async () => ({ matches: [] }) };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.doesNotMatch(body.search_term || '', /^(?:holo|delta|illustration|liv\.?\s*53|liv 53|Evolutions)$/i);
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+
+    await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'holo delta illustration Lv. 53 Evolutions 25/108',
+        originalTitle: 'holo delta illustration liv 53 Evoluzioni',
+        url: 'https://www.vinted.it/items/502-context-only',
+        selectedClues: ['holo', 'delta', 'illustration', 'liv 53', 'Evolutions', '25/108'],
+        clues: ['holo', 'delta', 'illustration', 'liv 53', 'Evolutions', '25/108'],
+        primaryClues: [],
+        previewSignature: 'vinted|context-only',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/502-context-only',
+            originalTitle: 'holo delta illustration liv 53 Evoluzioni',
+            searchTitle: 'holo delta illustration Lv. 53 Evolutions 25/108',
+            name: '',
+            variation: '',
+            collectorNumber: '25/108',
+            numericCollectorNumber: '25',
+            selectedClues: ['holo', 'delta', 'illustration', 'liv 53', 'Evolutions', '25/108'],
+            primaryClues: [],
+            features: ['holo', 'delta', 'illustration'],
+        },
+    }, { tab: { id: 502, title: 'holo delta illustration liv 53 Evoluzioni', url: 'https://www.vinted.it/items/502-context-only' } });
+
+    const resolverQueries = fetchBodies
+        .filter((entry) => entry.url.includes('/api/marketplace-autocomplete'))
+        .map((entry) => entry.body.search_term);
+    assert.equal(resolverQueries.some((query) => /^(?:holo|delta|illustration|liv|Evolutions)$/i.test(query)), false);
+});
+
+test('background autocomplete resolver cache reuses same selected clue signature', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return { ok: true, json: async () => ({ matches: [] }) };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: [
+                            { card_id: 'sprigatito-name', name: 'Sprigatito', canonical_name: 'Sprigatito', search_rank: 100 },
+                        ],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+    const request = {
+        action: 'searchCardForTitle',
+        title: 'Sprigatito',
+        originalTitle: 'Sprigatito illustration',
+        url: 'https://www.vinted.it/items/503-sprigatito',
+        selectedClues: ['Sprigatito'],
+        clues: ['Sprigatito'],
+        primaryClues: ['Sprigatito'],
+        previewSignature: 'vinted|sprigatito|a',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/503-sprigatito',
+            originalTitle: 'Sprigatito illustration',
+            searchTitle: 'Sprigatito',
+            name: 'Sprigatito',
+            selectedClues: ['Sprigatito'],
+            primaryClues: ['Sprigatito'],
+        },
+    };
+    const sender = { tab: { id: 503, title: 'Sprigatito illustration', url: request.url } };
+
+    await sendMessage(request, sender);
+    const autocompleteAfterFirst = fetchBodies.filter((entry) =>
+        entry.url.includes('/api/marketplace-autocomplete') && entry.body.result_limit === 20
+    ).length;
+    await sendMessage({ ...request, forceRefresh: true }, sender);
+    const autocompleteAfterSecond = fetchBodies.filter((entry) =>
+        entry.url.includes('/api/marketplace-autocomplete') && entry.body.result_limit === 20
+    ).length;
+
+    assert.equal(autocompleteAfterFirst, 1);
+    assert.equal(autocompleteAfterSecond, 1, 'same selected clue signature should reuse resolver cache even on forced search');
+});
+
+test('background autocomplete resolver changes query for changed manual clue signature', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                return { ok: true, json: async () => ({ matches: [] }) };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                const rows = body.search_term === 'Mimikyu'
+                    ? []
+                    : [{ card_id: `${body.search_term}-name`, name: body.search_term, canonical_name: body.search_term, search_rank: 100 }];
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows,
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+    const basePayload = {
+        source: 'vinted',
+        listingKey: 'https://www.vinted.it/items/504-manual',
+        originalTitle: 'manual name clue',
+        searchTitle: 'Mimikyu',
+        name: 'Mimikyu',
+        selectedClues: ['Mimikyu'],
+        primaryClues: ['Mimikyu'],
+    };
+    const baseRequest = {
+        action: 'searchCardForTitle',
+        title: 'Mimikyu',
+        originalTitle: 'manual name clue',
+        url: basePayload.listingKey,
+        selectedClues: ['Mimikyu'],
+        clues: ['Mimikyu'],
+        primaryClues: ['Mimikyu'],
+        previewSignature: 'vinted|manual|mimikyu',
+        selectionRevision: 1,
+        vintedPayload: basePayload,
+    };
+    const sender = { tab: { id: 504, title: 'manual name clue', url: basePayload.listingKey } };
+
+    await sendMessage(baseRequest, sender);
+    await sendMessage({
+        ...baseRequest,
+        title: 'Mimikyu Mabosstiff',
+        selectedClues: ['Mimikyu', 'Mabosstiff'],
+        clues: ['Mimikyu', 'Mabosstiff'],
+        primaryClues: ['Mimikyu', 'Mabosstiff'],
+        previewSignature: 'vinted|manual|mimikyu|mabosstiff',
+        selectionRevision: 2,
+        vintedPayload: {
+            ...basePayload,
+            searchTitle: 'Mimikyu Mabosstiff',
+            selectedClues: ['Mimikyu', 'Mabosstiff'],
+            primaryClues: ['Mimikyu', 'Mabosstiff'],
+        },
+    }, sender);
+
+    const resolverQueries = fetchBodies
+        .filter((entry) => entry.url.includes('/api/marketplace-autocomplete') && entry.body.result_limit === 20)
+        .map((entry) => entry.body.search_term);
+    assert.ok(resolverQueries.includes('Mimikyu'), JSON.stringify(resolverQueries));
+    assert.ok(resolverQueries.includes('Mabosstiff'), JSON.stringify(resolverQueries));
+});
+
+test('background autocomplete resolver keeps trainer composite name over shorter species', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                if (body.name === "Arven's Mabosstiff ex") {
+                    return {
+                        ok: true,
+                        json: async () => ({
+                            matches: [
+                                { cardId: 'arven-mabosstiff-ex', name: "Arven's Mabosstiff ex", expansionName: 'Scarlet Violet Promos', collectorNumber: '123', score: 99 },
+                            ],
+                        }),
+                    };
+                }
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'plain-mabosstiff', name: 'Mabosstiff ex', expansionName: 'Scarlet Violet', collectorNumber: '099', score: 100 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.match(body.search_term, /Arven's Mabosstiff ex/i);
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: [
+                            { card_id: 'plain-mabosstiff', name: 'Mabosstiff ex', canonical_name: 'Mabosstiff ex', search_rank: 100 },
+                            { card_id: 'arven-mabosstiff-ex', name: "Arven's Mabosstiff ex", canonical_name: "Arven's Mabosstiff ex", search_rank: 90 },
+                        ],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+
+    const response = await sendMessage({
+        action: 'searchCardForTitle',
+        title: "Arven's Mabosstiff ex",
+        originalTitle: "Arven's Mabosstiff ex",
+        url: 'https://www.vinted.it/items/505-arvens-mabosstiff',
+        selectedClues: ["Arven's Mabosstiff ex"],
+        clues: ["Arven's Mabosstiff ex"],
+        primaryClues: ["Arven's Mabosstiff ex"],
+        previewSignature: 'vinted|arvens-mabosstiff',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/505-arvens-mabosstiff',
+            originalTitle: "Arven's Mabosstiff ex",
+            searchTitle: "Arven's Mabosstiff ex",
+            name: "Arven's Mabosstiff ex",
+            variation: 'ex',
+            selectedClues: ["Arven's Mabosstiff ex"],
+            primaryClues: ["Arven's Mabosstiff ex"],
+        },
+    }, { tab: { id: 505, title: "Arven's Mabosstiff ex", url: 'https://www.vinted.it/items/505-arvens-mabosstiff' } });
+
+    assert.equal(response.success, true, JSON.stringify(response));
+    assert.equal(response.results[0].blueprint_id, 'arven-mabosstiff-ex');
+    const exactNames = fetchBodies
+        .filter((entry) => entry.url.includes('/api/extension-card-search'))
+        .map((entry) => entry.body.name);
+    assert.ok(exactNames.every((name) => name === "Arven's Mabosstiff ex"), JSON.stringify(exactNames));
+});
+
 test('background Vinted recent search cache reuses same selected payload', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -1521,7 +2008,7 @@ test('background Vinted recent search cache reuses same selected payload', async
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -1613,7 +2100,7 @@ test('background Vinted recent search cache changes key for clue or URL changes'
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -1716,6 +2203,216 @@ test('background Vinted recent search cache changes key for clue or URL changes'
     assert.ok(fetchBodies.length > afterClueChange, 'changed listing URL should miss recent cache');
 });
 
+test('background Vinted cache changes key for preview signature revision and force refresh', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                const index = fetchBodies.length;
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: `mega-charizard-${index}`, name: 'Mega Charizard', collectorNumber: String(index), score: 99 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                return { ok: true, json: async () => ({ rows: [] }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const sender = { tab: { id: 37, title: 'Mega Charizard ex', url: 'https://www.vinted.it/items/37-mega-charizard' } };
+    const basePayload = {
+        source: 'vinted',
+        listingKey: sender.tab.url,
+        originalTitle: 'Mega Charizard ex',
+        searchTitle: 'Mega Charizard',
+        name: 'Charizard',
+        variation: 'Mega',
+        selectedClues: ['Mega Charizard'],
+        primaryClues: ['Mega Charizard'],
+    };
+    const request = {
+        action: 'searchCardForTitle',
+        title: 'Mega Charizard',
+        originalTitle: 'Mega Charizard ex',
+        url: sender.tab.url,
+        selectedClues: ['Mega Charizard'],
+        clues: ['Mega Charizard'],
+        primaryClues: ['Mega Charizard'],
+        previewSignature: 'vinted|mega-charizard|a',
+        selectionRevision: 1,
+        vintedPayload: basePayload,
+    };
+
+    await new Promise((resolve) => messageListener(request, sender, resolve));
+    const afterFirst = fetchBodies.length;
+    await new Promise((resolve) => messageListener({ ...request }, sender, resolve));
+    const afterCached = fetchBodies.length;
+    await new Promise((resolve) => messageListener({
+        ...request,
+        previewSignature: 'vinted|mega-charizard|b',
+        selectionRevision: 2,
+        vintedPayload: {
+            ...basePayload,
+            selectedClues: ['Mega Charizard', 'Mysterious Treasures'],
+        },
+    }, sender, resolve));
+    const afterSignatureChange = fetchBodies.length;
+    await new Promise((resolve) => messageListener({ ...request, forceRefresh: true }, sender, resolve));
+
+    assert.equal(afterCached, afterFirst, 'same signature should reuse recent cache');
+    assert.ok(afterSignatureChange > afterCached, 'changed signature/revision should miss recent cache');
+    assert.ok(fetchBodies.length > afterSignatureChange, 'force refresh should bypass recent cache');
+});
+
+test('background broad Mega Charizard selected-chip search fills beyond exact three rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const fetchBodies = [];
+    const extensionRows = [
+        { cardId: 'mega-charizard-1', name: 'Mega Charizard EX', expansionName: 'Flashfire', collectorNumber: '69/106', score: 99 },
+        { cardId: 'mega-charizard-2', name: 'Mega Charizard Y EX', expansionName: 'Evolutions', collectorNumber: '13/108', score: 98 },
+        { cardId: 'mega-charizard-3', name: 'Mega Charizard X EX', expansionName: 'Flashfire', collectorNumber: '108/106', score: 97 },
+    ];
+    const fallbackRows = [
+        { card_id: 'mega-charizard-1', name: 'Mega Charizard EX', set_name: 'Flashfire', card_number: '69/106', search_rank: 99 },
+        { card_id: 'mega-charizard-2', name: 'Mega Charizard Y EX', set_name: 'Evolutions', card_number: '13/108', search_rank: 98 },
+        { card_id: 'mega-charizard-3', name: 'Mega Charizard X EX', set_name: 'Flashfire', card_number: '108/106', search_rank: 97 },
+        { card_id: 'mega-charizard-4', name: 'Mega Charizard EX', set_name: 'Promo', card_number: 'XY17', search_rank: 96 },
+        { card_id: 'mega-charizard-5', name: 'Mega Charizard', set_name: 'Generations', card_number: '12/83', search_rank: 95 },
+        { card_id: 'charizard-ex-generic', name: 'Charizard ex', set_name: 'Scarlet Violet', card_number: '006/165', search_rank: 500 },
+    ];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.name, 'Mega Charizard');
+                assert.equal(body.variation, 'Mega');
+                return { ok: true, json: async () => ({ matches: extensionRows }) };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.match(body.search_term, /Mega Charizard/i);
+                return { ok: true, json: async () => ({ rows: fallbackRows }) };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const request = {
+        action: 'searchCardForTitle',
+        title: 'Mega Charizard',
+        originalTitle: 'Mega Charizard ex',
+        url: 'https://www.vinted.it/items/38-mega-charizard',
+        selectedClues: ['Mega Charizard'],
+        clues: ['Mega Charizard'],
+        primaryClues: ['Mega Charizard'],
+        previewSignature: 'vinted|mega-charizard|broad',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/38-mega-charizard',
+            originalTitle: 'Mega Charizard ex',
+            searchTitle: 'Mega Charizard',
+            name: 'Charizard',
+            variation: 'Mega',
+            selectedClues: ['Mega Charizard'],
+            primaryClues: ['Mega Charizard'],
+        },
+    };
+    const response = await new Promise((resolve) => messageListener(
+        request,
+        { tab: { id: 38, title: 'Mega Charizard ex', url: request.url } },
+        resolve
+    ));
+
+    assert.equal(response.success, true, JSON.stringify(response));
+    assert.ok(response.results.length > 3, JSON.stringify({ response, fetchBodies }));
+    assert.deepEqual(Array.from(response.results.slice(0, 5).map((row) => row.blueprint_id)), [
+        'mega-charizard-1',
+        'mega-charizard-2',
+        'mega-charizard-3',
+        'mega-charizard-4',
+        'mega-charizard-5',
+    ]);
+    assert.ok(fetchBodies.some((entry) => entry.url.includes('/api/marketplace-autocomplete')), 'broad Mega search should run fallback fill');
+});
+
 test('background recent search cache evicts entries beyond last 20', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -1726,7 +2423,7 @@ test('background recent search cache evicts entries beyond last 20', async () =>
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -1839,7 +2536,7 @@ test('background Vinted Mega Latias ex rejects non-Mega Latias rows', async () =
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -2221,6 +2918,87 @@ test('Vinted Mega Charizard chip alone keeps Mega identity without X or ex requi
     assert.deepEqual(Array.from(payload.primaryClues).map((label) => label.toLowerCase()), ['mega charizard']);
     assert.deepEqual(Array.from(payload.selectedClues).map((label) => label.toLowerCase()), ['mega charizard']);
     assert.equal(messages[0].title.toLowerCase(), 'mega charizard');
+});
+
+test('Vinted Feraligatr liv.53 title carries level and Mysterious Treasures evidence', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/39-feraligatr-liv-53', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /feraligatr/i.test(String(title || '')) ? 'Feraligatr' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Feraligatr liv.53 Tesori Misteriosi';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = messages[0].vintedPayload;
+    assert.ok(selectedLabels.includes('Feraligatr'));
+    assert.ok(selectedLabels.includes('Lv 53'));
+    assert.ok(selectedLabels.includes('Mysterious Treasures'));
+    assert.equal(payload.name, 'Feraligatr');
+    assert.equal(payload.levelNumber, '53');
+    assert.equal(payload.expansion, 'Mysterious Treasures');
+    assert.match(messages[0].title, /Lv\.?\s*53/);
+});
+
+test('Vinted Jolteon specie delta payload includes delta form and collector evidence', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/40-jolteon-delta', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /jolteon/i.test(String(title || '')) ? 'Jolteon' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Jolteon specie delta 7/113';
+    processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = messages[0].vintedPayload;
+    assert.ok(selectedLabels.includes('Jolteon Delta Species'));
+    assert.ok(selectedLabels.includes('7/113'));
+    assert.equal(payload.name, 'Jolteon');
+    assert.equal(payload.variation, 'Delta Species');
+    assert.equal(payload.collectorNumber, '7/113');
+    assert.match(messages[0].title, /Delta Species/);
 });
 
 test('Vinted Team Rocket owner title defaults composite Mimikyu payload', async () => {
@@ -2647,6 +3425,82 @@ test('Vinted chip toggle invalidates stale preview rows before side-panel open',
     assert.doesNotMatch(latestOpenMessage.title, /Gengar/i);
     assert.match(latestOpenMessage.title, /Pikachu V/i);
     assert.ok(latestOpenMessage.selectionRevision > 0);
+});
+
+test('Vinted manual clue input adds selected clue and invalidates stale preview rows', async () => {
+    const messages = [];
+    let searchCount = 0;
+    const body = createDomElement('body');
+    const titleElement = createDomElement('h1');
+    titleElement.textContent = 'Kilowattrel ex';
+    body.appendChild(titleElement);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelector: (selector) => selector === '[data-pokoin-vinted-panel-host]' ? body.querySelector(selector) : null,
+            querySelectorAll: () => [],
+            createElement: (tag) => createDomElement(tag),
+            contains: (element) => body.contains(element),
+            body,
+            title: 'Kilowattrel ex',
+        },
+        window: {
+            location: { href: 'https://www.vinted.it/items/41-kilowattrel-ex', hostname: 'www.vinted.it', pathname: '/items/41-kilowattrel-ex' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /kilowattrel/i.test(String(title || '')) ? 'Kilowattrel' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action !== 'searchCardForTitle') {
+                        return { success: true };
+                    }
+                    searchCount += 1;
+                    if (searchCount === 1) {
+                        return {
+                            success: true,
+                            results: [{ blueprint_id: 'kilowattrel-ex', name_en: 'Kilowattrel ex', collector_number: '068/191', search_score: 99 }],
+                        };
+                    }
+                    return { success: true, results: [{ blueprint_id: 'kilowattrel-manual', name_en: 'Kilowattrel ex', collector_number: '068/191', search_score: 99 }] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Kilowattrel ex';
+    processor.currentTitleElement = titleElement;
+    processor.createVintedPanelButton(titleElement);
+    processor.renderKeywordToggles(processor.currentTitle, '');
+    processor.searchResultsBySignature.set(processor.buildVintedSearchSignature(processor.currentTitle), [
+        { blueprint_id: 'stale-kilowattrel', name_en: 'Kilowattrel ex' },
+    ]);
+    processor.lastRenderedPreviewResults = [{ blueprint_id: 'stale-kilowattrel', name_en: 'Kilowattrel ex' }];
+    processor.currentMatchCount = 1;
+
+    const input = processor.vintedPanelRoot().querySelector('[data-pokoin-vinted-manual-clue-input]');
+    assert.ok(input, 'manual clue input should render in the Vinted overlay');
+    input.value = '068/191';
+    input.eventListeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const selectedClues = processor.selectedKeywordLabels();
+    const searchMessages = messages.filter((message) => message.action === 'searchCardForTitle');
+    const tokenMessage = messages.filter((message) => message.action === 'marketplacePreviewReady').at(-1);
+    assert.ok(selectedClues.includes('068/191'));
+    assert.equal(selectedClues.filter((clue) => clue === '068/191').length, 1);
+    assert.equal(processor.lastRenderedPreviewResults.length, 0, 'manual clue should clear stale rendered rows before new search resolves');
+    assert.ok(searchMessages.at(-1).selectedClues.includes('068/191'));
+    assert.ok(tokenMessage.selectedClues.includes('068/191'));
+
+    input.value = '068/191';
+    input.eventListeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+    assert.equal(processor.selectedKeywordLabels().filter((clue) => clue === '068/191').length, 1);
 });
 
 test('Vinted Trainer Gallery slash collector stays atomic and clears stale rows', async () => {
@@ -4173,6 +5027,76 @@ test('eBay overlay chip toggles invalidate stale rows and send selected-key payl
     assert.ok(messages[1].ebayPayload.selectedClues.length > messages[0].ebayPayload.selectedClues.length);
 });
 
+test('eBay manual clue input adds selected clue and invalidates stale rows', async () => {
+    const messages = [];
+    const page = createDomElement('div');
+    const titleElement = createDomElement('h1', { 'data-testid': 'x-item-title__mainTitle' });
+    titleElement.textContent = 'Zangoose ex Pokemon TCG';
+    page.appendChild(titleElement);
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.com/itm/zangoose-manual', hostname: 'www.ebay.com', pathname: '/itm/zangoose-manual' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /zangoose/i.test(String(title || '')) ? 'Zangoose' : null,
+                isEXCard: /\bex\b/i.test(String(title || '')),
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action !== 'searchCardForTitle') return { success: true };
+                    return { success: true, results: [{ blueprint_id: 'zangoose-14', name_en: 'Zangoose ex', collector_number: '14/100', search_score: 95 }] };
+                },
+            },
+        },
+        document: {
+            title: titleElement.textContent,
+            querySelector: (selector) => {
+                if (selector.includes('h1') || selector.includes('x-item-title')) return titleElement;
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelector(selector);
+                return null;
+            },
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector.includes('x-item-title')) return [titleElement];
+                if (selector === '[data-pokoin-ebay-panel-host]') return page.querySelectorAll(selector);
+                return [];
+            },
+            contains: (element) => page.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: page,
+        },
+    });
+    const processor = new Processor();
+    processor.processProductPage();
+    await Promise.resolve();
+    processor.searchResultsBySignature.set(processor.buildEbaySearchSignature(processor.buildSelectedEbayPayload(processor.currentTitle)), [
+        { blueprint_id: 'stale-ebay', name_en: 'Zangoose ex', collector_number: '15/100' },
+    ]);
+    processor.lastRenderedPreviewResults = [{ blueprint_id: 'stale-ebay', name_en: 'Zangoose ex', collector_number: '15/100' }];
+
+    const input = processor.currentPanel.querySelector('[data-pokoin-ebay-manual-clue-input]');
+    assert.ok(input, 'manual clue input should render in eBay overlay');
+    input.value = '14/100';
+    input.eventListeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const selectedClues = processor.selectedKeywordLabels();
+    const searchMessages = messages.filter((message) => message.action === 'searchCardForTitle');
+    assert.ok(selectedClues.includes('14/100'));
+    assert.equal(selectedClues.filter((clue) => clue === '14/100').length, 1);
+    assert.equal(searchMessages.at(-1).ebayPayload.collectorNumber, '14/100');
+    assert.ok(searchMessages.at(-1).selectedClues.includes('14/100'));
+    assert.equal(searchMessages.at(-1).selectionRevision, 1);
+    assert.equal(processor.lastRenderedPreviewResults.length, 0, 'manual eBay clue should clear stale rows before the refreshed search paints');
+
+    input.value = '14/100';
+    input.eventListeners.keydown({ key: 'Enter', preventDefault() {}, stopPropagation() {} });
+    assert.equal(processor.selectedKeywordLabels().filter((clue) => clue === '14/100').length, 1);
+});
+
 test('eBay item page retries overlay injection after late title hydration', async () => {
     const page = createDomElement('div');
     const titleElement = createDomElement('h1', { 'data-testid': 'x-item-title__mainTitle' });
@@ -4970,6 +5894,76 @@ test('background ranks eBay Sandstorm collector above broad Zangoose ex rows', (
     assert.equal(sorted.at(-1).card_id, 'broad-ex-ah');
 });
 
+test('background ranks Vinted Feraligatr level and Mysterious Treasures evidence above ex rows', () => {
+    const sandbox = loadBackgroundHelpers([
+        'normalizeMarketplacePayload',
+        'sortRowsForStructuredCard',
+        'buildStructuredFallbackQueries',
+        'shouldRunAutocompleteFallback',
+    ]);
+    const payload = sandbox.normalizeMarketplacePayload({
+        source: 'vinted',
+        originalTitle: 'Feraligatr liv.53 Tesori Misteriosi',
+        searchTitle: 'Feraligatr Lv. 53 Mysterious Treasures',
+        selectedClues: ['Feraligatr', 'Lv. 53', 'Mysterious Treasures'],
+        primaryClues: ['Feraligatr'],
+        name: 'Feraligatr',
+        variation: '',
+        expansion: 'Mysterious Treasures',
+        levelNumber: '53',
+    });
+    const rows = [
+        { card_id: 'feraligatr-ex-103', name: 'Feraligatr ex', set_name: 'Unseen Forces', card_number: '103/115', search_rank: 12000 },
+        { card_id: 'feraligatr-53', name: 'Feraligatr Lv. 53', set_name: 'Mysterious Treasures', card_number: '8/123', search_rank: 20 },
+        { card_id: 'feraligatr-003', name: 'Feraligatr', set_name: 'Promo', card_number: '003', search_rank: 10000 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, payload.structuredCard);
+    const queries = sandbox.buildStructuredFallbackQueries(payload.structuredCard, payload.searchTitle);
+
+    assert.equal(payload.structuredCard.levelNumber, '53');
+    assert.equal(payload.structuredCard.expansion, 'Mysterious Treasures');
+    assert.equal(sorted[0].card_id, 'feraligatr-53');
+    assert.ok(queries.some((query) => /Feraligatr Lv\. 53 Mysterious Treasures/i.test(query)));
+    assert.equal(sandbox.shouldRunAutocompleteFallback([rows[0]], payload.structuredCard), true);
+});
+
+test('background ranks Vinted Jolteon Delta Species collector evidence above generic variants', () => {
+    const sandbox = loadBackgroundHelpers([
+        'normalizeMarketplacePayload',
+        'sortRowsForStructuredCard',
+        'buildStructuredFallbackQueries',
+        'rowMatchesStructuredVariation',
+        'shouldRunAutocompleteFallback',
+    ]);
+    const payload = sandbox.normalizeMarketplacePayload({
+        source: 'vinted',
+        originalTitle: 'Jolteon specie delta 7/113',
+        searchTitle: 'Jolteon Delta Species 7/113',
+        selectedClues: ['Jolteon', 'Delta Species', '7/113'],
+        primaryClues: ['Jolteon'],
+        name: 'Jolteon',
+        variation: 'Delta Species',
+        collectorNumber: '7/113',
+        numericCollectorNumber: '7',
+    });
+    const rows = [
+        { card_id: 'jolteon-ex', name: 'Jolteon ex', set_name: 'Prismatic Evolutions', card_number: '030/131', search_rank: 12000 },
+        { card_id: 'jolteon-vmax', name: 'Jolteon VMAX', set_name: 'Promo', card_number: 'SWSH184', search_rank: 11000 },
+        { card_id: 'jolteon-delta', name: 'Jolteon Delta Species', set_name: 'EX Delta Species', card_number: '7/113', search_rank: 10 },
+        { card_id: 'jolteon-gx', name: 'Jolteon GX', set_name: 'SM Promos', card_number: 'SM173', search_rank: 9000 },
+    ];
+    const sorted = sandbox.sortRowsForStructuredCard(rows, payload.structuredCard);
+    const queries = sandbox.buildStructuredFallbackQueries(payload.structuredCard, payload.searchTitle);
+
+    assert.equal(payload.structuredCard.variation, 'Delta Species');
+    assert.ok(payload.structuredCard.variationTokens.includes('deltaspecies'));
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[2], payload.structuredCard), true);
+    assert.equal(sandbox.rowMatchesStructuredVariation(rows[0], payload.structuredCard), false);
+    assert.equal(sorted[0].card_id, 'jolteon-delta');
+    assert.ok(queries.some((query) => /Jolteon Delta Species 7\/113/i.test(query)));
+    assert.equal(sandbox.shouldRunAutocompleteFallback([rows[0]], payload.structuredCard), true);
+});
+
 test('background normalizes eBay payload for exact Magearna search', () => {
     const sandbox = loadBackgroundHelpers(['normalizeMarketplacePayload']);
 
@@ -5171,13 +6165,13 @@ test('Cardmarket background search payload uses structured card name first', asy
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return {
                     ok: true,
                     json: async () => ({
-                        products: [{
-                            price: { non_layered_price_formatted: '$3.21' },
-                        }],
+                        blueprint_id: new URL(url).searchParams.get('blueprintId'),
+                        price_pkn: 321,
+                        currency: 'PKN',
                     }),
                 };
             }
@@ -5504,6 +6498,77 @@ test('side panel refresh forwards stored eBay selected-key payload', async () =>
     assert.equal(refreshMessage.marketplacePayload.source, 'ebay');
 });
 
+test('side panel candidate rows prefer preview thumbnails before set logos', async () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    elementsById.get('refreshBtn').addEventListener = () => {};
+    const state = {
+        pageInfo: { title: 'Mew ex 232/091' },
+        rows: [{
+            card_id: '274416',
+            name: 'Mew ex',
+            set_name: 'Paldean Fates',
+            card_number: 'Special Illustration Rare | 232/091',
+            expansion_symbol_url: 'https://cdn.pokoin.com/expansions/symbols/paldean-fates.png',
+            preview_image_url: 'https://cdn.pokoin.com/previews/274416_mew-ex.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates',
+        }],
+        best: {
+            card_id: '274416',
+            name: 'Mew ex',
+            preview_image_url: 'https://cdn.pokoin.com/previews/274416_mew-ex.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates',
+        },
+        blueprintId: '274416',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates',
+    };
+    const sandbox = {
+        document: {
+            body: { classList: createClassListStub() },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({ sidePanelState: state }) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    sandbox.renderState(state);
+    const candidate = elementsById.get('candidateList').children[0];
+    const media = candidate.children[0];
+    const image = media.children[0];
+    assert.equal(image.className, 'candidate-preview-image');
+    assert.equal(image.src, 'https://cdn.pokoin.com/previews/274416_mew-ex.jpg');
+});
+
 test('Vinted side panel Refresh reuses canonical overlay preview rows', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -5677,6 +6742,98 @@ test('Vinted side panel Refresh waits when canonical overlay state is not ready'
     assert.equal(scraped, false);
 });
 
+test('Vinted duplicate preview-ready events coalesce one side-panel write', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const storageWrites = [];
+    const tab = {
+        id: 82,
+        title: 'Mega Charizard ex',
+        url: 'https://www.vinted.it/items/82-mega-charizard',
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const request = {
+        action: 'marketplacePreviewReady',
+        source: 'vinted',
+        url: tab.url,
+        title: 'Mega Charizard',
+        originalTitle: tab.title,
+        clues: ['Mega Charizard'],
+        selectedClues: ['Mega Charizard'],
+        primaryClues: ['Mega Charizard'],
+        previewSource: 'vinted_overlay',
+        previewSignature: 'vinted|mega-charizard|canonical',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: tab.url,
+            originalTitle: tab.title,
+            searchTitle: 'Mega Charizard',
+            name: 'Charizard',
+            variation: 'Mega',
+            selectedClues: ['Mega Charizard'],
+            primaryClues: ['Mega Charizard'],
+        },
+        previewRows: [
+            { card_id: 'mega-charizard-1', name: 'Mega Charizard EX', set_name: 'Evolutions', card_number: '12/108' },
+            { card_id: 'mega-charizard-2', name: 'Mega Charizard Y EX', set_name: 'Promo', card_number: '13/106' },
+        ],
+    };
+
+    const [first, second, third] = await Promise.all([
+        new Promise((resolve) => messageListener(request, { tab }, resolve)),
+        new Promise((resolve) => messageListener({ ...request }, { tab }, resolve)),
+        new Promise((resolve) => messageListener({ ...request }, { tab }, resolve)),
+    ]);
+
+    assert.equal(first.success, true);
+    assert.equal(second.success, true);
+    assert.equal(third.success, true);
+    assert.equal(storageWrites.filter((state) => state?.debug?.pinnedVintedPreview || state?.debug?.vintedReadyDriven).length, 1);
+    assert.deepEqual(Array.from(storage.sidePanelState.rows.map((row) => row.card_id)), ['mega-charizard-1', 'mega-charizard-2']);
+});
+
 test('Vinted extension action waits for selected-key payload before searching', async () => {
     const source = readRepoFile('config/background.js');
     let actionClickListener = null;
@@ -5785,7 +6942,7 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -5958,7 +7115,7 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
     }
 
     assert.equal(scraped, false);
-    assert.ok(fetchBodies.every((entry) => entry.url.includes('/api/extension-card-search') || entry.url.includes('/api/cardtrader-redirect')));
+    assert.ok(fetchBodies.every((entry) => entry.url.includes('/api/extension-card-search') || entry.url.includes('/api/marketplace-blueprint-price')));
 });
 
 test('Vinted stale old-page preview-ready message is ignored', async () => {
@@ -6052,13 +7209,16 @@ test('Vinted price enrichment only decorates pinned preview rows', async () => {
         setTimeout,
         clearTimeout,
         fetch: async (url) => {
-            const id = new URL(url).searchParams.get('id');
+            const parsed = new URL(url);
+            assert.equal(parsed.pathname, '/api/marketplace-blueprint-price');
+            const id = parsed.searchParams.get('blueprintId');
             return {
-                ok: true,
+                ok: id === '222' ? false : true,
+                status: id === '222' ? 404 : 200,
                 json: async () => ({
-                    products: [{
-                        price: { non_layered_price_formatted: id === '111' ? '$1.11' : '$2.22' },
-                    }],
+                    blueprint_id: id,
+                    price_pkn: id === '111' ? 111 : null,
+                    currency: 'PKN',
                 }),
             };
         },
@@ -6124,8 +7284,108 @@ test('Vinted price enrichment only decorates pinned preview rows', async () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['111', '222']);
-    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.pokoin_price), ['$1.11', '$2.22']);
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.pokoin_price || ''), ['111 PKN', '']);
     assert.equal(storage.sidePanelState.debug.priceEnriched, true);
+});
+
+test('background canonical Pokoin URLs propagate from exact search rows', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const canonicalUrl = 'https://pokoin.com/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ blueprint_id: '274416', price_pkn: null }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.collectorNumber, '232/091');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{
+                            blueprintId: '274416',
+                            name: 'Mew ex',
+                            expansionName: 'Paldean Fates',
+                            collectorNumber: 'Special Illustration Rare | 232/091',
+                            imageUrl: 'https://cdn.pokoin.com/274416_mew-ex.jpg',
+                            previewImageUrl: 'https://cdn.pokoin.com/previews/274416_mew-ex.jpg',
+                            canonicalUrl,
+                            marketplaceUrl: canonicalUrl,
+                            canonicalPath: '/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates',
+                            marketplacePath: '/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates',
+                            score: 99,
+                        }],
+                    }),
+                };
+            }
+            return { ok: true, json: async () => ({ rows: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                get: async () => ({ id: 91, title: 'Mew ex 232/091', url: 'https://www.vinted.it/items/91-mew-ex' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { open: async () => {}, setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({
+            action: 'openSidePanelForCurrentTab',
+            url: 'https://www.vinted.it/items/91-mew-ex',
+            title: 'Mew ex 232/091',
+            originalTitle: 'Mew ex 232/091',
+            selectedClues: ['Mew ex', '232/091'],
+            primaryClues: ['Mew ex'],
+            marketplacePayload: {
+                source: 'vinted',
+                listingKey: 'https://www.vinted.it/items/91-mew-ex',
+                originalTitle: 'Mew ex 232/091',
+                searchTitle: 'Mew ex 232/091',
+                name: 'Mew',
+                variation: 'ex',
+                collectorNumber: '232/091',
+                selectedClues: ['Mew ex', '232/091'],
+                primaryClues: ['Mew ex'],
+            },
+        }, { tab: { id: 91, title: 'Mew ex 232/091', url: 'https://www.vinted.it/items/91-mew-ex' } }, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.result.pokoinUrl, canonicalUrl);
+    assert.equal(storage.sidePanelState.pokoinUrl, canonicalUrl);
+    assert.equal(storage.sidePanelState.rows[0].canonicalUrl, canonicalUrl);
+    assert.equal(storage.sidePanelState.best.marketplacePath, '/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates');
+    assert.equal(storage.sidePanelState.rows[0].preview_image_url, 'https://cdn.pokoin.com/previews/274416_mew-ex.jpg');
 });
 
 test('legacy Vinted fallback is inert when VintedProcessor owns matching', () => {
@@ -6166,7 +7426,7 @@ test('Cardmarket Piplup prefixed number uses structured payload and exact rankin
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -6270,7 +7530,7 @@ test('Vinted background payload preserves Magnezone V and rejects ex results', a
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -6380,7 +7640,7 @@ test('Cardmarket Meowth POR 062 uses Perfect Order numeric exact payload and ski
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -6466,7 +7726,7 @@ test('Cardmarket Jirachi CP5 026 low exact candidates skip broad fill fallback',
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -6548,7 +7808,7 @@ test('Cardmarket Meowth TR 62 exact Team Rocket match ends after exact phase', a
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -6662,7 +7922,7 @@ test('exact name variation search skips autocomplete after extension match', asy
         fetch: async (url, options = {}) => {
             const body = options.body ? JSON.parse(options.body) : {};
             fetchBodies.push({ url, body });
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             if (url.includes('/api/extension-card-search')) {
@@ -6742,7 +8002,7 @@ test('Cardmarket exact rows survive name and fallback fetch failure', async () =
         AbortController,
         fetch: async (url, options = {}) => {
             fetchBodies.push({ url, body: options.body ? JSON.parse(options.body) : {} });
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 throw new TypeError('Failed to fetch');
             }
             if (url.includes('/api/extension-card-search')) {
@@ -6842,7 +8102,7 @@ test('Cardmarket fallback fetch failure is terminal when no rows exist', async (
             if (url.includes('/api/marketplace-autocomplete')) {
                 throw new TypeError('Failed to fetch');
             }
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 throw new TypeError('Failed to fetch');
             }
             throw new Error(`Unexpected fetch: ${url}`);
@@ -6918,7 +8178,7 @@ test('name-only low candidate extension rows still use autocomplete fallback', a
         fetch: async (url, options = {}) => {
             const body = options.body ? JSON.parse(options.body) : {};
             fetchBodies.push({ url, body });
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             if (url.includes('/api/extension-card-search')) {
@@ -7001,7 +8261,7 @@ test('background search response is not blocked by Cardmarket observation auth',
         setTimeout,
         clearTimeout,
         fetch: async (url) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             if (url.includes('/api/extension-card-search')) {
@@ -7404,7 +8664,7 @@ test('Cardmarket Piplup fallback ranks MEP 042 above generic rows', async () => 
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -7495,7 +8755,7 @@ test('Cardmarket Piplup fallback queries include collector before promo expansio
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             const body = JSON.parse(options.body || '{}');
@@ -7588,7 +8848,7 @@ test('Cardmarket background search prefers trainer composite over shorter Pokemo
         setTimeout,
         clearTimeout,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return {
                     ok: true,
                     json: async () => ({ products: [] }),
@@ -7706,7 +8966,7 @@ test('background marketplace search preserves trainer composite names across sit
             setTimeout,
             clearTimeout,
             fetch: async (fetchUrl, options = {}) => {
-                if (fetchUrl.includes('/api/cardtrader-redirect')) {
+                if (fetchUrl.includes('/api/marketplace-blueprint-price')) {
                     return {
                         ok: true,
                         json: async () => ({ products: [] }),
@@ -7817,7 +9077,7 @@ test('background search de-dupes repeated identical title requests', async () =>
         fetch: async (url, options = {}) => {
             fetchCalls += 1;
             await fetchGate;
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return {
                     ok: true,
                     json: async () => ({ products: [] }),
@@ -7895,7 +9155,7 @@ test('background search de-dupes repeated identical title requests', async () =>
     assert.equal(responses[1].success, true);
     assert.equal(responses[0].results[0].name_en, 'Reshiram');
     assert.equal(responses[1].results[0].name_en, 'Reshiram');
-    assert.equal(fetchCalls, 4, 'name resolution, structured search, fallback autocomplete, and async price enrichment should run once for duplicate requests');
+    assert.equal(fetchCalls, 5, 'token prediction, name resolution, structured search, fallback autocomplete, and async price enrichment should run once for duplicate requests');
 });
 
 test('background side panel open honors selected Vinted candidate without reordering search', async () => {
@@ -8052,7 +9312,7 @@ test('background side panel open pins Vinted preview rows and clues', async () =
                 primaryClues: ['Tornadus ex', 'ex'],
                 previewSignature: 'vinted|tornadusexillustration',
                 previewRows: [
-                    { card_id: '96', name: 'Tornadus EX', set_name: 'BW Black Star Promos', card_number: '96', search_rank: 99, pokoin_price: '$1.00' },
+                    { card_id: '96', name: 'Tornadus EX', set_name: 'BW Black Star Promos', card_number: '96', search_rank: 99, pokoin_price: '$1.00', previewImageUrl: 'https://cdn.pokoin.com/previews/96_tornadus.jpg' },
                     { card_id: '90', name: 'Tornadus EX', set_name: 'Dark Explorers', card_number: '90', search_rank: 95, pokoin_price: '$2.00' },
                 ],
             },
@@ -8067,6 +9327,7 @@ test('background side panel open pins Vinted preview rows and clues', async () =
     assert.equal(fetchCalls, 0);
     assert.deepEqual(finalState.rows.map((row) => row.card_id), ['96', '90']);
     assert.deepEqual(finalState.rows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
+    assert.equal(finalState.rows[0].preview_image_url, 'https://cdn.pokoin.com/previews/96_tornadus.jpg');
     assert.equal(finalState.blueprintId, '96');
     assert.deepEqual(finalState.pageInfo.clues, ['Tornadus ex', 'ex', 'illustration']);
     assert.deepEqual(finalState.pageInfo.primaryClues, ['Tornadus ex', 'ex']);
@@ -8319,7 +9580,7 @@ test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state
         setTimeout,
         clearTimeout,
         fetch: async (url) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             if (url.includes('/api/extension-card-search')) {
@@ -8435,7 +9696,7 @@ test('background side panel owner prevents slow old tab search overwriting newer
         clearTimeout,
         AbortController,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             if (url.includes('/api/extension-card-search')) {
@@ -8575,7 +9836,7 @@ test('background URL change owner prevents prior same-tab URL search overwrite',
         AbortController,
         currentScrapeUrl: oldUrl,
         fetch: async (url, options = {}) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             if (url.includes('/api/extension-card-search')) {
@@ -8681,7 +9942,7 @@ test('background latest same-tab side panel request writes when current', async 
         clearTimeout,
         AbortController,
         fetch: async (url) => {
-            if (url.includes('/api/cardtrader-redirect')) return { ok: true, json: async () => ({ products: [] }) };
+            if (url.includes('/api/marketplace-blueprint-price')) return { ok: true, json: async () => ({ products: [] }) };
             if (url.includes('/api/extension-card-search')) {
                 return {
                     ok: true,
@@ -8843,7 +10104,7 @@ test('stale broad refresh cannot overwrite Vinted pinned preview rows', async ()
         clearTimeout,
         AbortController,
         fetch: async (url) => {
-            if (url.includes('/api/cardtrader-redirect')) return { ok: true, json: async () => ({ products: [] }) };
+            if (url.includes('/api/marketplace-blueprint-price')) return { ok: true, json: async () => ({ products: [] }) };
             if (url.includes('/api/extension-card-search')) {
                 return {
                     ok: true,
@@ -8947,7 +10208,7 @@ test('background Vinted preview state prefers structured payload over reparsed t
         clearTimeout,
         AbortController,
         fetch: async (url) => {
-            if (url.includes('/api/cardtrader-redirect')) return { ok: true, json: async () => ({ products: [] }) };
+            if (url.includes('/api/marketplace-blueprint-price')) return { ok: true, json: async () => ({ products: [] }) };
             return { ok: true, json: async () => ({ rows: [] }) };
         },
         chrome: {
@@ -9425,7 +10686,7 @@ test('CardTrader direct state cannot be overwritten by delayed non-direct refres
         clearTimeout,
         fetch: async (url) => {
             await fetchGate;
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             return {
@@ -9752,7 +11013,7 @@ test('CardTrader direct state cannot be overwritten by delayed non-direct refres
         clearTimeout,
         fetch: async (url) => {
             await fetchGate;
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             return {
@@ -10828,6 +12089,15 @@ test('visible Best candidates headings are removed from side panel and Vinted pr
     assert.match(vintedSource, /results\.slice\(0,\s*8\)/, 'candidate preview should still render candidates');
 });
 
+test('side panel runtime marker is footer metadata', () => {
+    const sidePanelHtml = readRepoFile('ui-pages/sidepanel.html');
+    const sidePanelCss = readRepoFile('ui-pages/sidepanel.css');
+
+    assert.match(sidePanelHtml, /<footer class="panel-footer"[^>]*>[\s\S]*id="runtimeInfo"[\s\S]*id="debugInfo"[\s\S]*<\/footer>/);
+    assert.match(sidePanelCss, /\.panel-footer\s*\{[^}]*margin-top:\s*auto/s);
+    assert.doesNotMatch(sidePanelHtml, /<section id="status"[\s\S]*id="runtimeInfo"[\s\S]*<section id="candidatesSection"/);
+});
+
 test('all marketplace buttons use the side panel message workflow', () => {
     for (const relativePath of ['content.js', 'processors/VINT.js', 'processors/EBAYE.js', 'processors/CME.js']) {
         const source = readRepoFile(relativePath);
@@ -11200,7 +12470,7 @@ test('Cardmarket observation with missing token queues without blocking matching
         setTimeout,
         clearTimeout,
         fetch: async (url) => {
-            if (url.includes('/api/cardtrader-redirect')) {
+            if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
             if (url.includes('/api/extension-card-search')) {

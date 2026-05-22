@@ -18,8 +18,28 @@ function setStatus(message, isError = false) {
     elements.status.hidden = !message;
 }
 
-function cardUrl(blueprintId) {
-    return `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(blueprintId)}`;
+function absolutePokoinUrl(pathOrUrl = '') {
+    const value = String(pathOrUrl || '').trim();
+    if (!value) {
+        return '';
+    }
+    if (/^https?:\/\//i.test(value)) {
+        return value;
+    }
+    return `${CARDVAULT_API_BASE_URL}${value.startsWith('/') ? '' : '/'}${value}`;
+}
+
+function cardUrl(rowOrBlueprintId) {
+    if (rowOrBlueprintId && typeof rowOrBlueprintId === 'object') {
+        const row = rowOrBlueprintId;
+        return row.canonicalUrl ||
+            row.canonical_url ||
+            row.marketplaceUrl ||
+            row.marketplace_url ||
+            absolutePokoinUrl(row.canonicalPath || row.canonical_path || row.marketplacePath || row.marketplace_path) ||
+            (row.card_id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(row.card_id)}` : '');
+    }
+    return `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(rowOrBlueprintId)}`;
 }
 
 function cardTraderUrl(blueprintId) {
@@ -220,30 +240,48 @@ function compactCandidateMeta(row = {}) {
     return [collector, expansion, price].filter(Boolean).join(' · ');
 }
 
+function candidatePreviewImageUrl(row = {}) {
+    return row.preview_image_url || row.previewImageUrl || row.image_url || row.imageUrl || row.cdn_image_url || row.cdnImageUrl || '';
+}
+
 function renderCandidate(row, isBest = false) {
     const link = document.createElement('a');
     link.className = `candidate${isBest ? ' candidate-best' : ''}`;
-    link.href = cardUrl(row.card_id);
+    link.href = cardUrl(row);
     link.target = '_blank';
     link.rel = 'noreferrer';
 
-    const logoUrl = expansionLogoUrl(row);
-    const logoSlot = document.createElement('span');
-    logoSlot.className = 'candidate-logo-slot';
+    const imageUrl = candidatePreviewImageUrl(row);
+    const mediaSlot = document.createElement('span');
+    mediaSlot.className = 'candidate-media-slot';
 
-    const logo = document.createElement('img');
-    logo.className = 'candidate-logo';
-    logo.alt = '';
-    logo.loading = 'lazy';
-    if (logoUrl) {
-        logo.src = logoUrl;
-        logo.addEventListener('error', () => {
-            logo.remove();
-            logoSlot.classList.add('candidate-logo-empty');
+    if (imageUrl) {
+        const image = document.createElement('img');
+        image.className = 'candidate-preview-image';
+        image.alt = '';
+        image.loading = 'lazy';
+        image.src = imageUrl;
+        image.addEventListener('error', () => {
+            image.remove();
+            mediaSlot.classList.add('candidate-media-empty');
         }, { once: true });
-        logoSlot.appendChild(logo);
+        mediaSlot.appendChild(image);
     } else {
-        logoSlot.classList.add('candidate-logo-empty');
+        const logoUrl = expansionLogoUrl(row);
+        const logo = document.createElement('img');
+        logo.className = 'candidate-logo';
+        logo.alt = '';
+        logo.loading = 'lazy';
+        if (logoUrl) {
+            logo.src = logoUrl;
+            logo.addEventListener('error', () => {
+                logo.remove();
+                mediaSlot.classList.add('candidate-media-empty');
+            }, { once: true });
+            mediaSlot.appendChild(logo);
+        } else {
+            mediaSlot.classList.add('candidate-media-empty');
+        }
     }
 
     const copy = document.createElement('span');
@@ -258,7 +296,7 @@ function renderCandidate(row, isBest = false) {
 
     copy.append(title, meta);
 
-    link.append(logoSlot, copy);
+    link.append(mediaSlot, copy);
     return link;
 }
 
@@ -323,7 +361,7 @@ function renderState(state) {
         return;
     }
 
-    const pokoinUrl = state.pokoinUrl || cardUrl(blueprintId);
+    const pokoinUrl = state.pokoinUrl || cardUrl(best);
     elements.cardName.textContent = isCardTraderDirect
         ? directCardDisplayName(pageInfo, best, blueprintId)
         : best.name || `Blueprint ${blueprintId}`;

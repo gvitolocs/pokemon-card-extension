@@ -9,6 +9,7 @@ The extension is now centered on a selected-key-first workflow:
 - Vinted and eBay render a top-left transparent overlay with a Pokoin button, selectable clue chips, and preview candidates.
 - Selected chips are the canonical first search layer. Raw title scraping and autocomplete fallback happen only after selected-key search is unavailable or insufficient.
 - Vinted/eBay selected payloads carry structured fields: `name`, `variation`, `variationTokens`, `collectorNumber`, `numericCollectorNumber`, `expansion`, `features`, `rarity`, and now `rarityAliases`.
+- Cardvault `POST /api/marketplace-autocomplete` is now the fast name-index canonicalization path for missing, ambiguous, or misspelled names. The background resolver caches by normalized query/language/source/selected clue signature and skips standalone context tokens such as `holo`, `delta`, `illustration`, level text, expansion names, condition words, and collector numbers.
 - Cardmarket uses a readiness-gated product parser and sends scrape observations to Pokoin after matching.
 - CardTrader direct URLs use the blueprint id from the URL and bypass generic search.
 
@@ -59,12 +60,17 @@ Keep these rules intact when changing marketplace matching:
   - Main structured search endpoint.
   - Payload includes name, collector numbers, expansion, rarity, `rarityAliases`, variation, edition hint, language, and limit.
 
-- `POST https://pokoin.com/api/marketplace-autocomplete`
-  - Fallback name/title search.
-  - Used after exact selected-key or structured search paths.
+- `POST https://pokoin.com/api/searchbar-token-predict`
+  - Lightweight card-name token predictor used before heavier autocomplete name resolution.
+  - The extension accepts only high-confidence predictions that extend the scraped fragment, then retries `/api/extension-card-search` with that clean token while preserving collector, expansion, rarity, and variation fields.
 
-- `GET https://pokoin.com/api/cardtrader-redirect?id=:cardId`
-  - Used for listing price enrichment.
+- `POST https://pokoin.com/api/marketplace-autocomplete`
+  - Fast Cardvault name-index canonicalization and fallback candidate search.
+  - Used after weak/empty exact selected-key results when token prediction is empty or unavailable, then again only as a broader candidate-fill fallback when structured search remains insufficient.
+  - Name resolver requests use `result_limit: 20`, query-length pool limits, `search_language: "en"`, and generated `search_session_id` values.
+
+- `GET https://pokoin.com/api/marketplace-blueprint-price?blueprintId=:cardId`
+  - Used for Pokoin PKN listing price enrichment.
   - Result is decoration only.
 
 - `POST https://pokoin.com/api/cardmarket-scrape-observation`

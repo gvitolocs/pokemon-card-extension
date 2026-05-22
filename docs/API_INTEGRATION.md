@@ -16,7 +16,9 @@ The active extension resolves cards through Pokoin/Cardvault endpoints hosted at
 
 - Owns the reliable marketplace search path
 - Calls `/api/extension-card-search` for structured matching
-- Falls back to `/api/marketplace-autocomplete` when needed
+- Calls `/api/searchbar-token-predict` for lightweight card-name token identification before heavier resolver work
+- Uses `/api/marketplace-autocomplete` as the Cardvault name-index resolver for ambiguous or misspelled names when token prediction is empty or low-confidence, then as the broader fallback candidate source when needed
+- Enriches candidate prices through `/api/marketplace-blueprint-price?blueprintId=:id`
 - Builds the canonical side-panel state
 - Sends authenticated Cardmarket scrape observations to `/api/cardmarket-scrape-observation`
 
@@ -31,9 +33,14 @@ The active extension resolves cards through Pokoin/Cardvault endpoints hosted at
 
 1. CardTrader card pages with `/cards/:id` use that URL blueprint id directly as the Pokoin card id.
 2. Other marketplace pages send title and structured clues to the background service worker.
-3. Structured search runs first through `/api/extension-card-search`.
-4. Autocomplete is used as the fallback candidate source.
-5. Successful matches open `https://pokoin.com/marketplace/en/cards/:id` in the side panel.
+3. Structured exact search runs first through `/api/extension-card-search` when selected chips or page metadata include strong name/variation/collector/expansion evidence.
+4. If the exact path is weak or empty, the background first calls `/api/searchbar-token-predict` with likely name phrases. High-confidence predictions that extend the scraped fragment are retried through `/api/extension-card-search`.
+5. If token prediction is empty, low-confidence, or unavailable, the background calls `/api/marketplace-autocomplete` with likely name phrases to recover backend canonical names from Cardvault's name index. Results are cached by normalized query, language, source, and selected clue signature.
+5. Standalone context tokens such as `holo`, `delta`, `illustration`, level text, expansion names, condition words, and collector numbers are not sent as primary name resolver queries.
+6. After canonicalization, `/api/extension-card-search` is retried with the canonical name while preserving collector, variation, rarity, and expansion constraints.
+7. Autocomplete is used as the broader fallback candidate source only after structured rows remain insufficient.
+8. Successful matches preserve backend-provided `canonicalUrl` / `marketplaceUrl` / canonical path fields and prefer those URLs in the side panel, falling back to `https://pokoin.com/marketplace/en/cards/:id` only when no canonical URL is supplied.
+9. Candidate rows preserve `previewImageUrl`/`preview_image_url` and the side panel uses that thumbnail before falling back to full image or expansion logo.
 
 ## Pokoin Auth Bridge
 
