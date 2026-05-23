@@ -332,6 +332,7 @@ class VintedProcessor {
             'Rocket Zapdos',
             "Team Rocket's Mimikyu",
             'Dark Magneton',
+            'Holon Transceiver',
             "Alto Mare's Latias",
             "Holon's Magneton",
             'Gengar Mimikyu',
@@ -627,7 +628,13 @@ class VintedProcessor {
             return true;
         }
         const withoutNumbers = normalized.replace(/\b\d{1,4}[a-z]?\b/gi, ' ');
-        return this.isPokemonNameLikeClue(withoutNumbers);
+        const withoutFeatureContext = withoutNumbers
+            .replace(/\b(?:delta(?:\s+species)?|species\s+delta|specie\s+delta|illustration|holo|rare)\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        return this.isPokemonNameLikeClue(withoutNumbers) ||
+            Boolean(this.knownVintedCompositeName(withoutNumbers)) ||
+            Boolean(this.knownVintedCompositeName(withoutFeatureContext));
     }
 
     isLikelyVintedBareCollectorNumber(value = '') {
@@ -1437,6 +1444,10 @@ class VintedProcessor {
         return [number || rawNumber, setName, price].filter(Boolean).join(' · ');
     }
 
+    candidateExpansionLogoUrl(result = {}) {
+        return result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || result.symbol_image_url || '';
+    }
+
     currentPreviewResults(options = {}) {
         const signature = this.buildVintedSearchSignature(this.currentTitle, this.selectedKeywordLabels());
         const results = this.searchResultsBySignature.get(signature) ||
@@ -1631,12 +1642,15 @@ class VintedProcessor {
 
         results.slice(0, 8).forEach((result) => {
             const row = document.createElement('button');
+            const logoUrl = this.candidateExpansionLogoUrl(result);
             row.type = 'button';
             row.setAttribute('data-pokoin-candidate-row', 'true');
             row.setAttribute('aria-label', `Open ${this.compactCandidateMeta(result) || 'candidate'} in Pokoin side panel`);
             row.style.cssText = `
                 display: grid;
-                grid-template-columns: 1fr;
+                grid-template-columns: ${logoUrl ? '22px minmax(0, 1fr)' : '1fr'};
+                align-items: center;
+                gap: 8px;
                 width: 100%;
                 padding: 10px 0;
                 border: 0;
@@ -1648,6 +1662,7 @@ class VintedProcessor {
                 pointer-events: auto;
             `;
             row.innerHTML = `
+                ${logoUrl ? `<img src="${logoUrl}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:999px;background:rgba(15,23,42,0.72);">` : ''}
                 <span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result) || 'Candidate'}</span>
             `;
             row.addEventListener('click', (event) => {

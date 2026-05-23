@@ -30,14 +30,46 @@ function absolutePokoinUrl(pathOrUrl = '') {
 function cardUrl(rowOrBlueprintId) {
     if (rowOrBlueprintId && typeof rowOrBlueprintId === 'object') {
         const row = rowOrBlueprintId;
-        return row.canonicalUrl ||
+        const directUrl = row.canonicalUrl ||
             row.canonical_url ||
             row.marketplaceUrl ||
             row.marketplace_url ||
+            '';
+        return absolutePokoinUrl(directUrl) ||
             absolutePokoinUrl(row.canonicalPath || row.canonical_path || row.marketplacePath || row.marketplace_path) ||
             (row.card_id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(row.card_id)}` : '');
     }
     return `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(rowOrBlueprintId)}`;
+}
+
+function openWithWindow(url) {
+    if (typeof window === 'undefined' || typeof window.open !== 'function') {
+        return false;
+    }
+    window.open(url, '_blank', 'noopener');
+    return true;
+}
+
+function openCandidateUrl(url) {
+    const targetUrl = absolutePokoinUrl(url);
+    if (!targetUrl) {
+        return false;
+    }
+
+    try {
+        const createTab = typeof chrome === 'undefined' ? null : chrome?.tabs?.create;
+        if (typeof createTab === 'function') {
+            const result = createTab.call(chrome.tabs, { url: targetUrl });
+            if (result && typeof result.catch === 'function') {
+                result.catch(() => openWithWindow(targetUrl));
+            }
+            return true;
+        }
+    } catch (error) {
+        // Fall through to window.open when the tabs API is unavailable in tests or browsers.
+    }
+
+    return openWithWindow(targetUrl);
 }
 
 function cardTraderUrl(blueprintId) {
@@ -226,13 +258,17 @@ async function loadExpansionLogos() {
     return expansionLogoPromise;
 }
 
+function expansionName(row = {}) {
+    return row.set_name || row.expansion_name || row.expansionName || row.expansion_name_en || '';
+}
+
 function expansionLogoUrl(row) {
-    const directLogo = row.expansion_symbol_url || row.expansionSymbolUrl || row.symbolImageUrl || '';
+    const directLogo = row.expansion_symbol_url || row.expansionSymbolUrl || row.symbolImageUrl || row.symbol_image_url || row.symbol_image || '';
     if (directLogo) {
         return directLogo;
     }
 
-    const setName = row.set_name || row.expansion_name || '';
+    const setName = expansionName(row);
     const cachedLogo = expansionLogoCache.get(normalizeExpansionName(setName));
     if (cachedLogo) {
         return cachedLogo;
@@ -306,13 +342,27 @@ function renderCandidate(row, isBest = false) {
     link.className = `candidate${isBest ? ' candidate-best' : ''}`;
     link.href = cardUrl(row);
     link.target = '_blank';
-    link.rel = 'noreferrer';
+    link.rel = 'noopener noreferrer';
+    link.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation?.();
+        openCandidateUrl(link.href);
+    });
+    link.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+            return;
+        }
+        event.preventDefault();
+        event.stopPropagation?.();
+        openCandidateUrl(link.href);
+    });
 
     const imageUrl = candidatePreviewImageUrl(row);
+    const logoUrl = expansionLogoUrl(row);
     const mediaSlot = document.createElement('span');
     mediaSlot.className = 'candidate-media-slot';
 
-    if (imageUrl) {
+    const appendPreviewImage = () => {
         const image = document.createElement('img');
         image.className = 'candidate-preview-image';
         image.alt = '';
@@ -323,22 +373,27 @@ function renderCandidate(row, isBest = false) {
             mediaSlot.classList.add('candidate-media-empty');
         }, { once: true });
         mediaSlot.appendChild(image);
-    } else {
-        const logoUrl = expansionLogoUrl(row);
+    };
+
+    if (logoUrl) {
         const logo = document.createElement('img');
         logo.className = 'candidate-logo';
         logo.alt = '';
         logo.loading = 'lazy';
-        if (logoUrl) {
-            logo.src = logoUrl;
-            logo.addEventListener('error', () => {
-                logo.remove();
+        logo.src = logoUrl;
+        logo.addEventListener('error', () => {
+            logo.remove();
+            if (imageUrl) {
+                appendPreviewImage();
+            } else {
                 mediaSlot.classList.add('candidate-media-empty');
-            }, { once: true });
-            mediaSlot.appendChild(logo);
-        } else {
-            mediaSlot.classList.add('candidate-media-empty');
-        }
+            }
+        }, { once: true });
+        mediaSlot.appendChild(logo);
+    } else if (imageUrl) {
+        appendPreviewImage();
+    } else {
+        mediaSlot.classList.add('candidate-media-empty');
     }
 
     const copy = document.createElement('span');

@@ -18,6 +18,7 @@ const VINTED_TOKEN_READY_TIMEOUT_MS = 6000;
 const RECENT_SEARCH_CACHE_LIMIT = 20;
 const CARDVAULT_NAME_RESOLUTION_CACHE_LIMIT = 50;
 const SEARCHBAR_TOKEN_PREDICT_MIN_CONFIDENCE = 70;
+const CARDVAULT_TOKEN_PREDICTION_CACHE_LIMIT = 50;
 
 let stats = {
     cardsProcessed: 0,
@@ -819,6 +820,13 @@ function normalizeVintedPayload(payload = null) {
     return normalizeMarketplacePayload(payload);
 }
 
+function normalizeEbayPayload(payload = null) {
+    if (!payload || typeof payload !== 'object' || payload.source !== 'ebay') {
+        return null;
+    }
+    return normalizeMarketplacePayload(payload);
+}
+
 function normalizeMarketplacePayload(payload = null) {
     if (!payload || typeof payload !== 'object' || !['vinted', 'ebay'].includes(payload.source)) {
         return null;
@@ -843,11 +851,15 @@ function normalizeMarketplacePayload(payload = null) {
     const variationTokens = normalizedVariationTokens(structuredVariation);
     const rarity = removeMarketplaceSearchNoise(payload.rarity || (features.includes('illustration') ? 'illustration' : ''));
     const rarityAliases = rarityAliasesForRarity(rarity, features);
+    const primaryName = removeMarketplaceSearchNoise(payload.name || primaryClues.find((clue) => {
+        const compact = compactSearchValue(clue);
+        return compact && !variationTokens.includes(normalizeVariationValue(clue)) && !isStandaloneNameResolverNoise(clue);
+    }) || primaryClues[0] || '');
     const structuredCard = {
         rawTitle: payload.source === 'vinted'
             ? selectedSearchTitle
             : (payload.searchTitle || payload.originalTitle || ''),
-        name: removeMarketplaceSearchNoise(payload.name || primaryClues[0] || ''),
+        name: primaryName,
         collectorNumber,
         collectorNumberPrefix: collectorNumber.match(/^([A-Z]{1,6})\b/i)?.[1]?.toUpperCase() || '',
         printedCollectorNumber: collectorNumber,
@@ -861,7 +873,7 @@ function normalizeMarketplacePayload(payload = null) {
         selectedClues,
         primaryClues,
         strictVariation: payload.source === 'vinted' && !payload.variation,
-        searchName: searchNameWithVariation(payload.name || primaryClues[0] || '', payload.variation || ''),
+        searchName: searchNameWithVariation(primaryName, payload.variation || ''),
     };
     return {
         ...payload,
@@ -1100,6 +1112,7 @@ function isLikelyCardNameResolverTerm(term = '') {
 
 function candidateNameTermsFromTitle(title = '', structuredCard = null, options = {}) {
     const terms = [];
+    const requestedNameCompact = compactSearchValue(structuredCard?.name || '');
     if (structuredCard?.name) {
         terms.push(structuredCard.name);
     }
@@ -1109,6 +1122,15 @@ function candidateNameTermsFromTitle(title = '', structuredCard = null, options 
 
     const primaryClues = normalizeRequestClues(options.primaryClues || []);
     const selectedClues = normalizeRequestClues(options.clues || options.selectedClues || []);
+    const selectedPhraseClues = [...primaryClues, ...selectedClues].filter((clue) => {
+        const compact = compactSearchValue(clue);
+        return requestedNameCompact &&
+            compact !== requestedNameCompact &&
+            compact.includes(requestedNameCompact) &&
+            normalizeNameResolverTerm(clue).split(/\s+/).filter(Boolean).length >= 2 &&
+            isLikelyCardNameResolverTerm(clue);
+    });
+    terms.unshift(...selectedPhraseClues);
     terms.push(...primaryClues, ...selectedClues);
 
     const cleaned = normalizeNameResolverTerm(title);
@@ -1172,7 +1194,7 @@ function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
     if (requestedName && /[&'’]/.test(structuredCard?.name || '') && compactSearchValue(resolvedName).length < requestedName.length) {
         return false;
     }
-    if (!rowMatchesStructuredVariation({ name: resolvedName }, structuredCard)) {
+    if (!selectedCluesContainResolvedName(resolvedName, structuredCard) && !rowMatchesStructuredVariation({ name: resolvedName }, structuredCard)) {
         return false;
     }
     if (!requestedName) {
@@ -1192,6 +1214,17 @@ function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
         (requestedWithoutNumbers && resolvedCompact.includes(requestedWithoutNumbers)) ||
         (searchWithoutNumbers && resolvedCompact === searchWithoutNumbers) ||
         compactEditDistanceWithin(resolvedCompact, requestedName, requestedName.length > 7 ? 2 : 1);
+}
+
+function selectedCluesContainResolvedName(resolvedName = '', structuredCard = {}) {
+    const resolvedCompact = compactSearchValue(resolvedName);
+    if (!resolvedCompact) {
+        return false;
+    }
+    return [
+        ...(Array.isArray(structuredCard?.primaryClues) ? structuredCard.primaryClues : []),
+        ...(Array.isArray(structuredCard?.selectedClues) ? structuredCard.selectedClues : []),
+    ].some((clue) => compactSearchValue(clue || '') === resolvedCompact);
 }
 
 function compactEditDistanceWithin(left = '', right = '', maxDistance = 1) {
@@ -1313,28 +1346,47 @@ async function predictCardNameToken(searchTerm = '', options = {}) {
     if (!payload.query || !isLikelyCardNameResolverTerm(payload.query)) {
         return { name: '', payload: null, skipped: true };
     }
+    const cacheKey = cardvaultNameResolutionCacheKey(payload.query, {
+        ...options,
+        source: `${options.source || 'marketplace'}:token-predict`,
+    });
+    const cached = recentSearchCacheGet(cardvaultTokenPredictionCache, cacheKey);
+    if (cached) {
+        return cached;
+    }
 
-    const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/searchbar-token-predict`, {
+    const requestPromise = cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/searchbar-token-predict`, {
         method: 'POST',
         headers: {
             'content-type': 'application/json',
         },
         body: JSON.stringify(payload),
-    });
+    })
+        .then(async (response) => {
+            if (!response.ok) {
+                return { name: '', payload, error: `HTTP ${response.status}` };
+            }
 
-    if (!response.ok) {
-        return { name: '', payload, error: `HTTP ${response.status}` };
-    }
+            const data = await response.json();
+            const accepted = acceptedSearchbarTokenPrediction(data, payload.query);
+            return {
+                name: accepted?.display_token || accepted?.displayToken || '',
+                payload,
+                prediction: accepted || null,
+                meta: data?.meta || null,
+                predictionCount: Array.isArray(data?.predictions) ? data.predictions.length : 0,
+            };
+        })
+        .catch((error) => ({
+            name: '',
+            payload,
+            error: error.message || 'Searchbar token prediction failed.',
+        }));
 
-    const data = await response.json();
-    const accepted = acceptedSearchbarTokenPrediction(data, payload.query);
-    return {
-        name: accepted?.display_token || accepted?.displayToken || '',
-        payload,
-        prediction: accepted || null,
-        meta: data?.meta || null,
-        predictionCount: Array.isArray(data?.predictions) ? data.predictions.length : 0,
-    };
+    recentSearchCacheSet(cardvaultTokenPredictionCache, cacheKey, requestPromise, CARDVAULT_TOKEN_PREDICTION_CACHE_LIMIT);
+    const result = await requestPromise;
+    recentSearchCacheSet(cardvaultTokenPredictionCache, cacheKey, result, CARDVAULT_TOKEN_PREDICTION_CACHE_LIMIT);
+    return result;
 }
 
 function cardvaultNameResolutionCacheKey(searchTerm = '', options = {}) {
@@ -1403,8 +1455,42 @@ function rowMatchesCompositeResolverTerm(row = {}, term = '') {
     return rowHasAllNameTokens(row, tokens);
 }
 
+function rowNameContainsSelectedSuffix(row = {}, structuredCard = null) {
+    const selectedTexts = [
+        structuredCard?.name,
+        structuredCard?.searchName,
+        ...(Array.isArray(structuredCard?.primaryClues) ? structuredCard.primaryClues : []),
+        ...(Array.isArray(structuredCard?.selectedClues) ? structuredCard.selectedClues : []),
+    ];
+    const rowName = resolvedCardNameFromRow(row, '') || row?.canonical_name || row?.canonicalName || row?.name || '';
+    const compactRowName = compactSearchValue(rowName);
+    if (!compactRowName) {
+        return false;
+    }
+    return selectedTexts.some((text) => {
+        const compactText = compactSearchValue(text || '');
+        return compactText &&
+            compactText.length >= 4 &&
+            compactText !== compactRowName &&
+            compactRowName.includes(compactText);
+    });
+}
+
 function acceptedNameResolverRow(rows = [], term = '', structuredCard = null) {
     const compactTerm = compactSearchValue(term);
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    const fullPhraseRow = rows.find((row) => {
+        const resolvedName = resolvedCardNameFromRow(row, term);
+        const resolvedCompact = compactSearchValue(resolvedName);
+        return resolvedName &&
+            rowNameContainsSelectedSuffix(row, structuredCard) &&
+            (!requestedName || resolvedCompact.includes(requestedName)) &&
+            rowMatchesCompositeResolverTerm(row, resolvedName);
+    });
+    if (fullPhraseRow) {
+        return fullPhraseRow;
+    }
+
     const exactRow = rows.find((row) => {
         const canonical = compactSearchValue(row.canonical_name || row.canonicalName || '');
         const display = compactSearchValue(row.name || row.name_en || row.pokemon_name || '');
@@ -1525,6 +1611,43 @@ async function resolveNameFromCardvaultTitle(title = '', structuredCard = null, 
         source: 'marketplace-autocomplete-name-index',
         attemptedTerms,
     };
+}
+
+function shouldResolveNameBeforeExactSearch(structuredCard = {}, options = {}) {
+    if (!['vinted', 'ebay'].includes(options.source || '')) {
+        return false;
+    }
+    if (normalizeVariationValue(structuredCard?.variation || '')) {
+        return false;
+    }
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    if (!requestedName) {
+        return false;
+    }
+    return [
+        ...(Array.isArray(structuredCard?.primaryClues) ? structuredCard.primaryClues : []),
+        ...(Array.isArray(structuredCard?.selectedClues) ? structuredCard.selectedClues : []),
+    ].some((clue) => {
+        const compactClue = compactSearchValue(clue || '');
+        return compactClue &&
+            compactClue !== requestedName &&
+            compactClue.includes(requestedName) &&
+            normalizeNameResolverTerm(clue).split(/\s+/).filter(Boolean).length >= 2 &&
+            isLikelyCardNameResolverTerm(clue);
+    });
+}
+
+async function promoteStructuredNameFromCardvaultTitle(title = '', structuredCard = {}, options = {}) {
+    const nameResolution = await resolveNameFromCardvaultTitle(title, structuredCard, options);
+    if (!shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
+        return { structuredCard, nameResolution, applied: false };
+    }
+    const nextStructuredCard = {
+        ...(structuredCard || {}),
+        name: nameResolution.name,
+    };
+    nextStructuredCard.searchName = searchNameWithVariation(nameResolution.name, nextStructuredCard.variation || '');
+    return { structuredCard: nextStructuredCard, nameResolution, applied: true };
 }
 
 async function getActivePageInfo(tab) {
@@ -2733,6 +2856,11 @@ function sidePanelStatePokoinUrl(row = {}) {
     return pokoinUrlForRow(row);
 }
 
+function cardTraderDirectPokoinUrl(blueprintId = '') {
+    const stableBlueprintId = String(blueprintId || '').trim();
+    return stableBlueprintId ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(stableBlueprintId)}` : '';
+}
+
 function previewRowsFromRequest(request = {}) {
     return (Array.isArray(request.previewRows) ? request.previewRows : [])
         .map(sidePanelRowFromPreview)
@@ -2761,6 +2889,139 @@ function sameCardTraderDirectBlueprint(a = '', b = '') {
     const leftBlueprintId = cardtraderBlueprintIdFromUrl(a);
     const rightBlueprintId = cardtraderBlueprintIdFromUrl(b);
     return Boolean(leftBlueprintId && rightBlueprintId && leftBlueprintId === rightBlueprintId);
+}
+
+function isCardTraderDirectUrl(url = '') {
+    return Boolean(cardtraderBlueprintIdFromUrl(url));
+}
+
+function cardTraderDirectStateCacheKey({ url = '', blueprintId = '', pokoinUrl = '' } = {}) {
+    const stableBlueprintId = String(blueprintId || cardtraderBlueprintIdFromUrl(url) || '').trim();
+    const stableCardUrl = stableSearchUrl(url);
+    const stablePokoinUrl = stableSearchUrl(pokoinUrl || cardTraderDirectPokoinUrl(stableBlueprintId));
+    if (!stableBlueprintId || !stableCardUrl || !stablePokoinUrl) {
+        return '';
+    }
+    return ['cardtrader', stableCardUrl, stableBlueprintId, stablePokoinUrl].join('|');
+}
+
+function cardTraderDirectStateCacheKeyFromState(state = {}) {
+    const pageInfo = state?.pageInfo || {};
+    return cardTraderDirectStateCacheKey({
+        url: pageInfo.url || '',
+        blueprintId: pageInfo.cardtraderBlueprintId || state?.debug?.cardtraderBlueprintId || state?.blueprintId || state?.best?.card_id || '',
+        pokoinUrl: state?.pokoinUrl || sidePanelStatePokoinUrl(state?.best || {}),
+    });
+}
+
+function isCardTraderDirectState(state = {}) {
+    const pageInfo = state?.pageInfo || {};
+    return Boolean(
+        !state?.loading &&
+        !state?.error &&
+        (pageInfo.cardtraderBlueprintId || state?.debug?.directCardTrader || state?.best?.source === 'cardtrader_url') &&
+        (state?.blueprintId || state?.best?.card_id || state?.best?.blueprint_id)
+    );
+}
+
+function cloneSidePanelState(state = {}) {
+    return {
+        ...state,
+        pageInfo: {
+            ...(state?.pageInfo || {}),
+            structuredCard: { ...(state?.pageInfo?.structuredCard || {}) },
+            debug: { ...(state?.pageInfo?.debug || {}) },
+        },
+        rows: Array.isArray(state?.rows) ? state.rows.map((row) => ({ ...row })) : [],
+        best: state?.best ? { ...state.best } : null,
+        debug: { ...(state?.debug || {}) },
+    };
+}
+
+function rememberCardTraderDirectState(state = {}) {
+    if (!isCardTraderDirectState(state)) {
+        return null;
+    }
+    const cacheKey = cardTraderDirectStateCacheKeyFromState(state);
+    if (!cacheKey) {
+        return null;
+    }
+    return recentSearchCacheSet(recentCardTraderDirectStateCache, cacheKey, cloneSidePanelState(state), RECENT_SEARCH_CACHE_LIMIT);
+}
+
+function validCachedCardTraderDirectState(state = {}, url = '') {
+    if (!isCardTraderDirectState(state)) {
+        return false;
+    }
+    const blueprintId = cardtraderBlueprintIdFromUrl(url);
+    const stateBlueprintId = state?.pageInfo?.cardtraderBlueprintId || state?.debug?.cardtraderBlueprintId || state?.blueprintId || state?.best?.card_id || '';
+    return Boolean(
+        blueprintId &&
+        stateBlueprintId &&
+        String(blueprintId) === String(stateBlueprintId) &&
+        sameUrlWithoutHash(state?.pageInfo?.url || '', url)
+    );
+}
+
+function latestRecentCardTraderDirectState(tab = {}, state = null) {
+    const url = tab?.url || '';
+    const blueprintId = cardtraderBlueprintIdFromUrl(url);
+    if (!blueprintId) {
+        return null;
+    }
+    if (validCachedCardTraderDirectState(state, url)) {
+        rememberCardTraderDirectState(state);
+        return state;
+    }
+    const cacheKey = cardTraderDirectStateCacheKey({
+        url,
+        blueprintId,
+        pokoinUrl: cardTraderDirectPokoinUrl(blueprintId),
+    });
+    const cached = recentSearchCacheGet(recentCardTraderDirectStateCache, cacheKey);
+    return validCachedCardTraderDirectState(cached, url) ? cached : null;
+}
+
+function isDuplicateCardTraderDirectState(currentState = {}, nextState = {}) {
+    return Boolean(
+        isCardTraderDirectState(currentState) &&
+        isCardTraderDirectState(nextState) &&
+        cardTraderDirectStateCacheKeyFromState(currentState) &&
+        cardTraderDirectStateCacheKeyFromState(currentState) === cardTraderDirectStateCacheKeyFromState(nextState) &&
+        stableSearchUrl(currentState.pokoinUrl || sidePanelStatePokoinUrl(currentState.best || {})) === stableSearchUrl(nextState.pokoinUrl || sidePanelStatePokoinUrl(nextState.best || {}))
+    );
+}
+
+async function applyCardTraderDirectCachedState(tab = {}, cachedState = {}, owner = null, options = {}) {
+    const blueprintId = cardtraderBlueprintIdFromUrl(tab?.url || cachedState?.pageInfo?.url || '') ||
+        cachedState?.pageInfo?.cardtraderBlueprintId ||
+        cachedState?.blueprintId ||
+        cachedState?.best?.card_id ||
+        '';
+    if (!blueprintId || !validCachedCardTraderDirectState(cachedState, tab?.url || cachedState?.pageInfo?.url || '')) {
+        return null;
+    }
+    const state = cloneSidePanelState(cachedState);
+    state.updatedAt = Date.now();
+    state.loading = false;
+    state.error = '';
+    state.pageInfo = {
+        ...(state.pageInfo || {}),
+        url: state.pageInfo?.url || tab?.url || '',
+        hostname: state.pageInfo?.hostname || safeUrlHostname(state.pageInfo?.url || tab?.url),
+        cardtraderBlueprintId: String(blueprintId),
+    };
+    state.blueprintId = String(blueprintId);
+    state.pokoinUrl = state.pokoinUrl || cardTraderDirectPokoinUrl(blueprintId);
+    state.debug = {
+        ...(state.debug || {}),
+        searched: false,
+        directCardTrader: true,
+        cardtraderBlueprintId: String(blueprintId),
+        cardTraderDirectCacheHit: true,
+        refreshFailureReason: options.reason || '',
+    };
+    return setSidePanelState(state, owner);
 }
 
 function isLockedCardTraderDirectState(state = {}, url = '') {
@@ -2792,6 +3053,14 @@ function isVintedUrl(url = '') {
     }
 }
 
+function isEbayUrl(url = '') {
+    try {
+        return new URL(url).hostname.includes('ebay');
+    } catch (error) {
+        return false;
+    }
+}
+
 function isPinnedVintedPreviewState(state = {}) {
     return Boolean(
         state?.debug?.pinnedVintedPreview &&
@@ -2814,6 +3083,13 @@ function selectedClueSignature(clues = [], primaryClues = []) {
         normalizeRequestClues(clues).map(compactSearchValue).sort().join(','),
         normalizeRequestClues(primaryClues).map(compactSearchValue).sort().join(','),
     ].join('|');
+}
+
+function marketplacePreviewRowIds(rows = []) {
+    return (Array.isArray(rows) ? rows : [])
+        .map((row) => String(row.card_id || row.blueprint_id || row.cardId || row.blueprintId || ''))
+        .filter(Boolean)
+        .join('|');
 }
 
 function vintedStateSelectionSignature(state = {}) {
@@ -2975,6 +3251,15 @@ async function setSidePanelState(nextState = {}, owner = null) {
         return currentState;
     }
     if (
+        isDuplicateCardTraderDirectState(currentState, state) &&
+        !state.debug?.priceEnriched &&
+        !state.debug?.forceCardTraderDirectRefresh
+    ) {
+        rememberCardTraderDirectState(currentState);
+        console.log('ℹ️ [Background] Kept CardTrader direct state over duplicate same-card update');
+        return currentState;
+    }
+    if (
         currentState?.debug?.pinnedPreviewRows &&
         !state.debug?.pinnedPreviewRows &&
         sameUrlWithoutHash(currentState.pageInfo?.url || '', state.pageInfo?.url || '')
@@ -2983,6 +3268,7 @@ async function setSidePanelState(nextState = {}, owner = null) {
         return currentState;
     }
     await chrome.storage.session.set({ sidePanelState: state });
+    rememberCardTraderDirectState(state);
     return state;
 }
 
@@ -3011,6 +3297,16 @@ function clearBackgroundSearchCachesForUrl(url = '') {
             vintedCanonicalApplyRecent.delete(key);
         }
     }
+    for (const key of [...ebayCanonicalApplyInFlight.keys()]) {
+        if (key.includes(`|${stableUrl}|`)) {
+            ebayCanonicalApplyInFlight.delete(key);
+        }
+    }
+    for (const key of [...ebayCanonicalApplyRecent.keys()]) {
+        if (key.includes(`|${stableUrl}|`)) {
+            ebayCanonicalApplyRecent.delete(key);
+        }
+    }
 }
 
 const sidePanelRefreshTimers = new Map();
@@ -3022,10 +3318,16 @@ const backgroundSearchInFlight = new Map();
 const backgroundSearchResultCache = new Map();
 const latestVintedCanonicalByTabUrl = new Map();
 const recentVintedCanonicalPreviewCache = new Map();
+const latestEbayCanonicalByTabUrl = new Map();
+const recentEbayCanonicalPreviewCache = new Map();
+const recentCardTraderDirectStateCache = new Map();
+const ebayCanonicalApplyInFlight = new Map();
+const ebayCanonicalApplyRecent = new Map();
 const vintedCanonicalApplyInFlight = new Map();
 const vintedCanonicalApplyRecent = new Map();
 const vintedTokenWaitTimers = new Map();
 const cardvaultNameResolutionCache = new Map();
+const cardvaultTokenPredictionCache = new Map();
 const pokoinPriceCache = new Map();
 const cardmarketObservationSignatures = new Set();
 const cardmarketObservationInFlight = new Map();
@@ -3068,7 +3370,13 @@ async function ensureRuntimeStorageCurrent() {
     }
     vintedTokenWaitTimers.clear();
     latestVintedCanonicalByTabUrl.clear();
+    latestEbayCanonicalByTabUrl.clear();
     cardvaultNameResolutionCache.clear();
+    cardvaultTokenPredictionCache.clear();
+    recentEbayCanonicalPreviewCache.clear();
+    recentCardTraderDirectStateCache.clear();
+    ebayCanonicalApplyInFlight.clear();
+    ebayCanonicalApplyRecent.clear();
     sidePanelCurrentOwner = null;
     sidePanelOwnersByTab.clear();
     await chrome.storage.session.set({
@@ -3538,6 +3846,11 @@ function vintedCanonicalCacheKey(tabId, url = '') {
     return tabId && stableUrl ? `${tabId}|${stableUrl}` : '';
 }
 
+function ebayCanonicalCacheKey(tabId, url = '') {
+    const stableUrl = stableSearchUrl(url);
+    return tabId && stableUrl ? `${tabId}|${stableUrl}` : '';
+}
+
 function vintedRecentCanonicalCacheKey(canonical = {}) {
     if (!canonical?.url) {
         return '';
@@ -3554,6 +3867,111 @@ function vintedRecentCanonicalCacheKey(canonical = {}) {
         previewSignature: canonical.previewSignature,
         selectionRevision: canonical.selectionRevision,
     });
+}
+
+function ebayRecentCanonicalCacheKey(canonical = {}) {
+    if (!canonical?.url) {
+        return '';
+    }
+    return recentMarketplaceSearchIdentity({
+        source: 'ebay',
+        url: canonical.url,
+        listingKey: canonical.listingKey,
+        title: canonical.title,
+        originalTitle: canonical.originalTitle,
+        clues: canonical.clues,
+        primaryClues: canonical.primaryClues,
+        payload: canonical.ebayPayload,
+        previewSignature: canonical.previewSignature,
+        selectionRevision: canonical.selectionRevision,
+    });
+}
+
+function ebayCanonicalFromPinnedState(state = {}, tab = {}) {
+    const pageInfo = state?.pageInfo || {};
+    if (!state?.debug?.pinnedEbayPreview || !isEbayUrl(pageInfo.url || '') || !sameUrlWithoutHash(pageInfo.url || '', tab?.url || '')) {
+        return null;
+    }
+    return {
+        tabId: tab?.id || null,
+        url: pageInfo.url || tab?.url || '',
+        title: pageInfo.title || tab?.title || '',
+        originalTitle: pageInfo.originalTitle || tab?.title || pageInfo.title || '',
+        listingKey: pageInfo.ebayPayload?.listingKey || stableSearchUrl(pageInfo.url || tab?.url || ''),
+        clues: normalizeRequestClues(pageInfo.selectedClues || pageInfo.clues),
+        primaryClues: normalizeRequestClues(pageInfo.primaryClues),
+        ebayPayload: normalizeEbayPayload(pageInfo.ebayPayload || pageInfo.marketplacePayload),
+        previewSignature: pageInfo.previewSignature || state.debug?.previewSignature || '',
+        previewSource: state.debug?.previewSource || 'ebay_overlay',
+        previewRows: (Array.isArray(state.rows) ? state.rows : [])
+            .map(sidePanelRowFromPreview)
+            .filter(Boolean),
+        selectedCandidateId: pageInfo.selectedCandidateId || '',
+        selectionRevision: Number(pageInfo.selectionRevision || state.debug?.selectionRevision || 0),
+        updatedAt: state.updatedAt || Date.now(),
+        source: 'ebay',
+    };
+}
+
+function ebayCanonicalFromRequest(request = {}, senderTab = {}) {
+    const url = request.url || senderTab?.url || '';
+    if (!isEbayUrl(url) || (senderTab?.url && !sameUrlWithoutHash(url, senderTab.url))) {
+        return null;
+    }
+    const ebayPayload = normalizeEbayPayload(request.ebayPayload || request.marketplacePayload);
+    const previewRows = previewRowsFromRequest(request);
+    if (!ebayPayload && previewRows.length === 0) {
+        return null;
+    }
+    return {
+        tabId: senderTab?.id || null,
+        url,
+        title: request.title || ebayPayload?.searchTitle || senderTab?.title || '',
+        originalTitle: request.originalTitle || ebayPayload?.originalTitle || senderTab?.title || '',
+        listingKey: request.listingKey || ebayPayload?.listingKey || stableSearchUrl(url),
+        clues: ebayPayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues),
+        primaryClues: ebayPayload?.primaryClues || normalizeRequestClues(request.primaryClues),
+        ebayPayload,
+        previewSignature: request.previewSignature || '',
+        previewSource: request.previewSource || 'ebay_overlay',
+        previewRows,
+        selectedCandidateId: request.selectedCandidateId || '',
+        selectionRevision: Number(request.selectionRevision || ebayPayload?.selectionRevision || 0),
+        updatedAt: Date.now(),
+        source: 'ebay',
+    };
+}
+
+function rememberEbayCanonicalPreview(canonical = null) {
+    const cacheKey = ebayCanonicalCacheKey(canonical?.tabId, canonical?.url);
+    if (!cacheKey) {
+        return null;
+    }
+    latestEbayCanonicalByTabUrl.set(cacheKey, canonical);
+    const recentKey = ebayRecentCanonicalCacheKey(canonical);
+    if (recentKey) {
+        recentSearchCacheSet(recentEbayCanonicalPreviewCache, recentKey, canonical);
+    }
+    return canonical;
+}
+
+function latestEbayCanonicalPreview(tab = {}, state = null) {
+    const cacheKey = ebayCanonicalCacheKey(tab?.id, tab?.url || '');
+    return (cacheKey && latestEbayCanonicalByTabUrl.get(cacheKey)) ||
+        ebayCanonicalFromPinnedState(state, tab);
+}
+
+function latestRecentEbayCanonicalPreview(request = {}, tab = {}) {
+    const canonical = ebayCanonicalFromRequest(request, tab);
+    const cacheKey = ebayRecentCanonicalCacheKey(canonical);
+    if (!cacheKey) {
+        return null;
+    }
+    const cached = recentSearchCacheGet(recentEbayCanonicalPreviewCache, cacheKey);
+    if (!cached?.url || !sameUrlWithoutHash(cached.url, canonical.url)) {
+        return null;
+    }
+    return cached;
 }
 
 function vintedCanonicalFromPinnedState(state = {}, tab = {}) {
@@ -3714,10 +4132,7 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
 }
 
 function vintedPreviewRowIds(rows = []) {
-    return (Array.isArray(rows) ? rows : [])
-        .map((row) => String(row.card_id || row.blueprint_id || row.cardId || row.blueprintId || ''))
-        .filter(Boolean)
-        .join('|');
+    return marketplacePreviewRowIds(rows);
 }
 
 function isDuplicateVintedCanonicalState(state = {}, canonical = {}) {
@@ -3758,6 +4173,199 @@ function vintedCanonicalApplyKey(tab = {}, canonical = {}) {
         vintedPreviewRowIds(canonical?.previewRows || []),
         canonical?.selectedCandidateId || '',
     ].join('|');
+}
+
+function ebayCanonicalApplyKey(tab = {}, canonical = {}) {
+    const url = stableSearchUrl(canonical?.url || tab?.url || '');
+    if (!url) {
+        return '';
+    }
+    return [
+        tab?.id || canonical?.tabId || '',
+        url,
+        canonical?.previewSignature || '',
+        canonical?.selectionRevision || 0,
+        canonical?.previewSource || '',
+        marketplacePreviewRowIds(canonical?.previewRows || []),
+        canonical?.selectedCandidateId || '',
+    ].join('|');
+}
+
+function isDuplicateEbayCanonicalState(state = {}, canonical = {}) {
+    if (!state?.pageInfo?.url || !canonical?.url || !sameUrlWithoutHash(state.pageInfo.url, canonical.url)) {
+        return false;
+    }
+    const stateSignature = state.pageInfo?.previewSignature || state.debug?.previewSignature || '';
+    const canonicalSignature = canonical.previewSignature || '';
+    if (stateSignature && canonicalSignature && stateSignature !== canonicalSignature) {
+        return false;
+    }
+    const stateRevision = Number(state.pageInfo?.selectionRevision || state.debug?.selectionRevision || 0);
+    const canonicalRevision = Number(canonical.selectionRevision || 0);
+    if (Number.isFinite(stateRevision) && Number.isFinite(canonicalRevision) && stateRevision !== canonicalRevision) {
+        return false;
+    }
+    if (canonical.selectedCandidateId && String(state.pageInfo?.selectedCandidateId || '') !== String(canonical.selectedCandidateId)) {
+        return false;
+    }
+    const canonicalRows = marketplacePreviewRowIds(canonical.previewRows);
+    return Boolean(canonicalRows && state.debug?.pinnedEbayPreview && marketplacePreviewRowIds(state.rows) === canonicalRows);
+}
+
+async function applyEbayCanonicalPreviewToSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    if (!canonical?.url || !sameUrlWithoutHash(canonical.url, tab?.url || canonical.url)) {
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'eBay canonical URL is stale');
+        }
+        return null;
+    }
+    const ebayPayload = normalizeEbayPayload(canonical.ebayPayload);
+    const requestClues = ebayPayload?.selectedClues || normalizeRequestClues(canonical.clues);
+    const requestPrimaryClues = ebayPayload?.primaryClues || normalizeRequestClues(canonical.primaryClues);
+    const requestTitle = ebayPayload?.selectedClues?.length > 0
+        ? buildPrimaryClueSearchTitle('', requestClues, requestPrimaryClues)
+        : ebayPayload?.searchTitle ||
+        buildPrimaryClueSearchTitle(canonical.originalTitle || canonical.title || tab?.title || '', requestClues, requestPrimaryClues);
+    const requestStructuredCard = ebayPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || '');
+    const previewRows = (Array.isArray(canonical.previewRows) ? canonical.previewRows : [])
+        .map(sidePanelRowFromPreview)
+        .filter(Boolean)
+        .slice(0, 8);
+    const bestPreviewRow = canonical.selectedCandidateId
+        ? previewRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || previewRows[0] || null
+        : previewRows[0] || null;
+    const previewResult = {
+        pageInfo: {
+            title: requestTitle || canonical.title || tab?.title || '',
+            url: canonical.url || tab?.url || '',
+            hostname: safeUrlHostname(canonical.url || tab?.url),
+            originalTitle: canonical.originalTitle || tab?.title || '',
+            clues: requestClues,
+            primaryClues: requestPrimaryClues,
+            selectedClues: requestClues,
+            structuredCard: requestStructuredCard,
+            ebayPayload,
+            marketplacePayload: ebayPayload,
+            previewSignature: canonical.previewSignature || '',
+            selectedCandidateId: canonical.selectedCandidateId || '',
+            selectionRevision: canonical.selectionRevision || 0,
+        },
+        rows: previewRows,
+        best: bestPreviewRow,
+        blueprintId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+        pokoinUrl: sidePanelStatePokoinUrl(bestPreviewRow),
+        error: previewRows.length > 0 ? '' : 'Waiting for eBay product details.',
+        debug: {
+            version: 2,
+            tab: {
+                id: tab?.id || null,
+                title: tab?.title || '',
+                url: tab?.url || '',
+            },
+            query: requestTitle || canonical.title || tab?.title || '',
+            apiBaseUrl: CARDVAULT_API_BASE_URL,
+            attemptedQueries: [],
+            searched: false,
+            rowCount: previewRows.length,
+            bestId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
+            selectedCandidateId: canonical.selectedCandidateId || '',
+            pinnedPreviewRows: previewRows.length > 0,
+            pinnedEbayPreview: previewRows.length > 0,
+            previewSignature: canonical.previewSignature || '',
+            previewSource: canonical.previewSource || 'ebay_overlay',
+            selectionRevision: canonical.selectionRevision || 0,
+            ebayReadyDriven: true,
+            ebayCanonicalUpdatedAt: canonical.updatedAt || null,
+            refreshFailureReason: options.reason || '',
+            marketplacePayload: ebayPayload ? {
+                source: ebayPayload.source,
+                selectedChipCategories: ebayPayload.selectedChipCategories || [],
+                structuredCard: requestStructuredCard,
+            } : null,
+            error: '',
+        },
+    };
+    await setSidePanelState({
+        updatedAt: Date.now(),
+        ...previewResult,
+    }, owner);
+    if (previewRows.length > 0) {
+        void schedulePriceEnrichment(previewRows, async (enrichedRows) => {
+            if (owner && !isSidePanelOwnerCurrent(owner, canonical.url || tab?.url || '')) {
+                markStaleSidePanelOwner(owner, 'eBay preview price enrichment owner no longer current');
+                return enrichedRows;
+            }
+            const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
+            if (
+                !currentSidePanelState?.debug?.pinnedEbayPreview ||
+                !sameUrlWithoutHash(currentSidePanelState.pageInfo?.url || '', canonical.url || tab?.url || '') ||
+                String(currentSidePanelState.blueprintId || '') !== String(bestPreviewRow?.card_id || '')
+            ) {
+                return enrichedRows;
+            }
+            const enrichedBest = canonical.selectedCandidateId
+                ? enrichedRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || enrichedRows[0] || null
+                : enrichedRows[0] || null;
+            const enrichedCanonical = {
+                ...canonical,
+                previewRows: enrichedRows,
+                updatedAt: Date.now(),
+            };
+            rememberEbayCanonicalPreview(enrichedCanonical);
+            await setSidePanelState({
+                updatedAt: Date.now(),
+                ...previewResult,
+                rows: enrichedRows,
+                best: enrichedBest,
+                blueprintId: enrichedBest?.card_id ? String(enrichedBest.card_id) : '',
+                pokoinUrl: sidePanelStatePokoinUrl(enrichedBest),
+                debug: {
+                    ...previewResult.debug,
+                    priceEnriched: true,
+                },
+            }, owner);
+            return enrichedRows;
+        });
+    }
+    return previewResult;
+}
+
+async function applyEbayCanonicalToSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    const applyKey = !options.forceRefresh && !options.skipInFlightGuard ? ebayCanonicalApplyKey(tab, canonical) : '';
+    if (applyKey && ebayCanonicalApplyInFlight.has(applyKey)) {
+        return ebayCanonicalApplyInFlight.get(applyKey);
+    }
+    if (applyKey) {
+        const recent = ebayCanonicalApplyRecent.get(applyKey);
+        if (recent && Date.now() - recent.timestamp < 1000 && isDuplicateEbayCanonicalState(recent.result, canonical)) {
+            return recent.result;
+        }
+    }
+    const applyPromise = (async () => {
+        if (!options.forceRefresh) {
+            const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+            if (isDuplicateEbayCanonicalState(sidePanelState, canonical)) {
+                return sidePanelState;
+            }
+        }
+        if (canonical?.previewRows?.length > 0) {
+            return applyEbayCanonicalPreviewToSidePanel(tab, canonical, owner, options);
+        }
+        return null;
+    })();
+    if (applyKey) {
+        ebayCanonicalApplyInFlight.set(applyKey, applyPromise.finally(() => {
+            ebayCanonicalApplyInFlight.delete(applyKey);
+        }));
+        return ebayCanonicalApplyInFlight.get(applyKey)
+            .then((result) => {
+                if (isDuplicateEbayCanonicalState(result, canonical)) {
+                    ebayCanonicalApplyRecent.set(applyKey, { result, timestamp: Date.now() });
+                }
+                return result;
+            });
+    }
+    return applyPromise;
 }
 
 async function resolveVintedCanonicalTokensForSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
@@ -4002,6 +4610,32 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
         await setVintedWaitingForPreviewState(tab, reason, owner);
         return;
     }
+    if (isEbayUrl(tab.url)) {
+        const canonical = latestEbayCanonicalPreview(tab, sidePanelState);
+        if (canonical?.previewRows?.length > 0) {
+            const owner = createSidePanelRequestOwner(tab, reason);
+            clearTimeout(sidePanelRefreshTimers.get(tab.id));
+            sidePanelRefreshTimers.delete(tab.id);
+            await applyEbayCanonicalToSidePanel(tab, canonical, owner, { reason });
+            return;
+        }
+    }
+    if (isCardTraderDirectUrl(tab.url)) {
+        clearTimeout(sidePanelRefreshTimers.get(tab.id));
+        sidePanelRefreshTimers.delete(tab.id);
+        if (isLockedCardTraderDirectState(sidePanelState, tab.url)) {
+            rememberCardTraderDirectState(sidePanelState);
+            return;
+        }
+        const owner = createSidePanelRequestOwner(tab, reason);
+        const cached = latestRecentCardTraderDirectState(tab, sidePanelState);
+        if (cached && !reason.includes('force')) {
+            await applyCardTraderDirectCachedState(tab, cached, owner, { reason });
+            return;
+        }
+        await resolveActiveTabForSidePanel(tab, { expectedUrl: tab.url || '', owner });
+        return;
+    }
     if (isLockedCardTraderDirectState(sidePanelState, tab.url)) {
         clearTimeout(sidePanelRefreshTimers.get(tab.id));
         sidePanelRefreshTimers.delete(tab.id);
@@ -4034,6 +4668,13 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
             }
             if (samePinnedVintedPreviewState(latestSidePanelState, refreshTab.url || scheduledUrl)) {
                 return;
+            }
+            if (isEbayUrl(refreshTab.url || scheduledUrl)) {
+                const canonical = latestEbayCanonicalPreview(refreshTab, latestSidePanelState);
+                if (canonical?.previewRows?.length > 0) {
+                    await applyEbayCanonicalToSidePanel(refreshTab, canonical, owner, { reason });
+                    return;
+                }
             }
 
             await setSidePanelState({
@@ -4091,6 +4732,27 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         (!owner || ['activated', 'tab-complete', 'tab-url', 'content-navigation', 'action-click', 'refresh'].includes(owner.reason || ''))
     ) {
         return existingSidePanelState;
+    }
+    if (
+        !requestContext.forceRefresh &&
+        isDuplicateEbayCanonicalState(existingSidePanelState, latestEbayCanonicalPreview(tab, existingSidePanelState) || {}) &&
+        (!owner || ['activated', 'tab-complete', 'tab-url', 'content-navigation', 'action-click', 'refresh'].includes(owner.reason || ''))
+    ) {
+        return existingSidePanelState;
+    }
+    if (!requestContext.forceRefresh && isCardTraderDirectUrl(tab?.url || '')) {
+        const cachedCardTraderState = latestRecentCardTraderDirectState(tab, existingSidePanelState);
+        if (cachedCardTraderState) {
+            if (isDuplicateCardTraderDirectState(existingSidePanelState, cachedCardTraderState)) {
+                return existingSidePanelState;
+            }
+            const cachedResult = await applyCardTraderDirectCachedState(tab, cachedCardTraderState, owner, {
+                reason: requestContext.reason || owner?.reason || 'resolve-cardtrader-direct-cache',
+            });
+            if (cachedResult) {
+                return cachedResult;
+            }
+        }
     }
     const phaseTimings = {};
     let phaseStartedAt = resolveStartedAt;
@@ -4204,8 +4866,40 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                 }];
                 debug.cardtraderBlueprintId = pageInfo.cardtraderBlueprintId;
             } else {
-                const exactIdentity = hasExactStructuredIdentity(pageInfo.structuredCard);
-                const exactFastPath = hasExactSearchFastPath(pageInfo.structuredCard);
+                let exactIdentity = hasExactStructuredIdentity(pageInfo.structuredCard);
+                let exactFastPath = hasExactSearchFastPath(pageInfo.structuredCard);
+                const nameResolutionTitle = titleForNameResolution(
+                    pageInfo.title,
+                    marketplacePayload?.source && effectiveRequestClues.length > 0 ? '' : (pageInfo.originalTitle || tab?.title || ''),
+                    pageInfo.clues
+                );
+                const nameResolutionOptions = {
+                    source: marketplacePayload?.source || (isCardmarketUrl(pageInfo.url) ? 'cardmarket' : 'marketplace'),
+                    clues: effectiveRequestClues,
+                    primaryClues: effectivePrimaryClues,
+                    selectedClueSignature: selectedClueSignature(effectiveRequestClues, effectivePrimaryClues),
+                };
+                if (shouldResolveNameBeforeExactSearch(pageInfo.structuredCard, nameResolutionOptions)) {
+                    try {
+                        const promotedResolution = await promoteStructuredNameFromCardvaultTitle(
+                            nameResolutionTitle,
+                            pageInfo.structuredCard,
+                            nameResolutionOptions
+                        );
+                        debug.nameResolution = promotedResolution.nameResolution;
+                        if (promotedResolution.applied) {
+                            pageInfo.structuredCard = promotedResolution.structuredCard;
+                            exactIdentity = hasExactStructuredIdentity(pageInfo.structuredCard);
+                            exactFastPath = hasExactSearchFastPath(pageInfo.structuredCard);
+                        }
+                    } catch (nameResolutionError) {
+                        debug.nameResolution = {
+                            source: 'marketplace_card_names_for_language',
+                            error: nameResolutionError.message || 'Card name resolution failed.',
+                        };
+                    }
+                    markPhase('preExactNameResolutionMs');
+                }
                 if (exactFastPath) {
                     try {
                         const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
@@ -4238,20 +4932,12 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                         }
                     }
                     try {
-                        const nameResolutionTitle = titleForNameResolution(
-                            pageInfo.title,
-                            marketplacePayload?.source && effectiveRequestClues.length > 0 ? '' : (pageInfo.originalTitle || tab?.title || ''),
-                            pageInfo.clues
-                        );
-                        const nameResolution = await resolveNameFromCardvaultTitle(
+                        const nameResolution = debug.nameResolution?.name
+                            ? debug.nameResolution
+                            : await resolveNameFromCardvaultTitle(
                             nameResolutionTitle,
                             pageInfo.structuredCard,
-                            {
-                                source: marketplacePayload?.source || (isCardmarketUrl(pageInfo.url) ? 'cardmarket' : 'marketplace'),
-                                clues: effectiveRequestClues,
-                                primaryClues: effectivePrimaryClues,
-                                selectedClueSignature: selectedClueSignature(effectiveRequestClues, effectivePrimaryClues),
-                            }
+                            nameResolutionOptions
                         );
                         debug.nameResolution = nameResolution;
                         if (shouldUseResolvedCardName(nameResolution.name, pageInfo.structuredCard)) {
@@ -4368,6 +5054,10 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         debug,
     }, owner);
 
+    if (pageInfo.cardtraderBlueprintId) {
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug };
+    }
+
     void schedulePriceEnrichment(rows, async (enrichedRows) => {
         if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
             markStaleSidePanelOwner(owner, 'price enrichment owner no longer current');
@@ -4479,6 +5169,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         }),
                     };
                 }
+                if (isEbayUrl(tab.url || '')) {
+                    const canonical = latestEbayCanonicalPreview(tab, sidePanelState);
+                    if (canonical?.previewRows?.length > 0 && !request.forceRefresh) {
+                        const owner = createSidePanelRequestOwner(tab, 'resolve-ebay-canonical');
+                        return applyEbayCanonicalToSidePanel(tab, canonical, owner, {
+                            reason: 'resolve-active-tab',
+                        });
+                    }
+                }
                 return resolveActiveTabForSidePanel(tab, {
                     forceRefresh: Boolean(request.forceRefresh),
                     clues: request.clues,
@@ -4542,10 +5241,31 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     }
                     const cardmarketContext = cardmarketContextFromRequest(request, requestUrl);
                     const structuredCard = marketplacePayload?.structuredCard || scrapeStructuredCardFields(title, cardmarketContext);
-                    const exactIdentity = hasExactStructuredIdentity(structuredCard);
-                    const exactFastPath = hasExactSearchFastPath(structuredCard);
+                    let exactIdentity = hasExactStructuredIdentity(structuredCard);
+                    let exactFastPath = hasExactSearchFastPath(structuredCard);
                     let rows = [];
                     let searchResult = null;
+                    let preExactNameResolution = null;
+                    const nameResolutionTitle = titleForNameResolution(title, isSelectedOverlaySearch ? '' : (request.originalTitle || tab?.title || ''), [...clues, ...primaryClues]);
+                    const nameResolutionOptions = {
+                        source: marketplacePayload?.source || (isCardmarketUrl(requestUrl) ? 'cardmarket' : 'marketplace'),
+                        clues,
+                        primaryClues,
+                        selectedClueSignature: selectedClueSignature(clues, primaryClues),
+                    };
+                    if (shouldResolveNameBeforeExactSearch(structuredCard, nameResolutionOptions)) {
+                        const promotedResolution = await promoteStructuredNameFromCardvaultTitle(
+                            nameResolutionTitle,
+                            structuredCard,
+                            nameResolutionOptions
+                        );
+                        preExactNameResolution = promotedResolution.nameResolution;
+                        if (promotedResolution.applied) {
+                            Object.assign(structuredCard, promotedResolution.structuredCard);
+                            exactIdentity = hasExactStructuredIdentity(structuredCard);
+                            exactFastPath = hasExactSearchFastPath(structuredCard);
+                        }
+                    }
                     if (exactFastPath) {
                         searchResult = await searchExtensionCard(structuredCard);
                         rows = searchResult.rows;
@@ -4564,16 +5284,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             }
                         }
                         const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
-                        const nameResolution = await resolveNameFromCardvaultTitle(
-                            titleForNameResolution(title, isSelectedOverlaySearch ? '' : (request.originalTitle || tab?.title || ''), [...clues, ...primaryClues]),
-                            structuredContext || structuredCard,
-                            {
-                                source: marketplacePayload?.source || (isCardmarketUrl(requestUrl) ? 'cardmarket' : 'marketplace'),
-                                clues,
-                                primaryClues,
-                                selectedClueSignature: selectedClueSignature(clues, primaryClues),
-                            }
-                        );
+                        const nameResolution = preExactNameResolution?.name
+                            ? preExactNameResolution
+                            : await resolveNameFromCardvaultTitle(
+                                nameResolutionTitle,
+                                structuredContext || structuredCard,
+                                nameResolutionOptions
+                            );
                         if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
                             structuredCard.name = nameResolution.name;
                             structuredCard.searchName = searchNameWithVariation(nameResolution.name, structuredCard.variation || '');
@@ -4686,6 +5403,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         url: currentUrl || tab.url || senderTab.url || '',
                     })
                     : null;
+                const recentEbayCanonical = previewRows.length === 0
+                    ? latestRecentEbayCanonicalPreview(request, {
+                        ...tab,
+                        id: senderTab.id,
+                        url: currentUrl || tab.url || senderTab.url || '',
+                    })
+                    : null;
                 if (
                     recentVintedCanonical?.previewRows?.length > 0 &&
                     !request.forceRefresh
@@ -4697,13 +5421,51 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         title: request.title || currentTitle || tab.title || '',
                     }, recentVintedCanonical, owner, { reason: 'open-recent-vinted-cache' });
                 }
+                if (
+                    recentEbayCanonical?.previewRows?.length > 0 &&
+                    !request.forceRefresh
+                ) {
+                    return applyEbayCanonicalToSidePanel({
+                        ...tab,
+                        id: senderTab.id,
+                        url: currentUrl || tab.url || senderTab.url || '',
+                        title: request.title || currentTitle || tab.title || '',
+                    }, recentEbayCanonical, owner, { reason: 'open-recent-ebay-cache' });
+                }
                 if (vintedCanonical) {
                     rememberVintedCanonicalPreview({
                         ...vintedCanonical,
                         selectedCandidateId: selectedCandidateRow?.card_id || vintedCanonical.selectedCandidateId || '',
                     });
                 }
+                const ebayCanonical = ebayCanonicalFromRequest(request, {
+                    ...tab,
+                    id: senderTab.id,
+                    url: currentUrl || tab.url || senderTab.url || '',
+                });
+                if (ebayCanonical?.previewRows?.length > 0) {
+                    rememberEbayCanonicalPreview({
+                        ...ebayCanonical,
+                        selectedCandidateId: selectedCandidateRow?.card_id || ebayCanonical.selectedCandidateId || '',
+                    });
+                }
                 if (directCardTraderBlueprintId) {
+                    const cachedDirectState = !request.forceRefresh
+                        ? latestRecentCardTraderDirectState({
+                            ...tab,
+                            id: senderTab.id,
+                            url: currentUrl || tab.url || senderTab.url || '',
+                            title: currentTitle || tab.title || senderTab.title || '',
+                        })
+                        : null;
+                    if (cachedDirectState) {
+                        return applyCardTraderDirectCachedState({
+                            ...tab,
+                            id: senderTab.id,
+                            url: currentUrl || tab.url || senderTab.url || '',
+                            title: currentTitle || tab.title || senderTab.title || '',
+                        }, cachedDirectState, owner, { reason: 'open-cardtrader-direct-cache' });
+                    }
                     const directName = cleanCardTraderDirectName(currentTitle, currentUrl, directCardTraderBlueprintId);
                     const directRow = {
                         card_id: directCardTraderBlueprintId,
@@ -4843,6 +5605,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
                             pinnedPreviewRows: true,
                             pinnedVintedPreview: request.previewSource === 'vinted_overlay' || /^vinted\|/.test(request.previewSignature || ''),
+                            pinnedEbayPreview: request.previewSource === 'ebay_overlay' || /^ebay\|/.test(request.previewSignature || ''),
                             previewSignature: request.previewSignature || '',
                             previewSource: request.previewSource || '',
                             selectionRevision: Number(request.selectionRevision || 0),
@@ -4960,6 +5723,65 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         scheduleSidePanelRefresh(tab, 'content-navigation')
             .then(() => sendResponse({ success: true }))
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to schedule refresh.' }));
+    } else if (request.action === 'marketplacePreviewReady' && request.source === 'ebay') {
+        Promise.resolve()
+            .then(async () => {
+                await ensureRuntimeStorageCurrent();
+                const senderTab = sender.tab;
+                if (!senderTab?.id) {
+                    return { success: false, error: 'No sender tab found.' };
+                }
+                const tab = chrome.tabs?.get ? await chrome.tabs.get(senderTab.id).catch(() => senderTab) : senderTab;
+                const currentTab = tab?.id ? tab : senderTab;
+                const currentUrl = request.url || currentTab.url || senderTab.url || '';
+                if (!isEbayUrl(currentUrl) || !sameUrlWithoutHash(currentUrl, currentTab.url || currentUrl)) {
+                    return { success: true, ignored: true, reason: 'stale-ebay-preview-url' };
+                }
+                const canonicalRequest = ebayCanonicalFromRequest(request, {
+                    ...currentTab,
+                    id: senderTab.id,
+                    url: currentUrl,
+                });
+                const hasPreviewRows = canonicalRequest?.previewRows?.length > 0;
+                const canonical = rememberEbayCanonicalPreview(canonicalRequest);
+                if (!canonical || !hasPreviewRows) {
+                    return { success: true, ignored: true, reason: 'missing-ebay-canonical-preview' };
+                }
+                const canonicalTab = {
+                    ...currentTab,
+                    id: senderTab.id,
+                    url: currentUrl,
+                    title: request.title || currentTab.title || '',
+                };
+                const applyKey = !request.forceRefresh ? ebayCanonicalApplyKey(canonicalTab, canonical) : '';
+                if (applyKey && ebayCanonicalApplyInFlight.has(applyKey)) {
+                    return ebayCanonicalApplyInFlight.get(applyKey)
+                        .then((result) => ({ success: true, result }));
+                }
+                const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+                const sidePanelUrl = sidePanelState?.pageInfo?.url || '';
+                if (
+                    sidePanelUrl &&
+                    !sameUrlWithoutHash(sidePanelUrl, currentUrl) &&
+                    isSupportedMarketplaceUrl(sidePanelUrl)
+                ) {
+                    return { success: true, ignored: true, reason: 'side-panel-owned-by-other-url' };
+                }
+                const owner = createSidePanelRequestOwner(canonicalTab, 'ebay-preview-ready');
+                const applyPromise = applyEbayCanonicalToSidePanel(canonicalTab, canonical, owner, {
+                    reason: 'ebay-preview-ready',
+                    skipInFlightGuard: true,
+                });
+                if (applyKey) {
+                    ebayCanonicalApplyInFlight.set(applyKey, applyPromise.finally(() => {
+                        ebayCanonicalApplyInFlight.delete(applyKey);
+                    }));
+                }
+                const result = await applyPromise;
+                return { success: true, result };
+            })
+            .then((response) => sendResponse(response))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to apply eBay preview.' }));
     } else if (request.action === 'marketplacePreviewReady' || request.action === 'vintedProductReady') {
         Promise.resolve()
             .then(async () => {
@@ -5071,6 +5893,28 @@ chrome.action.onClicked.addListener(async (tab) => {
         }
 
         if (samePinnedVintedPreviewState(sidePanelState, tab?.url || '')) {
+            return;
+        }
+
+        if (isEbayUrl(tab?.url || '')) {
+            const canonical = latestEbayCanonicalPreview(tab, sidePanelState);
+            if (canonical?.previewRows?.length > 0) {
+                await applyEbayCanonicalToSidePanel(tab, canonical, owner, { reason: 'action-click' });
+                return;
+            }
+        }
+
+        if (isCardTraderDirectUrl(tab?.url || '')) {
+            if (isLockedCardTraderDirectState(sidePanelState, tab.url)) {
+                rememberCardTraderDirectState(sidePanelState);
+                return;
+            }
+            const cached = latestRecentCardTraderDirectState(tab, sidePanelState);
+            if (cached) {
+                await applyCardTraderDirectCachedState(tab, cached, owner, { reason: 'action-click' });
+                return;
+            }
+            await resolveActiveTabForSidePanel(tab, { expectedUrl: tab?.url || '', owner });
             return;
         }
 

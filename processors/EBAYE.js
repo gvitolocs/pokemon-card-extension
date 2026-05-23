@@ -23,6 +23,8 @@ class EbayProcessor {
         this.searchResultsBySignature = new Map();
         this.pendingSearchApplications = new Map();
         this.lastRenderedPreviewResults = [];
+        this.lastSentEbayPreviewReadySignature = '';
+        this.lastSentEbayPreviewReadyRowIds = '';
         this.currentMatchCount = 0;
     }
 
@@ -220,6 +222,22 @@ class EbayProcessor {
         }
     }
 
+    knownEbayCompositeName(value = '') {
+        const normalized = this.normalizeClueValue(value);
+        const compositeNames = [
+            'Holon Transceiver',
+            "Team Rocket's Mimikyu",
+            "Arven's Mabosstiff ex",
+            'Gengar Mimikyu',
+            'Gengar Mimikyu GX',
+            'Espeon & Deoxys',
+            'Espeon & Deoxys ex',
+        ];
+        return compositeNames.find((name) =>
+            this.compactClueValue(name) === this.compactClueValue(normalized)
+        ) || '';
+    }
+
     resolvedPokemonNameFromClue(value = '') {
         if (typeof window.extractTitleInfo !== 'function') {
             return '';
@@ -377,6 +395,15 @@ class EbayProcessor {
         }
     }
 
+    addHolonPhraseCandidates(candidates, title = '') {
+        const source = this.normalizeClueValue(title)
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (/\bholon\s+transceiver\b/i.test(source)) {
+            this.addKeywordCandidate(candidates, 'Holon Transceiver', 'title-composite');
+        }
+    }
+
     extractEbayKeywords(title = '', details = '', titleInfo = {}) {
         const tokenizedTitle = this.ebayTitleTokenSource(title);
         const tokenizedDetails = this.ebayTitleTokenSource(details);
@@ -386,6 +413,7 @@ class EbayProcessor {
         }
         const candidates = [];
         this.addCompositeConnectorCandidates(candidates, tokenizedTitle);
+        this.addHolonPhraseCandidates(candidates, tokenizedTitle);
         const expansionHints = [
             'Generations Radiant Collection',
             'Radiant Collection',
@@ -473,20 +501,26 @@ class EbayProcessor {
     prepareEbayKeywordCandidates(candidates = [], sourceText = '') {
         const prepared = candidates.map((candidate, index) => {
             const label = candidate.label || candidate.value || '';
-            const nameLike = this.isPokemonNameLikeClue(label);
-            const collectorNumber = this.isCollectorNumberClue(label);
-            const expansion = this.isExpansionClue(label);
-            const feature = this.isFeatureClue(label);
-            const variation = (this.isVariationClue(label) || this.isMegaFormClue(label, sourceText)) && !expansion && !feature;
-            const labelCompact = this.compactClueValue(label);
+            const knownCompositeName = this.knownEbayCompositeName(label);
+            const compositeName = Boolean(knownCompositeName);
+            const normalizedCandidate = knownCompositeName
+                ? { ...candidate, label: knownCompositeName, value: knownCompositeName, compact: this.compactClueValue(knownCompositeName) }
+                : candidate;
+            const normalizedLabel = normalizedCandidate.label || normalizedCandidate.value || '';
+            const nameLike = compositeName || this.isPokemonNameLikeClue(normalizedLabel);
+            const collectorNumber = this.isCollectorNumberClue(normalizedLabel);
+            const expansion = this.isExpansionClue(normalizedLabel);
+            const feature = this.isFeatureClue(normalizedLabel);
+            const variation = (this.isVariationClue(normalizedLabel) || this.isMegaFormClue(normalizedLabel, sourceText)) && !expansion && !feature;
             const selectedByDefault =
                 nameLike ||
                 collectorNumber ||
                 (variation && /^(?:title-pattern|title-expansion)$/.test(candidate.source || '')) ||
                 (expansion && /^(?:title-expansion|title-pattern)$/.test(candidate.source || ''));
             return {
-                ...candidate,
+                ...normalizedCandidate,
                 nameLike,
+                compositeName,
                 variation,
                 collectorNumber,
                 expansion,
@@ -497,12 +531,26 @@ class EbayProcessor {
             };
         });
         const hasSelectedCollector = prepared.some((keyword) => keyword.collectorNumber && keyword.selectedByDefault);
+        const selectedCompositeNames = prepared
+            .filter((keyword) => keyword.compositeName && keyword.selectedByDefault)
+            .map((keyword) => keyword.compact);
         return prepared
-            .map((keyword) => ({
-                ...keyword,
-                selectedByDefault: keyword.selectedByDefault || (hasSelectedCollector && keyword.nameLike),
-            }))
+            .map((keyword) => {
+                const shadowedByComposite = Boolean(
+                    keyword.nameLike &&
+                    !keyword.compositeName &&
+                    selectedCompositeNames.some((compositeCompact) =>
+                        compositeCompact !== keyword.compact && compositeCompact.includes(keyword.compact)
+                    )
+                );
+                return {
+                    ...keyword,
+                    selectedByDefault: (keyword.selectedByDefault || (hasSelectedCollector && keyword.nameLike)) && !shadowedByComposite,
+                    shadowedByComposite,
+                };
+            })
             .sort((left, right) => {
+                if (left.compositeName !== right.compositeName) return left.compositeName ? -1 : 1;
                 if (left.nameLike !== right.nameLike) return left.nameLike ? -1 : 1;
                 if (left.selectedByDefault !== right.selectedByDefault) return left.selectedByDefault ? -1 : 1;
                 if (left.collectorNumber !== right.collectorNumber) return left.collectorNumber ? -1 : 1;
@@ -589,7 +637,7 @@ class EbayProcessor {
         const evidence = [title, details].filter(Boolean).join(' ');
         const fallbackName = this.extractName(titleInfo, title);
         const name = nameKeyword
-            ? (this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            ? (this.knownEbayCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
             : fallbackName;
         const variation = variationKeywords.map((keyword) => keyword.value).join(' ') || this.extractVariation(titleInfo, evidence);
         const collectorNumber = collectorKeyword ? this.normalizeEbayCollectorNumber(collectorKeyword.value) : (titleInfo.collectorNumber || titleInfo.cardNumber || this.extractCollectorNumber(titleInfo, evidence));
@@ -721,7 +769,7 @@ class EbayProcessor {
         const variationKeywords = selectedKeywords.filter((keyword) => keyword.variation);
         const titleInfo = this.extractTitleInfo(this.currentTitle || '');
         const resolvedName = nameKeyword
-            ? (this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            ? (this.knownEbayCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
             : '';
         const name = resolvedName || this.extractName(titleInfo, this.currentTitle || '');
         const variation = variationKeywords.map((keyword) => keyword.value).join(' ') || this.extractVariation(titleInfo, this.currentTitle || '');
@@ -747,7 +795,7 @@ class EbayProcessor {
         const featureKeywords = selectedKeywords.filter((keyword) => keyword.feature);
         const evidence = [title, details].filter(Boolean).join(' ');
         const name = nameKeyword
-            ? (this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            ? (this.knownEbayCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
             : this.extractName(titleInfo, title);
         const variation = variationKeywords.map((keyword) => keyword.value).join(' ') || this.extractVariation(titleInfo, evidence);
         const collectorNumber = collectorKeyword ? this.normalizeEbayCollectorNumber(collectorKeyword.value) : (titleInfo.collectorNumber || titleInfo.cardNumber || this.extractCollectorNumber(titleInfo, evidence));
@@ -811,10 +859,14 @@ class EbayProcessor {
 
     async searchCardWithBackground(title, ebayPayload = this.buildEbayPayload(title)) {
         const signature = this.buildEbaySearchSignature(ebayPayload);
+        if (this.searchResultsBySignature.has(signature)) {
+            return this.searchResultsBySignature.get(signature);
+        }
         if (this.recentSearchResults.has(signature)) {
             const cachedResults = this.recentSearchResults.get(signature);
             this.recentSearchResults.delete(signature);
             this.recentSearchResults.set(signature, cachedResults);
+            this.searchResultsBySignature.set(signature, cachedResults);
             this.storeMatchedResults(window.location.href, title, cachedResults);
             return cachedResults;
         }
@@ -832,6 +884,7 @@ class EbayProcessor {
             url: window.location.href,
         });
         const results = response?.success && Array.isArray(response.results) ? response.results : [];
+        this.searchResultsBySignature.set(signature, results);
         this.rememberRecentSearchResults(signature, results);
         this.storeMatchedResults(window.location.href, title, results);
         return results;
@@ -1263,6 +1316,10 @@ class EbayProcessor {
         return [number || rawNumber, setName, price].filter(Boolean).join(' · ');
     }
 
+    candidateExpansionLogoUrl(result = {}) {
+        return result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || result.symbol_image_url || '';
+    }
+
     renderCandidatePreview(results = []) {
         this.removeOwnedPanelChildren('[data-pokoin-candidate-preview]');
         this.lastRenderedPreviewResults = Array.isArray(results) ? results : [];
@@ -1289,11 +1346,15 @@ class EbayProcessor {
         `;
         results.slice(0, 8).forEach((result) => {
             const row = document.createElement('button');
+            const logoUrl = this.candidateExpansionLogoUrl(result);
             row.type = 'button';
             row.setAttribute('data-pokoin-candidate-row', 'true');
             row.setAttribute('aria-label', `Open ${this.compactCandidateMeta(result) || 'candidate'} in Pokoin side panel`);
             row.style.cssText = `
                 display: grid;
+                grid-template-columns: ${logoUrl ? '22px minmax(0, 1fr)' : '1fr'};
+                align-items: center;
+                gap: 8px;
                 width: 100%;
                 padding: 10px 0;
                 border: 0;
@@ -1304,7 +1365,7 @@ class EbayProcessor {
                 cursor: pointer;
                 pointer-events: auto;
             `;
-            row.innerHTML = `<span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result) || 'Candidate'}</span>`;
+            row.innerHTML = `${logoUrl ? `<img src="${logoUrl}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:999px;background:rgba(15,23,42,0.72);">` : ''}<span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result) || 'Candidate'}</span>`;
             row.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1322,6 +1383,8 @@ class EbayProcessor {
         this.lastAppliedSearchSignature = '';
         this.pendingSearchApplications.clear();
         this.lastRenderedPreviewResults = [];
+        this.lastSentEbayPreviewReadySignature = '';
+        this.lastSentEbayPreviewReadyRowIds = '';
         this.removeOwnedPanelChildren('[data-pokoin-candidate-preview]');
         this.currentMatchCount = 0;
         if (this.currentButton) {
@@ -1336,6 +1399,10 @@ class EbayProcessor {
             this.applyEbaySearchResults(searchSignature, this.searchResultsBySignature.get(searchSignature), { trigger });
             return;
         }
+        if (this.searchResultsBySignature.has(searchSignature)) {
+            this.applyEbaySearchResults(searchSignature, this.searchResultsBySignature.get(searchSignature), { trigger });
+            return;
+        }
         const searchToken = ++this.latestSearchToken;
         const backgroundResults = await this.searchCardWithBackground(title, ebayPayload);
         if (searchToken !== this.latestSearchToken || searchSignature !== this.buildEbaySearchSignature(this.buildSelectedEbayPayload(title))) {
@@ -1347,17 +1414,57 @@ class EbayProcessor {
     }
 
     applyEbaySearchResults(searchSignature, results = []) {
-        if (!this.isEbayOwnedNodeConnected(this.currentButton)) {
-            this.lastAppliedSearchSignature = searchSignature;
-            this.searchResultsBySignature.set(searchSignature, results);
-            this.renderCandidatePreview(results);
-            return false;
-        }
+        const isConnected = this.isEbayOwnedNodeConnected(this.currentButton);
         this.lastAppliedSearchSignature = searchSignature;
         this.pendingSearchApplications.delete(searchSignature);
         this.searchResultsBySignature.set(searchSignature, results);
         this.renderCandidatePreview(results);
-        return true;
+        this.sendEbayPreviewReady(searchSignature, results);
+        return isConnected;
+    }
+
+    ebayPreviewRowIds(results = []) {
+        return (Array.isArray(results) ? results : [])
+            .slice(0, 8)
+            .map((result) => String(this.candidateCardId(result) || ''))
+            .filter(Boolean)
+            .join('|');
+    }
+
+    sendEbayPreviewReady(searchSignature, results = []) {
+        if (!Array.isArray(results) || results.length === 0) {
+            return Promise.resolve();
+        }
+        const rowIds = this.ebayPreviewRowIds(results);
+        if (this.lastSentEbayPreviewReadySignature === searchSignature && this.lastSentEbayPreviewReadyRowIds === rowIds) {
+            return Promise.resolve();
+        }
+        const ebayPayload = this.buildSelectedEbayPayload(this.currentTitle || document.title);
+        const previewPayload = this.buildSidePanelPreviewRowsPayload(window.location.href, results);
+        if (!previewPayload.previewRows?.length) {
+            return Promise.resolve();
+        }
+        this.lastSentEbayPreviewReadySignature = searchSignature;
+        this.lastSentEbayPreviewReadyRowIds = rowIds;
+        return Promise.resolve(chrome.runtime.sendMessage({
+            action: 'marketplacePreviewReady',
+            source: 'ebay',
+            url: window.location.href,
+            title: ebayPayload.searchTitle || this.currentTitle || document.title,
+            originalTitle: this.currentTitle || document.title,
+            listingKey: ebayPayload.listingKey || this.stableUrl(),
+            clues: ebayPayload.selectedClues || [],
+            primaryClues: ebayPayload.primaryClues || [],
+            selectedClues: ebayPayload.selectedClues || [],
+            ebayPayload,
+            marketplacePayload: ebayPayload,
+            previewSignature: searchSignature,
+            previewSource: 'ebay_overlay',
+            selectionRevision: this.currentSelectionRevision,
+            ...previewPayload,
+        })).catch((error) => {
+            console.warn('⚠️ [EBAYE] Unable to send eBay preview:', error);
+        });
     }
 
     /**

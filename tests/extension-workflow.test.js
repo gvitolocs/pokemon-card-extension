@@ -1118,6 +1118,37 @@ test('Vinted Rocket Zapdos keeps composite card name primary with collector', ()
     assert.deepEqual([...payload.primaryClues], ['Rocket Zapdos']);
 });
 
+test('Vinted Holon Transceiver keeps full trainer name primary with collector', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/98-holon-transceiver', hostname: 'www.vinted.it' },
+            extractTitleInfo: () => ({ pokemonName: null }),
+        },
+    });
+    const processor = new Processor();
+    const title = 'Delta Species: Holon Transceiver [98]';
+
+    processor.currentTitle = title;
+    processor.prepareVintedKeywords(title, '');
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const selectedLabels = processor.selectedKeywordLabels();
+    const primaryClues = processor.selectedPrimaryClues(selectedLabels);
+    const payload = processor.buildVintedPayload(title, selectedLabels);
+
+    assert.ok(labels.includes('Holon Transceiver'), 'full trainer item name chip should render');
+    assert.ok(labels.includes('98') || labels.includes('Holon Transceiver 98'), 'collector evidence should render');
+    assert.ok(selectedLabels.includes('Holon Transceiver'), 'full trainer item name should be selected');
+    assert.equal(selectedLabels.includes('Transceiver'), false, 'suffix token should be shadowed by full phrase');
+    assert.deepEqual([...primaryClues], ['Holon Transceiver', 'Delta Species']);
+    assert.equal(payload.name, 'Holon Transceiver');
+    assert.ok(/\b98\b/.test(payload.collectorNumber));
+    assert.equal(payload.numericCollectorNumber, '98');
+    assert.ok(payload.selectedClues.includes('Delta Species'), 'delta context should remain selected');
+    assert.deepEqual([...payload.primaryClues], ['Holon Transceiver', 'Delta Species']);
+    assert.match(payload.searchTitle, /Holon Transceiver\b.*\b98\b/);
+    assert.doesNotMatch(payload.searchTitle, /\bXtransceiver\b/i);
+});
+
 test('Vinted illustration chip is always visible and only auto-selected from title hint', () => {
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -1996,6 +2027,92 @@ test('background autocomplete resolver keeps trainer composite name over shorter
         .filter((entry) => entry.url.includes('/api/extension-card-search'))
         .map((entry) => entry.body.name);
     assert.ok(exactNames.every((name) => name === "Arven's Mabosstiff ex"), JSON.stringify(exactNames));
+});
+
+test('background resolver promotes Holon Transceiver over suffix token and caches API calls', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/searchbar-token-predict')) {
+                assert.notEqual(body.query, 'Transceiver', 'suffix token should not be resolved before full phrase');
+                return { ok: true, json: async () => ({ ok: true, predictions: [] }) };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.notEqual(body.search_term, 'Transceiver', 'suffix token should not be autocompleted when full phrase is present');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: [
+                            { card_id: 'plain-transceiver', name: 'Transceiver', canonical_name: 'Transceiver', search_rank: 100 },
+                            { card_id: 'holon-transceiver', name: 'Holon Transceiver', canonical_name: 'Holon Transceiver', search_rank: 90 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                assert.equal(body.name.replace(/\s+Delta Species$/i, ''), 'Holon Transceiver');
+                assert.equal(body.collectorNumber, '98');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'holon-transceiver-98', name: 'Holon Transceiver', expansionName: 'EX Delta Species', collectorNumber: '98/113', score: 99 },
+                        ],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+    const request = {
+        action: 'searchCardForTitle',
+        title: 'Transceiver Delta Species 98',
+        originalTitle: 'Delta Species: Holon Transceiver [98]',
+        url: 'https://www.vinted.it/items/98-holon-transceiver',
+        selectedClues: ['Transceiver', 'Holon Transceiver', 'Delta Species', '98'],
+        clues: ['Transceiver', 'Holon Transceiver', 'Delta Species', '98'],
+        primaryClues: ['Transceiver', 'Holon Transceiver'],
+        previewSignature: 'vinted|holon-transceiver|98',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/98-holon-transceiver',
+            originalTitle: 'Delta Species: Holon Transceiver [98]',
+            searchTitle: 'Transceiver Holon Transceiver Delta Species 98',
+            name: 'Transceiver',
+            variation: '',
+            collectorNumber: '98',
+            numericCollectorNumber: '98',
+            selectedClues: ['Transceiver', 'Holon Transceiver', 'Delta Species', '98'],
+            primaryClues: ['Transceiver', 'Holon Transceiver'],
+        },
+    };
+    const sender = { tab: { id: 598, title: request.originalTitle, url: request.url } };
+
+    const response = await sendMessage(request, sender);
+    assert.equal(response.success, true, JSON.stringify(response));
+    assert.equal(response.results[0].blueprint_id, 'holon-transceiver-98');
+    const tokenCallsAfterFirst = fetchBodies.filter((entry) => entry.url.includes('/api/searchbar-token-predict')).length;
+    const autocompleteCallsAfterFirst = fetchBodies.filter((entry) => entry.url.includes('/api/marketplace-autocomplete')).length;
+
+    const cachedResponse = await sendMessage({ ...request, forceRefresh: true }, sender);
+    assert.equal(cachedResponse.success, true, JSON.stringify(cachedResponse));
+    const tokenCallsAfterSecond = fetchBodies.filter((entry) => entry.url.includes('/api/searchbar-token-predict')).length;
+    const autocompleteCallsAfterSecond = fetchBodies.filter((entry) => entry.url.includes('/api/marketplace-autocomplete')).length;
+
+    assert.equal(tokenCallsAfterFirst, 1, 'full phrase should use fast token prediction once');
+    assert.equal(autocompleteCallsAfterFirst, 1, 'full phrase should use autocomplete once after empty prediction');
+    assert.equal(tokenCallsAfterSecond, tokenCallsAfterFirst, 'token prediction cache should prevent repeat calls');
+    assert.equal(autocompleteCallsAfterSecond, autocompleteCallsAfterFirst, 'autocomplete cache should prevent repeat calls');
+    assert.deepEqual(
+        fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).map((entry) => entry.body.name),
+        ['Holon Transceiver', 'Holon Transceiver']
+    );
 });
 
 test('background Vinted recent search cache reuses same selected payload', async () => {
@@ -4648,6 +4765,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
         name_en: 'Regigigas VSTAR',
         collector_number: `${114 + index}/189`,
         expansion_name_en: 'Astral Radiance',
+        expansion_symbol_url: index === 0 ? 'https://cdn.example/astral-radiance.png' : '',
         pokoin_price: index === 0 ? '$12.34' : '',
     })));
 
@@ -4660,6 +4778,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.equal(rows[0].type, 'button');
     assert.equal(rows[0].attributes['data-pokoin-candidate-row'], 'true');
     assert.doesNotMatch(rows[0].innerHTML, /Regigigas VSTAR/);
+    assert.match(rows[0].innerHTML, /https:\/\/cdn\.example\/astral-radiance\.png/);
     assert.match(rows[0].innerHTML, /114/);
     assert.match(rows[0].innerHTML, /Astral Radiance/);
     assert.match(rows[0].innerHTML, /\$12\.34/);
@@ -4687,6 +4806,39 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
         stopImmediatePropagation() {},
     });
     assert.equal(messages.length, 2, 'one runtime message should be sent for each real candidate click');
+});
+
+test('eBay compact candidate preview renders expansion logo when provided', () => {
+    const panel = createDomElement('div');
+    const button = createButtonStub();
+    panel.appendChild(button);
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: { location: { href: 'https://www.ebay.com/itm/1', hostname: 'www.ebay.com', pathname: '/itm/1' } },
+        document: {
+            title: 'Mew ex 232/091',
+            querySelectorAll: () => [],
+            contains: (element) => panel.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: panel,
+        },
+    });
+    const processor = new Processor();
+    processor.currentButton = button;
+    processor.currentTitle = 'Mew ex 232/091';
+    processor.ensureEbayPanel = () => panel;
+    processor.isEbayOwnedNodeConnected = () => true;
+
+    processor.renderCandidatePreview([{
+        blueprint_id: '548832',
+        name_en: 'Mew ex',
+        collector_number: '232/091',
+        expansion_name_en: 'Paldean Fates',
+        expansion_symbol_url: 'https://cdn.example/paldean-fates.png',
+    }]);
+
+    const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
+    assert.match(preview.children[0].innerHTML, /https:\/\/cdn\.example\/paldean-fates\.png/);
+    assert.match(preview.children[0].style.cssText, /grid-template-columns:\s*22px minmax\(0, 1fr\)/);
 });
 
 test('Vinted candidate metadata includes Pokoin price when available', () => {
@@ -5205,6 +5357,213 @@ test('eBay button sends same structured payload and preview rows to side panel',
     assert.equal(message.ebayPayload.collectorNumber, '110/114');
     assert.equal(message.ebayPayload.expansion, 'Steam Siege');
     assert.deepEqual(message.marketplacePayload, message.ebayPayload);
+});
+
+test('eBay repeated same item and selected clues reuse overlay preview cache', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.com/itm/100-ultra-necrozma?hash=a',
+                hostname: 'www.ebay.com',
+                pathname: '/itm/100-ultra-necrozma',
+            },
+            extractTitleInfo: () => ({
+                pokemonName: 'Ultra Necrozma',
+                isGXCard: true,
+                collectorNumber: '95/131',
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action === 'searchCardForTitle') {
+                        return {
+                            success: true,
+                            results: [
+                                { blueprint_id: 'ultra-necrozma-gx-95', name_en: 'Ultra Necrozma GX', collector_number: '95/131', search_score: 96 },
+                            ],
+                        };
+                    }
+                    return { success: true };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    const title = 'Ultra Necrozma GX 95/131 Pokemon TCG';
+    processor.currentTitle = title;
+    processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.runEbaySearch(title, 'first-visit');
+    await Promise.resolve();
+    await processor.runEbaySearch(title, 'tab-revisit');
+    await Promise.resolve();
+
+    const searchMessages = messages.filter((message) => message.action === 'searchCardForTitle');
+    const previewMessages = messages.filter((message) => message.action === 'marketplacePreviewReady');
+    assert.equal(searchMessages.length, 1, 'same eBay URL and selected clues should not search twice');
+    assert.equal(previewMessages.length, 1, 'same eBay preview rows should not re-send preview-ready on revisit');
+    assert.equal(previewMessages[0].source, 'ebay');
+    assert.deepEqual(previewMessages[0].previewRows.map((row) => row.card_id), ['ultra-necrozma-gx-95']);
+});
+
+test('eBay changed manual clue invalidates overlay preview cache', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.com/itm/101-magearna?hash=a',
+                hostname: 'www.ebay.com',
+                pathname: '/itm/101-magearna',
+            },
+            extractTitleInfo: () => ({
+                pokemonName: 'Magearna',
+                isEXCard: true,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action === 'searchCardForTitle') {
+                        const manualCollector = message.selectedClues?.includes('110/114');
+                        return {
+                            success: true,
+                            results: [
+                                {
+                                    blueprint_id: manualCollector ? 'magearna-ex-110' : 'magearna-generic',
+                                    name_en: 'Magearna EX',
+                                    collector_number: manualCollector ? '110/114' : '',
+                                    search_score: 95,
+                                },
+                            ],
+                        };
+                    }
+                    return { success: true };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    const title = 'Magearna EX Pokemon TCG';
+    processor.currentTitle = title;
+    processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    await processor.runEbaySearch(title, 'first-visit');
+    processor.addManualEbayKeyword('110/114');
+    processor.invalidateEbayPreviewForSelectionChange();
+    await processor.runEbaySearch(title, 'manual-clue');
+
+    const searchMessages = messages.filter((message) => message.action === 'searchCardForTitle');
+    const previewMessages = messages.filter((message) => message.action === 'marketplacePreviewReady');
+    assert.equal(searchMessages.length, 2, 'changed eBay selected clue should search again');
+    assert.equal(previewMessages.length, 2, 'changed eBay selected clue should publish a new canonical preview');
+    assert.equal(searchMessages.at(-1).ebayPayload.collectorNumber, '110/114');
+    assert.deepEqual(previewMessages.at(-1).previewRows.map((row) => row.card_id), ['magearna-ex-110']);
+});
+
+test('background eBay canonical preview cache is isolated by item URL', async () => {
+    const storage = {};
+    const storageWrites = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        storage,
+        tabs: {
+            get: async (tabId) => ({
+                id: tabId,
+                title: tabId === 10 ? 'Magearna EX' : 'Ultra Necrozma GX',
+                url: tabId === 10
+                    ? 'https://www.ebay.com/itm/10-magearna'
+                    : 'https://www.ebay.com/itm/11-ultra-necrozma',
+            }),
+        },
+        sessionStorage: {
+            set: async (payload) => {
+                Object.assign(storage, payload);
+                if (payload.sidePanelState) {
+                    storageWrites.push(payload.sidePanelState);
+                }
+            },
+        },
+    });
+    const magearnaPayload = {
+        source: 'ebay',
+        listingKey: 'https://www.ebay.com/itm/10-magearna',
+        originalTitle: 'Magearna EX',
+        searchTitle: 'Magearna ex',
+        name: 'Magearna',
+        variation: 'ex',
+        selectedClues: ['Magearna', 'ex'],
+        primaryClues: ['Magearna', 'ex'],
+    };
+    const ultraPayload = {
+        source: 'ebay',
+        listingKey: 'https://www.ebay.com/itm/11-ultra-necrozma',
+        originalTitle: 'Ultra Necrozma GX',
+        searchTitle: 'Ultra Necrozma GX',
+        name: 'Ultra Necrozma',
+        variation: 'GX',
+        selectedClues: ['Ultra Necrozma', 'GX'],
+        primaryClues: ['Ultra Necrozma', 'GX'],
+    };
+
+    await sendMessage({
+        action: 'marketplacePreviewReady',
+        source: 'ebay',
+        url: magearnaPayload.listingKey,
+        title: magearnaPayload.searchTitle,
+        originalTitle: magearnaPayload.originalTitle,
+        selectedClues: magearnaPayload.selectedClues,
+        primaryClues: magearnaPayload.primaryClues,
+        previewSignature: 'ebay|magearna|10',
+        selectionRevision: 0,
+        ebayPayload: magearnaPayload,
+        marketplacePayload: magearnaPayload,
+        previewRows: [{ card_id: 'magearna-ex-110', name: 'Magearna EX' }],
+    }, { tab: { id: 10, title: 'Magearna EX', url: magearnaPayload.listingKey } });
+    await sendMessage({
+        action: 'marketplacePreviewReady',
+        source: 'ebay',
+        url: ultraPayload.listingKey,
+        title: ultraPayload.searchTitle,
+        originalTitle: ultraPayload.originalTitle,
+        selectedClues: ultraPayload.selectedClues,
+        primaryClues: ultraPayload.primaryClues,
+        previewSignature: 'ebay|ultra-necrozma|11',
+        selectionRevision: 0,
+        ebayPayload: ultraPayload,
+        marketplacePayload: ultraPayload,
+        previewRows: [{ card_id: 'ultra-necrozma-gx-95', name: 'Ultra Necrozma GX' }],
+    }, { tab: { id: 11, title: 'Ultra Necrozma GX', url: ultraPayload.listingKey } });
+    await sendMessage({
+        action: 'openSidePanelForCurrentTab',
+        url: magearnaPayload.listingKey,
+        title: magearnaPayload.searchTitle,
+        originalTitle: magearnaPayload.originalTitle,
+        selectedClues: magearnaPayload.selectedClues,
+        primaryClues: magearnaPayload.primaryClues,
+        previewSignature: 'ebay|magearna|10',
+        ebayPayload: magearnaPayload,
+        marketplacePayload: magearnaPayload,
+    }, { tab: { id: 10, title: 'Magearna EX', url: magearnaPayload.listingKey } });
+
+    const latestState = storageWrites.at(-1);
+    assert.equal(latestState.pageInfo.url, magearnaPayload.listingKey);
+    assert.deepEqual(latestState.rows.map((row) => row.card_id), ['magearna-ex-110']);
+    assert.doesNotMatch(JSON.stringify(latestState), /ultra-necrozma/i);
 });
 
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
@@ -6498,7 +6857,7 @@ test('side panel refresh forwards stored eBay selected-key payload', async () =>
     assert.equal(refreshMessage.marketplacePayload.source, 'ebay');
 });
 
-test('side panel candidate rows prefer preview thumbnails before set logos', async () => {
+test('side panel candidate rows prefer set logos before preview thumbnails', async () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
     const makeElement = (id) => {
@@ -6564,9 +6923,35 @@ test('side panel candidate rows prefer preview thumbnails before set logos', asy
     sandbox.renderState(state);
     const candidate = elementsById.get('candidateList').children[0];
     const media = candidate.children[0];
-    const image = media.children[0];
-    assert.equal(image.className, 'candidate-preview-image');
-    assert.equal(image.src, 'https://cdn.pokoin.com/previews/274416_mew-ex.jpg');
+    const logo = media.children[0];
+    assert.equal(media.children.length, 1);
+    assert.equal(logo.className, 'candidate-logo');
+    assert.equal(logo.src, 'https://cdn.pokoin.com/expansions/symbols/paldean-fates.png');
+
+    sandbox.renderState({
+        ...state,
+        rows: [{
+            card_id: '274417',
+            name: 'Mew ex',
+            set_name: '',
+            card_number: 'Special Illustration Rare | 232/091',
+            preview_image_url: 'https://cdn.pokoin.com/previews/274417_mew-ex.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/274417',
+        }],
+        best: {
+            card_id: '274417',
+            name: 'Mew ex',
+            preview_image_url: 'https://cdn.pokoin.com/previews/274417_mew-ex.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/274417',
+        },
+        blueprintId: '274417',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/274417',
+    });
+    const fallbackMedia = elementsById.get('candidateList').children[0].children[0];
+    const fallbackImage = fallbackMedia.children[0];
+    assert.equal(fallbackMedia.children.length, 1);
+    assert.equal(fallbackImage.className, 'candidate-preview-image');
+    assert.equal(fallbackImage.src, 'https://cdn.pokoin.com/previews/274417_mew-ex.jpg');
 });
 
 test('Vinted side panel Refresh reuses canonical overlay preview rows', async () => {
@@ -10432,6 +10817,301 @@ test('CardTrader direct URL opens side panel without page scrape or API search',
     assert.equal(finalState.debug.directCardTrader, true);
 });
 
+test('CardTrader repeated same blueprint activation reuses cached direct state without loading rewrite', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    let executeScriptCalls = 0;
+    let fetchCalls = 0;
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async () => {
+            fetchCalls += 1;
+            throw new Error('CardTrader direct revisit should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                get: async () => ({
+                    id: 7,
+                    title: 'Charizard ex',
+                    url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+                }),
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    executeScriptCalls += 1;
+                    throw new Error('CardTrader direct revisit should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel; this.scheduleSidePanelRefresh = scheduleSidePanelRefresh;`, sandbox, { filename: 'config/background.js' });
+
+    const tab = {
+        id: 7,
+        title: 'Charizard ex',
+        url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+    };
+    const first = await sandbox.resolveActiveTabForSidePanel(tab, { expectedUrl: tab.url });
+    const writesAfterFirst = storageWrites.length;
+
+    await sandbox.scheduleSidePanelRefresh(tab, 'activated');
+
+    assert.equal(first.blueprintId, '12345');
+    assert.equal(storageWrites.length, writesAfterFirst, 'same CardTrader direct state should not be rewritten on activation');
+    assert.equal(storageWrites.some((state) => state.loading), false, 'revisit should not emit a loading state');
+    assert.equal(executeScriptCalls, 0);
+    assert.equal(fetchCalls, 0);
+});
+
+test('CardTrader direct open reuses cached state without reloading same Pokoin URL', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const storageWrites = [];
+    const openedPanels = [];
+    const cardTraderUrl = 'https://www.cardtrader.com/en/cards/12345-charizard-ex';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async () => {
+            throw new Error('CardTrader direct cached open should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                get: async () => ({ id: 7, title: 'Charizard ex', url: cardTraderUrl }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct cached open should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async (payload) => openedPanels.push(payload),
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const request = { action: 'openSidePanelForCurrentTab', url: cardTraderUrl, title: 'Charizard ex', cardtraderBlueprintId: '12345' };
+    const sender = { tab: { id: 7, title: 'Charizard ex', url: cardTraderUrl } };
+    const first = await new Promise((resolve) => messageListener(request, sender, resolve));
+    const writesAfterFirst = storageWrites.length;
+    const firstState = storage.sidePanelState;
+    const second = await new Promise((resolve) => messageListener(request, sender, resolve));
+
+    assert.equal(first.success, true);
+    assert.equal(second.success, true);
+    assert.equal(storageWrites.length, writesAfterFirst, 'cached direct open should not write an equivalent state again');
+    assert.equal(openedPanels.length, 2);
+    assert.equal(storage.sidePanelState, firstState, 'unchanged state lets the side panel keep the existing iframe src');
+    assert.equal(storage.sidePanelState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/12345');
+});
+
+test('CardTrader different direct blueprint updates cached side-panel state', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async () => {
+            throw new Error('CardTrader direct blueprint update should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct blueprint update should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel; this.scheduleSidePanelRefresh = scheduleSidePanelRefresh;`, sandbox, { filename: 'config/background.js' });
+
+    await sandbox.resolveActiveTabForSidePanel({
+        id: 7,
+        title: 'Charizard ex',
+        url: 'https://www.cardtrader.com/en/cards/12345-charizard-ex',
+    });
+    await sandbox.scheduleSidePanelRefresh({
+        id: 7,
+        title: 'Blastoise ex',
+        url: 'https://www.cardtrader.com/en/cards/67890-blastoise-ex',
+    }, 'tab-url');
+
+    assert.equal(storage.sidePanelState.blueprintId, '67890');
+    assert.equal(storage.sidePanelState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/67890');
+    assert.deepEqual(storageWrites.map((state) => state.blueprintId), ['12345', '67890']);
+});
+
+test('CardTrader direct state cache evicts entries beyond last 20', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        fetch: async () => {
+            throw new Error('CardTrader direct cache should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => {
+                    throw new Error('CardTrader direct cache should not scrape');
+                },
+            },
+            storage: {
+                session: {
+                    get: async (key) => {
+                        if (typeof key === 'string') return { [key]: storage[key] };
+                        if (Array.isArray(key)) return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        return { ...storage };
+                    },
+                    set: async (payload) => {
+                        Object.assign(storage, payload);
+                        if (payload.sidePanelState) storageWrites.push(payload.sidePanelState);
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.resolveActiveTabForSidePanel = resolveActiveTabForSidePanel; this.scheduleSidePanelRefresh = scheduleSidePanelRefresh;`, sandbox, { filename: 'config/background.js' });
+
+    const makeTab = (id) => ({
+        id: 7,
+        title: `Card ${id}`,
+        url: `https://www.cardtrader.com/en/cards/${id}-card-${id}`,
+    });
+
+    for (let id = 1; id <= 21; id += 1) {
+        await sandbox.resolveActiveTabForSidePanel(makeTab(id));
+    }
+    const writesAfterWarmup = storageWrites.length;
+
+    await sandbox.scheduleSidePanelRefresh(makeTab(2), 'activated');
+    assert.equal(storageWrites.length, writesAfterWarmup + 1, 'cached CardTrader direct entry should write cached final state');
+    assert.equal(storageWrites.at(-1).blueprintId, '2');
+    assert.equal(storageWrites.at(-1).debug.cardTraderDirectCacheHit, true);
+    assert.equal(storageWrites.at(-1).loading, false);
+
+    await sandbox.scheduleSidePanelRefresh(makeTab(1), 'activated');
+    assert.equal(storageWrites.length, writesAfterWarmup + 2, 'oldest CardTrader direct entry should be rebuilt after cache eviction');
+    assert.equal(storageWrites.at(-1).blueprintId, '1');
+    assert.equal(storageWrites.at(-1).debug.cardTraderDirectCacheHit, undefined);
+});
+
 test('CardTrader direct background search returns clean URL slug name', async () => {
     const source = readRepoFile('config/background.js');
     let messageListener = null;
@@ -11496,6 +12176,170 @@ test('side panel keeps Pokoin iframe alive for same cached URL updates', () => {
     assert.equal(elementsById.get('frameSection').hidden, false);
 });
 
+test('side panel candidate click opens canonical URL without changing iframe', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const srcWrites = [];
+    const openedTabs = [];
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const frame = elementsById.get('pokoinFrame');
+    let frameSrc = '';
+    Object.defineProperty(frame, 'src', {
+        get: () => frameSrc,
+        set: (value) => {
+            srcWrites.push(value);
+            frameSrc = value;
+        },
+    });
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            tabs: {
+                create: async (payload) => {
+                    openedTabs.push(payload);
+                    return {};
+                },
+            },
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: { title: 'Mew ex 232/091', url: 'https://www.vinted.it/items/50-mew-ex' },
+        best: { card_id: '548832', name: 'Mew ex' },
+        blueprintId: '548832',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/548832/current-best',
+        rows: [
+            { card_id: '548832', name: 'Mew ex' },
+            {
+                card_id: '999999',
+                name: 'Mew ex alternate',
+                canonicalUrl: 'https://pokoin.com/marketplace/en/cards/999999/mew-ex-alt',
+                marketplaceUrl: 'https://pokoin.com/marketplace/en/cards/999999',
+            },
+        ],
+    });
+
+    const alternateCandidate = elementsById.get('candidateList').children[1];
+    alternateCandidate.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+    });
+
+    assert.equal(openedTabs.length, 1);
+    assert.equal(openedTabs[0].url, 'https://pokoin.com/marketplace/en/cards/999999/mew-ex-alt');
+    assert.deepEqual(srcWrites, ['https://pokoin.com/marketplace/en/cards/548832/current-best']);
+    assert.equal(frame.src, 'https://pokoin.com/marketplace/en/cards/548832/current-best');
+});
+
+test('side panel candidate keyboard activation uses window fallback', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const openedWindows = [];
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: createClassListStub() },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        window: {
+            open: (url, target, features) => {
+                openedWindows.push({ url, target, features });
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: { title: 'Bulbasaur', url: 'https://www.ebay.com/itm/1' },
+        best: { card_id: '1', name: 'Bulbasaur' },
+        blueprintId: '1',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/1',
+        rows: [{ card_id: '2', name: 'Bulbasaur alt', marketplacePath: '/marketplace/en/cards/2/bulbasaur-alt' }],
+    });
+
+    const candidate = elementsById.get('candidateList').children[0];
+    candidate.eventListeners.keydown({
+        key: ' ',
+        preventDefault() {},
+        stopPropagation() {},
+    });
+
+    assert.deepEqual(openedWindows, [{
+        url: 'https://pokoin.com/marketplace/en/cards/2/bulbasaur-alt',
+        target: '_blank',
+        features: 'noopener',
+    }]);
+});
+
 test('side panel keeps direct CardTrader iframe alive for same blueprint URL', () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
@@ -11772,6 +12616,84 @@ test('side panel preserves API candidate order while rendering logos', () => {
     assert.equal(rendered[1].href, 'https://pokoin.com/marketplace/en/cards/2');
     assert.equal(rendered[2].href, 'https://pokoin.com/marketplace/en/cards/3');
     assert.equal(rendered[1].querySelector('img').src, 'https://cdn.example/logo.png');
+});
+
+test('side panel uses cached expansion logos without repeated fetches', async () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    let fetchCalls = 0;
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => {
+            fetchCalls += 1;
+            return {
+                ok: true,
+                json: async () => ({
+                    expansions: [{ name: 'Paldean Fates', symbolImageUrl: 'https://cdn.example/paldean-fates.png' }],
+                }),
+            };
+        },
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState; this.loadExpansionLogos = loadExpansionLogos;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    await sandbox.loadExpansionLogos();
+    await sandbox.loadExpansionLogos();
+    const state = {
+        pageInfo: { title: 'Mew ex 232/091', url: 'https://www.vinted.it/items/50-mew-ex' },
+        best: { card_id: '548832', name: 'Mew ex', set_name: 'Paldean Fates' },
+        blueprintId: '548832',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/548832',
+        rows: [
+            { card_id: '548832', name: 'Mew ex', set_name: 'Paldean Fates' },
+            { card_id: '999999', name: 'Mew ex alt', set_name: 'Paldean Fates' },
+        ],
+    };
+    sandbox.renderState(state);
+    sandbox.renderState(state);
+
+    const firstLogo = elementsById.get('candidateList').children[0].querySelector('img');
+    const secondLogo = elementsById.get('candidateList').children[1].querySelector('img');
+    assert.equal(fetchCalls, 1);
+    assert.equal(firstLogo.className, 'candidate-logo');
+    assert.equal(firstLogo.src, 'https://cdn.example/paldean-fates.png');
+    assert.equal(secondLogo.src, 'https://cdn.example/paldean-fates.png');
 });
 
 test('side panel warms Pokoin auth session on load', async () => {
