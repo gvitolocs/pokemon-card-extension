@@ -836,6 +836,10 @@ function processListingImmediate(listingElement) {
             console.log(`🚫 [CardTrader] Match already successful for: "${title}", skipping`);
             return;
         }
+
+        if (!instance.globalButton || typeof instance.globalButton.cloneNode !== 'function') {
+            return;
+        }
         
         // Create an immediate loading button (clone the global button)
         const loadingButton = instance.globalButton.cloneNode(true);

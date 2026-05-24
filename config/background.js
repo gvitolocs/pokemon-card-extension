@@ -1194,7 +1194,7 @@ function shouldUseResolvedCardName(resolvedName = '', structuredCard = null) {
     if (requestedName && /[&'’]/.test(structuredCard?.name || '') && compactSearchValue(resolvedName).length < requestedName.length) {
         return false;
     }
-    if (!selectedCluesContainResolvedName(resolvedName, structuredCard) && !rowMatchesStructuredVariation({ name: resolvedName }, structuredCard)) {
+    if (!selectedCluesContainResolvedNamePhrase(resolvedName, structuredCard) && !rowMatchesStructuredVariation({ name: resolvedName }, structuredCard)) {
         return false;
     }
     if (!requestedName) {
@@ -1225,6 +1225,22 @@ function selectedCluesContainResolvedName(resolvedName = '', structuredCard = {}
         ...(Array.isArray(structuredCard?.primaryClues) ? structuredCard.primaryClues : []),
         ...(Array.isArray(structuredCard?.selectedClues) ? structuredCard.selectedClues : []),
     ].some((clue) => compactSearchValue(clue || '') === resolvedCompact);
+}
+
+function selectedCluesContainResolvedNamePhrase(resolvedName = '', structuredCard = {}) {
+    const resolvedCompact = compactSearchValue(resolvedName);
+    if (!resolvedCompact) {
+        return false;
+    }
+    return [
+        ...(Array.isArray(structuredCard?.primaryClues) ? structuredCard.primaryClues : []),
+        ...(Array.isArray(structuredCard?.selectedClues) ? structuredCard.selectedClues : []),
+    ].some((clue) => {
+        const compactClue = compactSearchValue(clue || '');
+        return compactClue &&
+            compactClue.length >= resolvedCompact.length &&
+            (compactClue === resolvedCompact || compactClue.includes(resolvedCompact));
+    });
 }
 
 function compactEditDistanceWithin(left = '', right = '', maxDistance = 1) {
@@ -1624,16 +1640,28 @@ function shouldResolveNameBeforeExactSearch(structuredCard = {}, options = {}) {
     if (!requestedName) {
         return false;
     }
-    return [
+    const selectedClues = [
         ...(Array.isArray(structuredCard?.primaryClues) ? structuredCard.primaryClues : []),
         ...(Array.isArray(structuredCard?.selectedClues) ? structuredCard.selectedClues : []),
-    ].some((clue) => {
+    ];
+    if (selectedClues.some((clue) => {
         const compactClue = compactSearchValue(clue || '');
         return compactClue &&
             compactClue !== requestedName &&
             compactClue.includes(requestedName) &&
             normalizeNameResolverTerm(clue).split(/\s+/).filter(Boolean).length >= 2 &&
             isLikelyCardNameResolverTerm(clue);
+    })) {
+        return true;
+    }
+
+    const titleTerms = candidateNameTermsFromTitle(options.title || '', structuredCard, options);
+    return titleTerms.some((term) => {
+        const compactTerm = compactSearchValue(term || '');
+        return compactTerm &&
+            compactTerm !== requestedName &&
+            compactTerm.endsWith(requestedName) &&
+            normalizeNameResolverTerm(term).split(/\s+/).filter(Boolean).length >= 2;
     });
 }
 
@@ -4877,6 +4905,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     source: marketplacePayload?.source || (isCardmarketUrl(pageInfo.url) ? 'cardmarket' : 'marketplace'),
                     clues: effectiveRequestClues,
                     primaryClues: effectivePrimaryClues,
+                    title: nameResolutionTitle,
                     selectedClueSignature: selectedClueSignature(effectiveRequestClues, effectivePrimaryClues),
                 };
                 if (shouldResolveNameBeforeExactSearch(pageInfo.structuredCard, nameResolutionOptions)) {
@@ -5251,6 +5280,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         source: marketplacePayload?.source || (isCardmarketUrl(requestUrl) ? 'cardmarket' : 'marketplace'),
                         clues,
                         primaryClues,
+                        title: nameResolutionTitle,
                         selectedClueSignature: selectedClueSignature(clues, primaryClues),
                     };
                     if (shouldResolveNameBeforeExactSearch(structuredCard, nameResolutionOptions)) {

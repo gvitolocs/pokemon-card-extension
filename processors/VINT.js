@@ -326,6 +326,33 @@ class VintedProcessor {
         }
     }
 
+    resolvedPokemonNameSuffixFromPhrase(value = '') {
+        const label = this.removeVintedMarketplaceNoise(typeof value === 'object' ? value.label || value.value : value);
+        const normalized = this.normalizeClueValue(label);
+        const resolvedName = this.resolvedPokemonNameFromClue(normalized);
+        const labelCompact = this.compactClueValue(normalized);
+        const resolvedCompact = this.compactClueValue(resolvedName);
+        if (!normalized || !resolvedName || labelCompact === resolvedCompact || normalized.split(/\s+/).length < 2) {
+            return '';
+        }
+        return labelCompact.endsWith(resolvedCompact) ? resolvedName : '';
+    }
+
+    isVintedFullCardIdentityPhrase(value = '') {
+        const label = this.removeVintedMarketplaceNoise(typeof value === 'object' ? value.label || value.value : value);
+        const resolvedSuffix = this.resolvedPokemonNameSuffixFromPhrase(label);
+        if (!resolvedSuffix || this.isVariationClue(label) || this.isCollectorNumberClue(label) || this.isExpansionClue(label)) {
+            return false;
+        }
+
+        const prefix = this.normalizeClueValue(label)
+            .slice(0, Math.max(0, this.normalizeClueValue(label).length - resolvedSuffix.length))
+            .replace(/\s+/g, ' ')
+            .trim();
+        return /\b(?:dark|light|rocket|alto\s+mare's|holon's|team\s+rocket's?|team\s+rocket)\b/i.test(prefix) ||
+            /(?:^|\s)[A-Za-z][A-Za-z]+['’]s\s*$/i.test(prefix);
+    }
+
     knownVintedCompositeName(value = '') {
         const normalized = this.normalizeClueValue(value);
         const compositeNames = [
@@ -711,7 +738,7 @@ class VintedProcessor {
 
     isExpansionClue(value = '') {
         return this.isBaseSetClue(value) ||
-            /\b(?:evolutions|evoluzioni|lost\s+origin|origine\s+perduta|neo\s+discovery|mysterious\s+treasures|tesori\s+misteriosi|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
+            /\b(?:team\s+rocket|evolutions|evoluzioni|lost\s+origin|origine\s+perduta|neo\s+discovery|mysterious\s+treasures|tesori\s+misteriosi|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
     }
 
     sourceContainsClue(value = '', sourceText = '') {
@@ -771,7 +798,8 @@ class VintedProcessor {
                 const compositeNormalizedCandidate = knownCompositeName
                     ? { ...normalizedCandidate, label: knownCompositeName, value: knownCompositeName, compact: this.compactClueValue(knownCompositeName) }
                     : normalizedCandidate;
-                const nameLike = compositeName || this.isPokemonNameLikeClue(compositeNormalizedCandidate);
+                const fullCardIdentityName = !compositeName && this.isVintedFullCardIdentityPhrase(compositeNormalizedCandidate);
+                const nameLike = compositeName || fullCardIdentityName || this.isPokemonNameLikeClue(compositeNormalizedCandidate);
                 const variation = this.isVariationClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value) ||
                     this.isMegaFormClue(compositeNormalizedCandidate, sourceText);
                 const baseSet = this.isBaseSetClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
@@ -796,6 +824,7 @@ class VintedProcessor {
                     ...compositeNormalizedCandidate,
                     nameLike,
                     compositeName,
+                    fullCardIdentityName,
                     variation,
                     baseSet,
                     collectorNumber,
@@ -816,10 +845,10 @@ class VintedProcessor {
         );
 
         const selectedCompositeNames = prepared
-            .filter((keyword) => keyword.compositeName && keyword.selectedByDefault)
+            .filter((keyword) => (keyword.compositeName || keyword.fullCardIdentityName) && keyword.selectedByDefault)
             .map((keyword) => keyword.compact);
         const selectedCompositeNamesWithVariation = prepared
-            .filter((keyword) => keyword.compositeName && keyword.selectedByDefault && this.isVariationClue(keyword.label || keyword.value))
+            .filter((keyword) => (keyword.compositeName || keyword.fullCardIdentityName) && keyword.selectedByDefault && this.isVariationClue(keyword.label || keyword.value))
             .map((keyword) => keyword.compact);
         const selectedAttachedNamePhrases = prepared
             .filter((keyword) => keyword.attachedNamePhrase && keyword.selectedByDefault && this.isPureAttachedVariationPhrase(keyword))
@@ -845,13 +874,14 @@ class VintedProcessor {
                     hasSelectedTitleCollector
                 );
                 const shadowedByComposite = Boolean(
-                    (keyword.nameLike || keyword.compositeName) &&
+                    (keyword.nameLike || keyword.compositeName || keyword.fullCardIdentityName) &&
                     !keyword.compositeName &&
+                    !keyword.fullCardIdentityName &&
                     selectedCompositeNames.some((compositeCompact) =>
                         compositeCompact !== keyword.compact && compositeCompact.includes(keyword.compact)
                     )
                 ) || Boolean(
-                    keyword.compositeName &&
+                    (keyword.compositeName || keyword.fullCardIdentityName) &&
                     !this.isVariationClue(keyword.label || keyword.value) &&
                     selectedCompositeNamesWithVariation.some((compositeCompact) =>
                         compositeCompact !== keyword.compact && compositeCompact.includes(keyword.compact)
@@ -881,8 +911,10 @@ class VintedProcessor {
                 };
             })
             .sort((left, right) => {
-                if (left.compositeName !== right.compositeName) {
-                    return left.compositeName ? -1 : 1;
+                const leftFullIdentity = left.compositeName || left.fullCardIdentityName;
+                const rightFullIdentity = right.compositeName || right.fullCardIdentityName;
+                if (leftFullIdentity !== rightFullIdentity) {
+                    return leftFullIdentity ? -1 : 1;
                 }
                 if (left.attachedNamePhrase !== right.attachedNamePhrase) {
                     return left.attachedNamePhrase ? -1 : 1;
@@ -1075,19 +1107,31 @@ class VintedProcessor {
     }
 
     selectedPrimaryClues(clues = this.selectedKeywordLabels()) {
-        const selectedCompacts = new Set(
-            this.currentKeywords
-                .filter((keyword) => this.selectedKeywordValues.has(keyword.compact))
-                .filter((keyword) =>
-                    keyword.nameLike ||
-                    keyword.attachedNamePhrase ||
-                    keyword.attachedVariation ||
-                    (this.isManualVintedKeyword(keyword) && !keyword.collectorNumber && !keyword.expansion && !keyword.illustration)
-                )
-                .map((keyword) => keyword.compact)
-        );
+        const selectedPrimaryKeywords = this.currentKeywords
+            .filter((keyword) => this.selectedKeywordValues.has(keyword.compact))
+            .filter((keyword) =>
+                keyword.nameLike ||
+                keyword.attachedNamePhrase ||
+                keyword.attachedVariation ||
+                (this.isManualVintedKeyword(keyword) && !keyword.collectorNumber && !keyword.expansion && !keyword.illustration)
+            );
+        const selectedCompacts = new Set(selectedPrimaryKeywords.map((keyword) => keyword.compact));
+        const selectedFullIdentityCompacts = selectedPrimaryKeywords
+            .filter((keyword) => keyword.compositeName || keyword.fullCardIdentityName)
+            .map((keyword) => keyword.compact)
+            .filter(Boolean);
 
-        return clues.filter((clue) => selectedCompacts.has(this.compactClueValue(clue)));
+        return clues
+            .filter((clue) => selectedCompacts.has(this.compactClueValue(clue)))
+            .filter((clue) => {
+                const compact = this.compactClueValue(clue);
+                if (!compact || this.isVariationClue(clue)) {
+                    return true;
+                }
+                return !selectedFullIdentityCompacts.some((identityCompact) =>
+                    identityCompact !== compact && identityCompact.includes(compact)
+                );
+            });
     }
 
     selectedVariationClues(clues = this.selectedKeywordLabels()) {
@@ -1160,7 +1204,11 @@ class VintedProcessor {
             return all.findIndex((candidate) => this.compactClueValue(candidate) === compact) === index;
         });
         const name = nameKeyword
-            ? (this.knownVintedCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            ? (
+                this.knownVintedCompositeName(nameKeyword.value) ||
+                (nameKeyword.fullCardIdentityName ? nameKeyword.value : this.resolvedPokemonNameFromClue(nameKeyword.value)) ||
+                nameKeyword.value
+            )
             : (primaryClues.find((clue) => !this.isVariationClue(clue)) || primaryClues[0] || '');
         const collectorNumber = collectorKeyword ? this.normalizeVintedCollectorNumber(collectorKeyword.value) : '';
         return {

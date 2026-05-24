@@ -234,9 +234,15 @@ class CardmarketProcessor {
      * Check whether current page is a Cardmarket product page
      */
     isProductPage() {
-        return window.location.hostname.includes('cardmarket') && 
-               (window.location.pathname.includes('/Products/Singles/') || 
-                document.querySelector('.page-title-container h1'));
+        if (!window.location.hostname.includes('cardmarket')) {
+            return false;
+        }
+
+        return Boolean(this.getProductTitleElement());
+    }
+
+    getProductTitleElement() {
+        return document.querySelector('.page-title-container h1');
     }
 
     stableProductKey() {
@@ -291,13 +297,17 @@ class CardmarketProcessor {
     }
 
     getReadyProductContext() {
-        const titleElement = document.querySelector('.page-title-container h1');
+        const titleElement = this.getProductTitleElement();
+        if (!titleElement) {
+            return null;
+        }
+
         const title = this.cleanProductTitleText(titleElement);
         const details = this.extractProductDetailFields();
         const hasExpansionLink = Boolean(this.findProductRoot()?.querySelector?.('dl.labeled a[href*="/Products/Singles/"]'));
         const hasIdentityDetails = Boolean(details.number && (details.expansion || hasExpansionLink));
 
-        if (!titleElement || !title || !hasIdentityDetails) {
+        if (!title || !hasIdentityDetails) {
             return null;
         }
 

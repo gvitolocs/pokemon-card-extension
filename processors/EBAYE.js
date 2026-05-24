@@ -196,7 +196,7 @@ class EbayProcessor {
     isExpansionClue(value = '') {
         return this.knownExpansionAliases().some(({ pattern, name }) =>
             pattern.test(value) || this.compactClueValue(name) === this.compactClueValue(value)
-        ) || /\b(?:team\s+magma\s+vs\s+aqua|ex\s+team\s+magma\s+vs\s+aqua)\b/i.test(this.normalizeClueValue(value));
+        ) || /\b(?:team\s+rocket|team\s+magma\s+vs\s+aqua|ex\s+team\s+magma\s+vs\s+aqua)\b/i.test(this.normalizeClueValue(value));
     }
 
     isFeatureClue(value = '') {
@@ -258,6 +258,32 @@ class EbayProcessor {
             console.warn('⚠️ [EBAYE] Unable to resolve eBay clue Pokemon name:', error);
             return '';
         }
+    }
+
+    resolvedPokemonNameSuffixFromPhrase(value = '') {
+        const label = this.removeEbayMarketplaceNoise(value);
+        const resolvedName = this.resolvedPokemonNameFromClue(label);
+        const labelCompact = this.compactClueValue(label);
+        const resolvedCompact = this.compactClueValue(resolvedName);
+        if (!label || !resolvedName || labelCompact === resolvedCompact || label.split(/\s+/).length < 2) {
+            return '';
+        }
+        return labelCompact.endsWith(resolvedCompact) ? resolvedName : '';
+    }
+
+    isEbayFullCardIdentityPhrase(value = '') {
+        const label = this.removeEbayMarketplaceNoise(value);
+        const resolvedSuffix = this.resolvedPokemonNameSuffixFromPhrase(label);
+        if (!resolvedSuffix || this.isVariationClue(label) || this.isCollectorNumberClue(label) || this.isExpansionClue(label)) {
+            return false;
+        }
+
+        const prefix = this.normalizeClueValue(label)
+            .slice(0, Math.max(0, this.normalizeClueValue(label).length - resolvedSuffix.length))
+            .replace(/\s+/g, ' ')
+            .trim();
+        return /\b(?:dark|light|rocket|alto\s+mare's|holon's|team\s+rocket's?|team\s+rocket)\b/i.test(prefix) ||
+            /(?:^|\s)[A-Za-z][A-Za-z]+['’]s\s*$/i.test(prefix);
     }
 
     removeEbayMarketplaceNoise(value = '') {
@@ -507,7 +533,8 @@ class EbayProcessor {
                 ? { ...candidate, label: knownCompositeName, value: knownCompositeName, compact: this.compactClueValue(knownCompositeName) }
                 : candidate;
             const normalizedLabel = normalizedCandidate.label || normalizedCandidate.value || '';
-            const nameLike = compositeName || this.isPokemonNameLikeClue(normalizedLabel);
+            const fullCardIdentityName = !compositeName && this.isEbayFullCardIdentityPhrase(normalizedLabel);
+            const nameLike = compositeName || fullCardIdentityName || this.isPokemonNameLikeClue(normalizedLabel);
             const collectorNumber = this.isCollectorNumberClue(normalizedLabel);
             const expansion = this.isExpansionClue(normalizedLabel);
             const feature = this.isFeatureClue(normalizedLabel);
@@ -521,6 +548,7 @@ class EbayProcessor {
                 ...normalizedCandidate,
                 nameLike,
                 compositeName,
+                fullCardIdentityName,
                 variation,
                 collectorNumber,
                 expansion,
@@ -532,13 +560,14 @@ class EbayProcessor {
         });
         const hasSelectedCollector = prepared.some((keyword) => keyword.collectorNumber && keyword.selectedByDefault);
         const selectedCompositeNames = prepared
-            .filter((keyword) => keyword.compositeName && keyword.selectedByDefault)
+            .filter((keyword) => (keyword.compositeName || keyword.fullCardIdentityName) && keyword.selectedByDefault)
             .map((keyword) => keyword.compact);
         return prepared
             .map((keyword) => {
                 const shadowedByComposite = Boolean(
                     keyword.nameLike &&
                     !keyword.compositeName &&
+                    !keyword.fullCardIdentityName &&
                     selectedCompositeNames.some((compositeCompact) =>
                         compositeCompact !== keyword.compact && compositeCompact.includes(keyword.compact)
                     )
@@ -550,7 +579,9 @@ class EbayProcessor {
                 };
             })
             .sort((left, right) => {
-                if (left.compositeName !== right.compositeName) return left.compositeName ? -1 : 1;
+                const leftFullIdentity = left.compositeName || left.fullCardIdentityName;
+                const rightFullIdentity = right.compositeName || right.fullCardIdentityName;
+                if (leftFullIdentity !== rightFullIdentity) return leftFullIdentity ? -1 : 1;
                 if (left.nameLike !== right.nameLike) return left.nameLike ? -1 : 1;
                 if (left.selectedByDefault !== right.selectedByDefault) return left.selectedByDefault ? -1 : 1;
                 if (left.collectorNumber !== right.collectorNumber) return left.collectorNumber ? -1 : 1;
@@ -637,7 +668,11 @@ class EbayProcessor {
         const evidence = [title, details].filter(Boolean).join(' ');
         const fallbackName = this.extractName(titleInfo, title);
         const name = nameKeyword
-            ? (this.knownEbayCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            ? (
+                this.knownEbayCompositeName(nameKeyword.value) ||
+                (nameKeyword.fullCardIdentityName ? nameKeyword.value : this.resolvedPokemonNameFromClue(nameKeyword.value)) ||
+                nameKeyword.value
+            )
             : fallbackName;
         const variation = variationKeywords.map((keyword) => keyword.value).join(' ') || this.extractVariation(titleInfo, evidence);
         const collectorNumber = collectorKeyword ? this.normalizeEbayCollectorNumber(collectorKeyword.value) : (titleInfo.collectorNumber || titleInfo.cardNumber || this.extractCollectorNumber(titleInfo, evidence));
@@ -769,7 +804,11 @@ class EbayProcessor {
         const variationKeywords = selectedKeywords.filter((keyword) => keyword.variation);
         const titleInfo = this.extractTitleInfo(this.currentTitle || '');
         const resolvedName = nameKeyword
-            ? (this.knownEbayCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            ? (
+                this.knownEbayCompositeName(nameKeyword.value) ||
+                (nameKeyword.fullCardIdentityName ? nameKeyword.value : this.resolvedPokemonNameFromClue(nameKeyword.value)) ||
+                nameKeyword.value
+            )
             : '';
         const name = resolvedName || this.extractName(titleInfo, this.currentTitle || '');
         const variation = variationKeywords.map((keyword) => keyword.value).join(' ') || this.extractVariation(titleInfo, this.currentTitle || '');
@@ -795,7 +834,11 @@ class EbayProcessor {
         const featureKeywords = selectedKeywords.filter((keyword) => keyword.feature);
         const evidence = [title, details].filter(Boolean).join(' ');
         const name = nameKeyword
-            ? (this.knownEbayCompositeName(nameKeyword.value) || this.resolvedPokemonNameFromClue(nameKeyword.value) || nameKeyword.value)
+            ? (
+                this.knownEbayCompositeName(nameKeyword.value) ||
+                (nameKeyword.fullCardIdentityName ? nameKeyword.value : this.resolvedPokemonNameFromClue(nameKeyword.value)) ||
+                nameKeyword.value
+            )
             : this.extractName(titleInfo, title);
         const variation = variationKeywords.map((keyword) => keyword.value).join(' ') || this.extractVariation(titleInfo, evidence);
         const collectorNumber = collectorKeyword ? this.normalizeEbayCollectorNumber(collectorKeyword.value) : (titleInfo.collectorNumber || titleInfo.cardNumber || this.extractCollectorNumber(titleInfo, evidence));

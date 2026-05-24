@@ -1118,6 +1118,39 @@ test('Vinted Rocket Zapdos keeps composite card name primary with collector', ()
     assert.deepEqual([...payload.primaryClues], ['Rocket Zapdos']);
 });
 
+test('Vinted Dark Flareon keeps API-recognized full card name primary with collector and expansion', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/21-dark-flareon', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /flareon/i.test(String(title || '')) ? 'Flareon' : '',
+            }),
+        },
+    });
+    const processor = new Processor();
+    const title = 'Dark Flareon Team Rocket 35/82';
+
+    processor.currentTitle = title;
+    processor.prepareVintedKeywords(title, '');
+    const labels = processor.currentKeywords.map((keyword) => keyword.label);
+    const selectedLabels = processor.selectedKeywordLabels();
+    const primaryClues = processor.selectedPrimaryClues(selectedLabels);
+    const payload = processor.buildVintedPayload(title, selectedLabels);
+
+    assert.ok(labels.includes('Dark Flareon'), 'full card identity chip should render');
+    assert.ok(labels.includes('Flareon'), 'component species chip can remain visible');
+    assert.ok(labels.includes('35/82'), 'collector chip should render');
+    assert.ok(selectedLabels.includes('Dark Flareon'), 'full card identity should be selected');
+    assert.equal(selectedLabels.includes('Flareon'), false, 'component species should be shadowed by full identity');
+    assert.equal(selectedLabels.includes('dark'), false, 'generic adjective token should not be selected separately');
+    assert.ok(selectedLabels.includes('Team Rocket'), 'expansion evidence should remain selected');
+    assert.deepEqual([...primaryClues], ['Dark Flareon']);
+    assert.equal(payload.name, 'Dark Flareon');
+    assert.equal(payload.collectorNumber, '35/82');
+    assert.equal(payload.expansion, 'Team Rocket');
+    assert.deepEqual([...payload.primaryClues], ['Dark Flareon']);
+});
+
 test('Vinted Holon Transceiver keeps full trainer name primary with collector', () => {
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -2112,6 +2145,83 @@ test('background resolver promotes Holon Transceiver over suffix token and cache
     assert.deepEqual(
         fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).map((entry) => entry.body.name),
         ['Holon Transceiver', 'Holon Transceiver']
+    );
+});
+
+test('background resolver promotes Dark Flareon over shorter Flareon when API validates full phrase', async () => {
+    const fetchBodies = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url, options = {}) => {
+            if (url.includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (url.includes('/api/searchbar-token-predict')) {
+                assert.notEqual(body.query, 'Flareon', 'short species token should not be resolved before full phrase');
+                return { ok: true, json: async () => ({ ok: true, predictions: [] }) };
+            }
+            if (url.includes('/api/marketplace-autocomplete')) {
+                assert.equal(body.search_term, 'Dark Flareon');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        rows: [
+                            { card_id: 'plain-flareon', name: 'Flareon', canonical_name: 'Flareon', search_rank: 100 },
+                            { card_id: 'dark-flareon-name', name: 'Dark Flareon', canonical_name: 'Dark Flareon', search_rank: 90 },
+                        ],
+                    }),
+                };
+            }
+            if (url.includes('/api/extension-card-search')) {
+                if (body.name === 'Flareon') {
+                    return { ok: true, json: async () => ({ matches: [] }) };
+                }
+                assert.equal(body.name, 'Dark Flareon');
+                assert.equal(body.collectorNumber, '35/82');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [
+                            { cardId: 'dark-flareon-35', name: 'Dark Flareon', expansionName: 'Team Rocket', collectorNumber: '35/82', score: 99 },
+                        ],
+                    }),
+                };
+            }
+            throw new Error(`Unexpected fetch: ${url}`);
+        },
+    });
+
+    const response = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'Dark Flareon Team Rocket 35/82',
+        originalTitle: 'Dark Flareon Team Rocket 35/82',
+        url: 'https://www.vinted.it/items/35-dark-flareon',
+        selectedClues: ['Dark Flareon', 'Team Rocket', '35/82'],
+        clues: ['Dark Flareon', 'Team Rocket', '35/82'],
+        primaryClues: ['Dark Flareon'],
+        previewSignature: 'vinted|dark-flareon|35-82',
+        selectionRevision: 1,
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/35-dark-flareon',
+            originalTitle: 'Dark Flareon Team Rocket 35/82',
+            searchTitle: 'Dark Flareon Team Rocket 35/82',
+            name: 'Dark Flareon',
+            variation: '',
+            collectorNumber: '35/82',
+            numericCollectorNumber: '35',
+            expansion: 'Team Rocket',
+            selectedClues: ['Dark Flareon', 'Team Rocket', '35/82'],
+            primaryClues: ['Dark Flareon'],
+        },
+    }, { tab: { id: 535, title: 'Dark Flareon Team Rocket 35/82', url: 'https://www.vinted.it/items/35-dark-flareon' } });
+
+    assert.equal(response.success, true, JSON.stringify(response));
+    assert.equal(response.results[0].blueprint_id, 'dark-flareon-35');
+    assert.deepEqual(
+        fetchBodies.filter((entry) => entry.url.includes('/api/extension-card-search')).map((entry) => entry.body.name),
+        ['Dark Flareon']
     );
 });
 
@@ -4985,6 +5095,39 @@ test('eBay Magearna EX title builds Vinted-like structured payload and clues', (
     assert.match(processor.buildEbaySearchSignature(payload), /magearnaexsteamsiege110114/);
 });
 
+test('eBay Dark Flareon keeps full card identity over component species', () => {
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.com/itm/dark-flareon-35',
+                hostname: 'www.ebay.com',
+                pathname: '/itm/dark-flareon-35',
+            },
+            extractTitleInfo: (title) => ({
+                pokemonName: /flareon/i.test(String(title || '')) ? 'Flareon' : null,
+            }),
+        },
+    });
+    const processor = new Processor();
+    const title = 'Dark Flareon Team Rocket 35/82 Pokemon TCG';
+    processor.currentTitle = title;
+    processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.selectedByDefault)
+            .map((keyword) => keyword.compact)
+    );
+
+    const selectedLabels = processor.selectedKeywordLabels();
+    const payload = processor.buildSelectedEbayPayload(title, '');
+
+    assert.ok(processor.currentKeywords.map((keyword) => keyword.label).includes('Dark Flareon'));
+    assert.ok(selectedLabels.includes('Dark Flareon'), 'full card identity should be selected');
+    assert.equal(selectedLabels.includes('Flareon'), false, 'component species should be shadowed');
+    assert.equal(payload.name, 'Dark Flareon');
+    assert.deepEqual(Array.from(payload.primaryClues), ['Dark Flareon']);
+});
+
 test('eBay overlay selected keys preserve RC collector and Radiant Collection evidence', async () => {
     const messages = [];
     const page = createDomElement('div');
@@ -5740,6 +5883,50 @@ test('Cardmarket product injection waits for title and labeled identity details'
     assert.equal(messages.length, 1);
     assert.equal(messages[0].title, 'Piplup (MEP 042)');
     assert.ok(sandbox.document.querySelector('[data-pokemon-linker-button="true"]'));
+});
+
+test('Cardmarket expansion listing URL is not treated as a product page', () => {
+    const errors = [];
+    const messages = [];
+    const documentStub = {
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        createElement: (tagName) => createDomElement(tagName),
+        body: createDomElement('main'),
+        contains: () => false,
+        title: 'BREAKthrough Singles | Cardmarket',
+    };
+    const { Processor } = loadProcessor('processors/CME.js', 'CardmarketProcessor', {
+        window: {
+            location: {
+                href: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/BREAKthrough',
+                hostname: 'www.cardmarket.com',
+                pathname: '/en/Pokemon/Products/Singles/BREAKthrough',
+            },
+            extractTitleInfo: () => ({ pokemonName: null }),
+        },
+        document: documentStub,
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+        error: (...args) => errors.push(args),
+        setTimeout: () => {
+            throw new Error('listing page should not schedule product retries');
+        },
+    });
+    const processor = new Processor();
+
+    assert.equal(processor.isProductPage(), false);
+    assert.equal(processor.getReadyProductContext(), null);
+    assert.doesNotThrow(() => processor.init());
+    assert.equal(messages.length, 0);
+    assert.equal(errors.length, 0);
 });
 
 test('Cardmarket product injection is once per stable ready product URL', async () => {
