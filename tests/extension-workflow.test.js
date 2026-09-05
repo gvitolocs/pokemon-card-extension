@@ -40,6 +40,7 @@ function loadBackgroundHelpers(helperNames = []) {
         fetch: async () => ({ ok: true, json: async () => ({}) }),
         chrome: {
             runtime: {
+                getManifest: () => ({ version: '2.0.0' }),
                 onMessage: { addListener() {} },
                 onInstalled: { addListener() {} },
                 onStartup: { addListener() {} },
@@ -14087,4 +14088,101 @@ test('dist zip includes current runtime files without stale backups', () => {
         const zipContent = execFileSync('unzip', ['-p', path.join(REPO_ROOT, 'dist/pokemon-card-extension-2.0.0.zip'), entry], { encoding: 'utf8' });
         assert.equal(hash(zipContent), sourceHash, `${entry} in dist zip should match source`);
     });
+});
+
+test('extension debug log bounds, redacts, truncates, and clears events', async () => {
+    const storage = {};
+    const sandbox = loadBackgroundHelpers([
+        'recordExtensionDebugEvent',
+        'getExtensionDebugLog',
+        'clearExtensionDebugLog',
+    ]);
+    sandbox.chrome.storage.session.get = async (key) => ({ [key]: storage[key] });
+    sandbox.chrome.storage.session.set = async (payload) => Object.assign(storage, payload);
+
+    for (let index = 0; index < 305; index += 1) {
+        await sandbox.recordExtensionDebugEvent('test.event', {
+            index,
+            url: `https://example.test/item?access_token=secret-${index}`,
+            authorization: 'Bearer very-secret-token',
+            longText: 'x'.repeat(500),
+        });
+    }
+
+    const events = await sandbox.getExtensionDebugLog();
+    assert.equal(events.length, 300);
+    assert.equal(events[0].details.index, 5, 'debug log should keep the newest bounded ring buffer');
+    assert.equal(events.at(-1).details.authorization, '[REDACTED]');
+    assert.match(events.at(-1).details.url, /access_token=\[REDACTED\]/);
+    assert.equal(events.at(-1).details.longText.length, 323);
+
+    await sandbox.clearExtensionDebugLog();
+    assert.equal((await sandbox.getExtensionDebugLog()).length, 0);
+});
+
+test('extension debug log message handlers expose and clear session events', async () => {
+    const harness = loadBackgroundMessageHarness();
+
+    const recordResponse = await harness.sendMessage({
+        action: 'recordExtensionDebugEvent',
+        type: 'processor.search-start',
+        details: {
+            source: 'vinted',
+            url: 'https://www.vinted.it/items/1?token=secret',
+            selectedClues: ['Reshiram'],
+        },
+    });
+    const getResponse = await harness.sendMessage({ action: 'getExtensionDebugLog' });
+    const clearResponse = await harness.sendMessage({ action: 'clearExtensionDebugLog' });
+    const emptyResponse = await harness.sendMessage({ action: 'getExtensionDebugLog' });
+
+    assert.equal(recordResponse.success, true);
+    assert.equal(getResponse.success, true);
+    assert.equal(getResponse.count, 1);
+    assert.equal(getResponse.events[0].type, 'processor.search-start');
+    assert.equal(getResponse.events[0].details.source, 'vinted');
+    assert.match(getResponse.events[0].details.url, /token=\[REDACTED\]/);
+    assert.equal(clearResponse.success, true);
+    assert.equal(emptyResponse.count, 0);
+});
+
+test('Vinted diagnostics forward high-value events to extension debug log in runtime', async () => {
+    const sentMessages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        chrome: {
+            runtime: {
+                id: 'runtime-extension-id',
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    sentMessages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/10-reshiram',
+                hostname: 'www.vinted.it',
+                pathname: '/items/10-reshiram',
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokemon Reshiram';
+    processor.recordVintedDiagnostic('search-start', {
+        searchSignature: 'vinted|reshiram',
+        selectedChipCategories: ['name:Reshiram'],
+        payload: {
+            source: 'vinted',
+            selectedClues: ['Reshiram'],
+            token: 'secret',
+        },
+    });
+
+    const debugMessage = sentMessages.find((message) => message.action === 'recordExtensionDebugEvent');
+    assert.ok(debugMessage);
+    assert.equal(debugMessage.type, 'vinted.search-start');
+    assert.equal(debugMessage.details.source, 'vinted');
+    assert.equal(debugMessage.details.searchSignature, 'vinted|reshiram');
+    assert.deepEqual(debugMessage.details.selectedChipCategories, ['name:Reshiram']);
 });

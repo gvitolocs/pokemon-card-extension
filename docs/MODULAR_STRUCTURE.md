@@ -22,6 +22,9 @@ pokemon-card-extension/
 ├── ui/
 │   └── ButtonManager.js
 ├── ui-pages/
+│   ├── sidepanel.html
+│   ├── sidepanel.js
+│   ├── sidepanel.css
 │   ├── popup.html
 │   ├── popup.js
 │   ├── settings.html
@@ -29,6 +32,7 @@ pokemon-card-extension/
 ├── utils/
 │   └── UrlGenerator.js
 ├── content.js
+├── pokoin-auth-bridge.js
 └── manifest.json
 ```
 
@@ -66,10 +70,22 @@ pokemon-card-extension/
 ### `processors/*.js`
 
 - Encapsulate site-specific integration logic:
-  - `EBAYE.js`
-  - `VINT.js`
-  - `CME.js` (Cardmarket)
-  - `PromoFilter.js` (extra filtering)
+  - `VINT.js`: Vinted selected-chip overlay, preview rows, and structured search payload
+  - `EBAYE.js`: eBay product overlay using the same selected-key workflow
+  - `CME.js`: only active Cardmarket product-page path; historical `content.js` Cardmarket fallback is inert
+  - `PromoFilter.js`: extra promotional filtering
+
+### `pokoin-auth-bridge.js`
+
+- Runs only on `https://pokoin.com/extension/auth-bridge`
+- Accepts object or JSON-string token messages and `token.accessToken`
+- Forwards a normalized token to the background worker
+
+### `ui-pages/sidepanel.*`
+
+- Embeds the Pokoin marketplace card page in the Chrome side panel
+- Consumes `sidePanelState` owned by a monotonic request id
+- Emits iframe reuse/change debug events
 
 ## Runtime Flow
 
@@ -81,12 +97,12 @@ pokemon-card-extension/
 
 ## Side Panel Matching Workflow
 
-1. `config/background.js` scrapes the active marketplace page title with site-specific selectors.
+1. `config/background.js` scrapes the active marketplace page title with site-specific selectors, or reuses overlay selected chips and `previewRows` when Vinted/eBay have already scanned the listing.
 2. The title is normalized into structured fields (`name`, `collectorNumber`, `expansion`, `rarity`, `variation`).
 3. Marketplace noise is removed before search. Vinted terms such as `pokemon`, `pokémon`, `pkkmn`, `pkn`, `pokn`, `sealed`, `salead`, `pack`, `booster`, and `lot` are ignored.
-4. Before card search, the side panel resolves candidate title terms through Cardvault autocomplete, which uses `marketplace_card_names_for_language(...)` behind the API. If a term returns an exact canonical card name, that Cardvault name replaces the locally guessed name.
-5. `/api/extension-card-search` is tried first with the Cardvault-resolved name. Returned rows are accepted only if the returned card name matches the resolved structured name, preventing weak fuzzy matches like unrelated promo cards.
-6. If structured search has no accepted rows, the extension falls back to `/api/marketplace-autocomplete`.
+4. Strong selected or scraped evidence goes to `/api/extension-card-search` first.
+5. If that exact path is empty or weak, `POST /api/searchbar-token-predict` tries a lightweight card-name token, then retries `/api/extension-card-search`.
+6. If token prediction is empty, low-confidence, or unavailable, `POST /api/marketplace-autocomplete` canonicalizes likely name phrases. Autocomplete is also the later broad candidate-fill fallback when structured rows remain insufficient.
 7. The side panel and injected marketplace buttons resolve names from the same Cardvault-backed data, so they do not depend on the old local Pokémon-name list or disagree on the best card.
 
 ## Local Display Workflow

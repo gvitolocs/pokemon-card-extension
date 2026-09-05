@@ -114,6 +114,7 @@ The zip hash guard in the tests checks that packaged runtime files match source.
 
 ## Remaining Work
 
+- Live-verify a Cardmarket observation after Pokoin login: `pokoinAuthSession.token` set, HTTP 201, `source = pokemon-card-extension`. The auth-bridge `accessToken` parser and top-level observation `url` already shipped in `7d90e40`.
 - Validate the live Pokoin `/api/extension-card-search` behavior with `rarityAliases`. The extension now sends the field, but backend support should be confirmed in production logs/API traces.
 - If the backend does not yet consume `rarityAliases`, it should map the aliases server-side or accept multiple rarity values.
 - Consider adding explicit row fields for rarity match confidence in the API response, so the extension can avoid guessing from text fields.

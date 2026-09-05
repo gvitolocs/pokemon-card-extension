@@ -12,16 +12,15 @@ Chrome extension that turns Pokemon card listing titles from eBay, Vinted, CardT
 
 ## Current Architecture
 
-The extension is split into focused modules:
+The live product is a Manifest V3 matching engine. Marketplace processors send selected clues to the background service worker, which searches Pokoin/Cardvault and opens matched cards in the Chrome side panel.
 
-- `content.js`: orchestration, fallback flow, and page patching logic
-- `core/`: shared core logic (`ExtensionCore`, `CacheManager`)
-- `processors/`: site-specific behavior (`EBAYE`, `VINT`, `CME`, `PromoFilter`)
-- `data/`: title parsing (`TitleExtractor`)
-- `ui/`: UI button handling (`ButtonManager`)
-- `utils/`: URL generation (`UrlGenerator`)
-- `config/`: Pokoin API and background configuration
-- `ui-pages/`: popup/settings HTML and JS
+- `config/background.js`: service worker, search, side-panel ownership, Cardmarket observations, session debug log
+- `processors/`: site-specific overlays and parsers (`VINT`, `EBAYE`, `CME`, `PromoFilter`)
+- `pokoin-auth-bridge.js`: Firebase token bridge on `https://pokoin.com/extension/auth-bridge`
+- `ui-pages/sidepanel.html`: embedded Pokoin marketplace page
+- `content.js`: orchestration and leftover compatibility path; Cardmarket/Vinted product pages belong to their processors
+- `core/`, `data/`, `ui/`, `utils/`: shared helpers still loaded by the content-script bundle
+- `ui-pages/popup.html` and `settings.html`: older manual surfaces, not the overlay workflow
 
 ## Installation
 
@@ -46,15 +45,14 @@ cd pokemon-card-extension
 3. Wait for Pokoin buttons to appear
 
 Button states:
-- Gray: searching/matching in progress
-- Green: match found and ready to open
+
+- Gray/loading: matching in progress (Cardmarket compact gray)
+- Matched: `Pokoin.com (N)` with a high-confidence count. Vinted stays Pokoin blue. Cardmarket switches to compact bright blue.
+- Click opens the Chrome side panel for the current tab, not a new browser tab.
 
 ### Manual Mode (Popup)
 
-1. Click the extension icon
-2. Paste a listing title
-3. Generate the Pokoin link
-4. Save cards to your local collection if needed
+The popup can still generate a link from a pasted title. Day-to-day matching is the marketplace overlay plus side panel.
 
 ## Supported Sites
 
@@ -101,12 +99,16 @@ node --test tests/cardvault-api-smoke.test.js
 Technical documentation lives in `docs/`:
 
 - `docs/README.md`: docs index
+- `docs/EXTENSION_WORKFLOW.md`: overlay, side-panel, and matching rules
+- `docs/EXTENSION_AGENT_HANDOFF.md`: runtime, APIs, and remaining work
 - `docs/INSTALLATION.md`: setup steps
 - `docs/MODULAR_STRUCTURE.md`: module overview
 - `docs/API_INTEGRATION.md`: API and auth behavior
+- `docs/POKOIN_AUTH_CARDMARKET_BLOCKER.md`: resolved auth/observation postmortem
 - `docs/DATABASE_STRUCTURE.md`: legacy schema notes
 - `docs/STANDALONE_SETUP.md`: legacy/standalone notes
 - `docs/ICONS.md`: icon generation and placement
+- `errors/EXTENSION_DEBUG_LOGGING.md`: session debug-log export
 
 ## Contributing
 

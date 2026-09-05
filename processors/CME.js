@@ -38,16 +38,47 @@ class CardmarketProcessor {
         return results.filter((result) => this.isHighConfidenceMatch(result)).length;
     }
 
+    recordExtensionDebugEvent(type, details = {}) {
+        if (!chrome.runtime?.id || typeof chrome.runtime.sendMessage !== 'function') {
+            return Promise.resolve(null);
+        }
+        return Promise.resolve(chrome.runtime.sendMessage({
+            action: 'recordExtensionDebugEvent',
+            type,
+            details: {
+                source: 'cardmarket',
+                url: window.location.href,
+                ...details,
+            },
+        })).catch(() => null);
+    }
+
     async searchCardWithBackground(title) {
+        void this.recordExtensionDebugEvent('processor.search-start', {
+            title,
+            selectedClues: [],
+            listingKey: this.stableProductKey(),
+        });
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title,
             url: window.location.href,
         });
-        return response?.success && Array.isArray(response.results) ? response.results : [];
+        const results = response?.success && Array.isArray(response.results) ? response.results : [];
+        void this.recordExtensionDebugEvent(response?.success ? 'processor.search-complete' : 'processor.search-failed', {
+            title,
+            listingKey: this.stableProductKey(),
+            rowCount: results.length,
+            error: response?.success ? '' : response?.error || 'Search failed',
+        });
+        return results;
     }
 
     openPokoinSidePanel() {
+        void this.recordExtensionDebugEvent('processor.side-panel-open', {
+            title: document.title,
+            listingKey: this.stableProductKey(),
+        });
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
             url: window.location.href,
@@ -83,14 +114,28 @@ class CardmarketProcessor {
     }
 
     async searchProductWithBackground(context) {
+        const structuredRequest = this.buildStructuredRequestContext(context);
+        void this.recordExtensionDebugEvent('processor.search-start', {
+            title: context.title,
+            listingKey: context.key || this.stableProductKey(),
+            selectedClues: structuredRequest.clues || [],
+        });
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: context.title,
             url: window.location.href,
-            ...this.buildStructuredRequestContext(context),
+            ...structuredRequest,
             cardmarketReady: true,
         });
-        return response?.success && Array.isArray(response.results) ? response.results : [];
+        const results = response?.success && Array.isArray(response.results) ? response.results : [];
+        void this.recordExtensionDebugEvent(response?.success ? 'processor.search-complete' : 'processor.search-failed', {
+            title: context.title,
+            listingKey: context.key || this.stableProductKey(),
+            selectedClues: structuredRequest.clues || [],
+            rowCount: results.length,
+            error: response?.success ? '' : response?.error || 'Search failed',
+        });
+        return results;
     }
 
     buildSidePanelPreviewRowsPayload(context = {}) {
@@ -124,12 +169,20 @@ class CardmarketProcessor {
     }
 
     openProductSidePanel(context) {
+        const previewPayload = this.buildSidePanelPreviewRowsPayload(context);
+        void this.recordExtensionDebugEvent('processor.side-panel-open', {
+            title: context.title,
+            listingKey: context.key || this.stableProductKey(),
+            selectedClues: this.buildStructuredRequestContext(context).clues || [],
+            previewSignature: previewPayload.previewSignature || '',
+            previewRowCount: previewPayload.previewRows?.length || 0,
+        });
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
             url: window.location.href,
             title: context.title,
             ...this.buildStructuredRequestContext(context),
-            ...this.buildSidePanelPreviewRowsPayload(context),
+            ...previewPayload,
             cardmarketReady: true,
         }).catch((error) => {
             console.warn('⚠️ [CME] Unable to open side panel:', error);
@@ -355,11 +408,21 @@ class CardmarketProcessor {
             }
 
             if (this.processedPages.has(context.key) && document.querySelector('[data-pokemon-linker-button="true"]')) {
+                void this.recordExtensionDebugEvent('processor.process-skip', {
+                    listingKey: context.key,
+                    skippedDuplicateReason: 'same product already processed',
+                    title: context.title,
+                });
                 console.log('🚫 [CME] Product page already processed, skipping');
                 return;
             }
 
             console.log('🔍 [CME] Processing Cardmarket product page...');
+            void this.recordExtensionDebugEvent('processor.product-ready', {
+                listingKey: context.key,
+                title: context.title,
+                selectedClues: this.buildStructuredRequestContext(context).clues || [],
+            });
             
             console.log(`🔍 [CME] Product title: "${context.title}"`);
             
@@ -409,6 +472,13 @@ class CardmarketProcessor {
             // Always run database lookup if button exists (new or already present)
             console.log('🔍 [CME] Starting database lookup for:', titleInfo.pokemonName || context.title);
             const searchPromise = this.inFlightProductSearches.get(context.key) || this.searchProductWithBackground(context);
+            if (this.inFlightProductSearches.has(context.key)) {
+                void this.recordExtensionDebugEvent('processor.search-skip', {
+                    listingKey: context.key,
+                    skippedDuplicateReason: 'in-flight',
+                    title: context.title,
+                });
+            }
             this.inFlightProductSearches.set(context.key, searchPromise);
             searchPromise.then(results => {
                 if (results && results.length > 0) {

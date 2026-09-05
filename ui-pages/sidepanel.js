@@ -16,6 +16,20 @@ function setStatus(message, isError = false) {
     elements.status.hidden = !message;
 }
 
+function recordExtensionDebugEvent(type, details = {}) {
+    if (!chrome.runtime?.id || typeof chrome.runtime.sendMessage !== 'function') {
+        return Promise.resolve(null);
+    }
+    return Promise.resolve(chrome.runtime.sendMessage({
+        action: 'recordExtensionDebugEvent',
+        type,
+        details: {
+            source: 'sidepanel',
+            ...details,
+        },
+    })).catch(() => null);
+}
+
 function absolutePokoinUrl(pathOrUrl = '') {
     const value = String(pathOrUrl || '').trim();
     if (!value) {
@@ -126,12 +140,22 @@ function updatePokoinFrameUrl(pathOrUrl = '') {
     if (nextKey && currentKey === nextKey) {
         dataset.pokoinUrl = nextUrl;
         dataset.pokoinUrlKey = nextKey;
+        void recordExtensionDebugEvent('sidepanel.iframe-reused', {
+            pokoinUrl: nextUrl,
+            frameKey: nextKey,
+        });
         return false;
     }
 
     elements.pokoinFrame.src = nextUrl;
     dataset.pokoinUrl = nextUrl;
     dataset.pokoinUrlKey = nextKey;
+    void recordExtensionDebugEvent('sidepanel.iframe-url-changed', {
+        previousUrl: currentUrl,
+        pokoinUrl: nextUrl,
+        previousFrameKey: currentKey,
+        frameKey: nextKey,
+    });
     return true;
 }
 
@@ -500,6 +524,14 @@ elements.refreshBtn.addEventListener('click', async () => {
             vintedPayload: sidePanelState?.pageInfo?.vintedPayload || null,
             ebayPayload: sidePanelState?.pageInfo?.ebayPayload || null,
             marketplacePayload: sidePanelState?.pageInfo?.marketplacePayload || null,
+        });
+        void recordExtensionDebugEvent('sidepanel.refresh-requested', {
+            url: sidePanelState?.pageInfo?.url || '',
+            source: sidePanelState?.pageInfo?.marketplacePayload?.source || '',
+            selectedClues: sidePanelState?.pageInfo?.selectedClues || sidePanelState?.pageInfo?.clues || [],
+            previewSignature: sidePanelState?.pageInfo?.previewSignature || '',
+            success: Boolean(response?.success),
+            error: response?.success ? '' : response?.error || 'Refresh failed.',
         });
         if (!response?.success) {
             throw new Error(response?.error || 'Refresh failed.');

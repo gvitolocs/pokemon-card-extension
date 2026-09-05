@@ -7,3 +7,6 @@
 # Cursor canvas artifacts live outside the repo, but ignore local copies too.
 canvases/
 *.canvas.tsx
+
+# Codevira cache (gitignored; rebuilt by `codevira sync`)
+.codevira-cache/

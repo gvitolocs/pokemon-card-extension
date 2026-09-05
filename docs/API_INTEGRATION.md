@@ -44,13 +44,20 @@ The active extension resolves cards through Pokoin/Cardvault endpoints hosted at
 
 ## Pokoin Auth Bridge
 
-The extension cannot read the Pokoin web Firebase session from Cardmarket pages. When a Cardmarket observation needs auth, the background worker opens or reuses `https://pokoin.com/extension/auth-bridge` without focusing it. The Pokoin page should call `FirebaseAuth.currentUser.getIdToken()` after receiving `POKOIN_EXTENSION_AUTH_TOKEN_REQUEST` and reply to itself with a `POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE` message containing `token` and optional `expiresAt`.
+The extension cannot read the Pokoin web Firebase session from Cardmarket pages. When a Cardmarket observation needs auth, the background worker opens or reuses `https://pokoin.com/extension/auth-bridge` without focusing it.
 
-`pokoin-auth-bridge.js` runs only on that Pokoin path, accepts `postMessage` events only from `https://pokoin.com`, and forwards valid token messages to the background worker. The background worker stores tokens only in `chrome.storage.session` under `pokoinAuthSession` with expiry metadata. Auth tokens are never written to `chrome.storage.local` and are not sent to marketplace content scripts.
+`pokoin-auth-bridge.js` runs only on that path and accepts `postMessage` events only from `https://pokoin.com`. It parses object or JSON-string payloads and accepts either:
+
+- `type: POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE` with `token` as a string, or
+- `type: pokoin-auth-token` with `ok: true` and `token.accessToken` (the live Pokoin web shape)
+
+Both normalize to `POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE` before `config/background.js` stores `chrome.storage.session.pokoinAuthSession`. Tokens are never written to `chrome.storage.local` and are not sent to marketplace content scripts.
 
 ## Cardmarket Observations
 
-Cardmarket observations are posted to `https://pokoin.com/api/cardmarket-scrape-observation` with `Authorization: Bearer <Firebase ID token>`. Payloads include `structuredCard`, `cardmarketContext`, `match`, and `promoteVerifiedLink`.
+Cardmarket observations are posted to `https://pokoin.com/api/cardmarket-scrape-observation` with `Authorization: Bearer <Firebase ID token>`. Payloads include top-level `url`, `title`, `hostname`, `structuredCard`, `cardmarketContext`, `match`, `promoteVerifiedLink`, `extensionVersion`, and `source`.
+
+Without a top-level `url`, `cardmarketUrl`, or `pageUrl`, Pokoin returns `A valid Cardmarket singles URL is required.` The current builder always sends `url`.
 
 Automatic Cardmarket navigation/search observations use `promoteVerifiedLink: false`. Explicit Cardmarket side-panel opens with a selected or best match use `promoteVerifiedLink: true`, which lets Pokoin persist the full Cardmarket URL into `marketplace_cm_verified_links`. Missing-token observations are queued in `chrome.storage.session` and flushed after the bridge supplies a token.
 

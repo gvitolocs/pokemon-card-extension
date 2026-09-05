@@ -19,12 +19,17 @@ const RECENT_SEARCH_CACHE_LIMIT = 20;
 const CARDVAULT_NAME_RESOLUTION_CACHE_LIMIT = 50;
 const SEARCHBAR_TOKEN_PREDICT_MIN_CONFIDENCE = 70;
 const CARDVAULT_TOKEN_PREDICTION_CACHE_LIMIT = 50;
+const EXTENSION_DEBUG_LOG_STORAGE_KEY = 'pokoinExtensionDebugLog';
+const EXTENSION_DEBUG_LOG_LIMIT = 300;
+const EXTENSION_DEBUG_TEXT_LIMIT = 320;
 
 let stats = {
     cardsProcessed: 0,
     linksGenerated: 0,
     lastUpdate: Date.now()
 };
+let extensionDebugLog = [];
+let extensionDebugSequence = 0;
 
 // Update extension icon
 async function updateIcon(status) {
@@ -96,6 +101,7 @@ async function cardvaultFetch(url, options = {}, retryOptions = {}) {
     let lastError = null;
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
+        const startedAt = Date.now();
         const controller = typeof AbortController !== 'undefined' && !options.signal
             ? new AbortController()
             : null;
@@ -103,12 +109,29 @@ async function cardvaultFetch(url, options = {}, retryOptions = {}) {
             ? setTimeout(() => controller.abort(), timeoutMs)
             : null;
         try {
-            return await fetch(url, {
+            const response = await fetch(url, {
                 ...options,
                 ...(controller ? { signal: controller.signal } : {}),
             });
+            void recordExtensionDebugEvent('api.response', {
+                endpoint: safeDebugEndpoint(url),
+                method: options.method || 'GET',
+                status: response.status,
+                ok: Boolean(response.ok),
+                attempt,
+                durationMs: Date.now() - startedAt,
+            });
+            return response;
         } catch (error) {
             lastError = error;
+            void recordExtensionDebugEvent('api.failure', {
+                endpoint: safeDebugEndpoint(url),
+                method: options.method || 'GET',
+                attempt,
+                finalAttempt: attempt >= attempts,
+                durationMs: Date.now() - startedAt,
+                error: error.message || String(error || ''),
+            });
             if (attempt >= attempts || !isTransientFetchError(error)) {
                 throw error;
             }
@@ -121,6 +144,105 @@ async function cardvaultFetch(url, options = {}, retryOptions = {}) {
     }
 
     throw lastError || new Error('Cardvault request failed.');
+}
+
+function safeDebugEndpoint(url = '') {
+    try {
+        const parsed = new URL(url);
+        return `${parsed.origin}${parsed.pathname}`;
+    } catch (error) {
+        return String(url || '').split('?')[0].slice(0, EXTENSION_DEBUG_TEXT_LIMIT);
+    }
+}
+
+function truncateExtensionDebugText(value = '', limit = EXTENSION_DEBUG_TEXT_LIMIT) {
+    const text = String(value || '');
+    return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
+
+function redactExtensionDebugText(value = '') {
+    return truncateExtensionDebugText(String(value || '')
+        .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+        .replace(/([?&#](?:access_token|id_token|token|auth|authorization|session)=)[^&#\s]+/gi, '$1[REDACTED]')
+        .replace(/\b(?:access_token|id_token|firebase_token|auth_token|authorization|cookie)\s*[:=]\s*[^\s,;}]+/gi, (match) => {
+            const separator = match.includes('=') ? '=' : ':';
+            return `${match.split(separator)[0]}${separator}${separator === '=' ? '' : ' '}[REDACTED]`;
+        }));
+}
+
+function sanitizeExtensionDebugValue(value, depth = 0, key = '') {
+    if (/(?:token|authorization|cookie|password|secret|bearer|firebase)/i.test(key)) {
+        return '[REDACTED]';
+    }
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') {
+        return value;
+    }
+    if (typeof value === 'string') {
+        return redactExtensionDebugText(value);
+    }
+    if (depth >= 4) {
+        return '[Truncated]';
+    }
+    if (Array.isArray(value)) {
+        return value.slice(0, 20).map((entry) => sanitizeExtensionDebugValue(entry, depth + 1));
+    }
+    if (typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).slice(0, 40).map(([entryKey, entryValue]) => [
+            entryKey,
+            sanitizeExtensionDebugValue(entryValue, depth + 1, entryKey),
+        ]));
+    }
+    return truncateExtensionDebugText(String(value));
+}
+
+async function persistExtensionDebugLog() {
+    try {
+        if (chrome.runtime?.id && chrome.storage?.session?.set) {
+            await chrome.storage.session.set({ [EXTENSION_DEBUG_LOG_STORAGE_KEY]: extensionDebugLog });
+        }
+    } catch (error) {
+        // Debug logging must never affect matching or side-panel writes.
+    }
+}
+
+async function recordExtensionDebugEvent(type, details = {}, options = {}) {
+    const entry = {
+        id: `${Date.now().toString(36)}-${(++extensionDebugSequence).toString(36)}`,
+        timestamp: new Date().toISOString(),
+        type: truncateExtensionDebugText(type, 120),
+        details: sanitizeExtensionDebugValue(details || {}),
+        extensionVersion: EXTENSION_VERSION,
+        buildMarker: EXTENSION_BUILD_MARKER,
+    };
+    extensionDebugLog.push(entry);
+    while (extensionDebugLog.length > EXTENSION_DEBUG_LOG_LIMIT) {
+        extensionDebugLog.shift();
+    }
+    if (options.persist !== false) {
+        await persistExtensionDebugLog();
+    }
+    return entry;
+}
+
+async function getExtensionDebugLog() {
+    try {
+        const storage = await chrome.storage.session.get(EXTENSION_DEBUG_LOG_STORAGE_KEY);
+        const storedLog = Array.isArray(storage?.[EXTENSION_DEBUG_LOG_STORAGE_KEY])
+            ? storage[EXTENSION_DEBUG_LOG_STORAGE_KEY].slice(-EXTENSION_DEBUG_LOG_LIMIT)
+            : [];
+        if (storedLog.length > extensionDebugLog.length) {
+            extensionDebugLog = storedLog;
+        }
+    } catch (error) {
+        // Return the in-memory buffer when session storage is unavailable.
+    }
+    return extensionDebugLog.slice(-EXTENSION_DEBUG_LOG_LIMIT);
+}
+
+async function clearExtensionDebugLog() {
+    extensionDebugLog = [];
+    await persistExtensionDebugLog();
+    return [];
 }
 
 function cardtraderBlueprintIdFromUrl(url = '') {
@@ -2765,6 +2887,10 @@ async function searchExtensionCard(structuredCard) {
     });
 
     if (!response.ok) {
+        void recordExtensionDebugEvent('api.extension-card-search.failure', {
+            status: response.status,
+            payload,
+        });
         throw new Error(`Extension card search failed with HTTP ${response.status}`);
     }
 
@@ -3200,6 +3326,13 @@ function markStaleSidePanelOwner(owner = null, reason = 'stale') {
         owner.stale = true;
         owner.staleReason = reason;
     }
+    void recordExtensionDebugEvent('side-panel.stale-owner', {
+        requestId: owner?.requestId || null,
+        tabId: owner?.tabId || null,
+        url: owner?.url || '',
+        reason,
+        staleIgnoredCount: sidePanelStaleIgnoredCount,
+    });
     console.log(`ℹ️ [Background] Ignored stale side panel request${owner?.requestId ? ` #${owner.requestId}` : ''}: ${reason}`);
 }
 
@@ -3253,6 +3386,13 @@ function createSidePanelRequestOwner(tab = {}, reason = 'refresh') {
             // Older requests are also gated by request id before writing.
         }
     }
+    void recordExtensionDebugEvent('side-panel.owner-created', {
+        requestId,
+        previousRequestId: previousOwner?.requestId || null,
+        tabId: owner.tabId,
+        url: owner.url,
+        reason,
+    });
     return owner;
 }
 
@@ -3271,10 +3411,22 @@ async function setSidePanelState(nextState = {}, owner = null) {
         return null;
     }
     if (shouldKeepExistingExactCardmarketState(currentState, state)) {
+        void recordExtensionDebugEvent('side-panel.write-suppressed', {
+            reason: 'kept exact Cardmarket state',
+            requestId: owner?.requestId || null,
+            url: state.pageInfo?.url || owner?.url || '',
+            source: state.pageInfo?.marketplacePayload?.source || state.pageInfo?.hostname || '',
+        });
         console.log('ℹ️ [Background] Kept exact Cardmarket state over weaker same-URL update');
         return currentState;
     }
     if (shouldKeepExistingPinnedVintedState(currentState, state)) {
+        void recordExtensionDebugEvent('side-panel.write-suppressed', {
+            reason: 'kept pinned Vinted preview',
+            requestId: owner?.requestId || null,
+            url: state.pageInfo?.url || owner?.url || '',
+            previewSignature: state.pageInfo?.previewSignature || '',
+        });
         console.log('ℹ️ [Background] Kept Vinted preview rows over broader same-URL update');
         return currentState;
     }
@@ -3284,6 +3436,11 @@ async function setSidePanelState(nextState = {}, owner = null) {
         !state.debug?.forceCardTraderDirectRefresh
     ) {
         rememberCardTraderDirectState(currentState);
+        void recordExtensionDebugEvent('side-panel.write-suppressed', {
+            reason: 'kept duplicate CardTrader direct state',
+            requestId: owner?.requestId || null,
+            url: state.pageInfo?.url || owner?.url || '',
+        });
         console.log('ℹ️ [Background] Kept CardTrader direct state over duplicate same-card update');
         return currentState;
     }
@@ -3292,10 +3449,28 @@ async function setSidePanelState(nextState = {}, owner = null) {
         !state.debug?.pinnedPreviewRows &&
         sameUrlWithoutHash(currentState.pageInfo?.url || '', state.pageInfo?.url || '')
     ) {
+        void recordExtensionDebugEvent('side-panel.write-suppressed', {
+            reason: 'kept pinned preview rows',
+            requestId: owner?.requestId || null,
+            url: state.pageInfo?.url || owner?.url || '',
+            previewSignature: currentState?.pageInfo?.previewSignature || state.pageInfo?.previewSignature || '',
+        });
         console.log('ℹ️ [Background] Kept pinned preview rows over weaker same-URL update');
         return currentState;
     }
     await chrome.storage.session.set({ sidePanelState: state });
+    void recordExtensionDebugEvent('side-panel.write', {
+        requestId: owner?.requestId || null,
+        reason: owner?.reason || '',
+        url: state.pageInfo?.url || owner?.url || '',
+        source: state.pageInfo?.marketplacePayload?.source || state.pageInfo?.hostname || '',
+        rowCount: Array.isArray(state.rows) ? state.rows.length : 0,
+        bestId: state.best?.card_id || state.blueprintId || '',
+        previewSignature: state.pageInfo?.previewSignature || state.debug?.previewSignature || '',
+        selectionRevision: state.pageInfo?.selectionRevision || state.debug?.selectionRevision || 0,
+        loading: Boolean(state.loading),
+        error: state.error || '',
+    });
     rememberCardTraderDirectState(state);
     return state;
 }
@@ -5141,6 +5316,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         ensureRuntimeStorageCurrent()
             .then(() => sendResponse({ success: true, runtime: runtimeDebugMetadata() }))
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to read runtime info.' }));
+    } else if (request.action === 'getExtensionDebugLog') {
+        getExtensionDebugLog()
+            .then((events) => sendResponse({
+                success: true,
+                events,
+                count: events.length,
+                limit: EXTENSION_DEBUG_LOG_LIMIT,
+                runtime: runtimeDebugMetadata(),
+            }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to read extension debug log.' }));
+    } else if (request.action === 'clearExtensionDebugLog') {
+        clearExtensionDebugLog()
+            .then(() => sendResponse({ success: true, count: 0 }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to clear extension debug log.' }));
+    } else if (request.action === 'recordExtensionDebugEvent') {
+        recordExtensionDebugEvent(request.type || request.event || 'content.event', {
+            ...(request.details || {}),
+            senderTabId: sender.tab?.id || null,
+            senderUrl: sender.tab?.url || request.details?.url || '',
+        })
+            .then((entry) => sendResponse({ success: true, entry }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to record extension debug event.' }));
     } else if (request.action === 'toggleExtension') {
         // Implement extension enable/disable logic
         sendResponse({ success: true });
@@ -5238,6 +5435,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     primaryClues,
                     url: requestUrl,
                 });
+                const searchStartedAt = Date.now();
                 const recentSearchKey = buildBackgroundRecentSearchKey({
                     title,
                     originalTitle: request.originalTitle || request.title || tab?.title || '',
@@ -5250,10 +5448,46 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 });
                 const cachedResults = recentSearchCacheGet(backgroundSearchResultCache, recentSearchKey);
                 if (cachedResults && !request.forceRefresh) {
+                    void recordExtensionDebugEvent('background.search-cache-hit', {
+                        source: marketplacePayload?.source || safeUrlHostname(requestUrl) || 'marketplace',
+                        url: requestUrl,
+                        listingKey: marketplacePayload?.listingKey || '',
+                        title,
+                        selectedClues: clues,
+                        primaryClues,
+                        previewSignature: request.previewSignature || '',
+                        selectionRevision: request.selectionRevision ?? marketplacePayload?.selectionRevision ?? '',
+                        searchSignature,
+                        rowCount: cachedResults.length,
+                    });
                     sendResponse({ success: true, results: cachedResults });
                     return;
                 }
-                if (!backgroundSearchInFlight.has(recentSearchKey)) {
+                if (backgroundSearchInFlight.has(recentSearchKey)) {
+                    void recordExtensionDebugEvent('background.search-duplicate-suppressed', {
+                        source: marketplacePayload?.source || safeUrlHostname(requestUrl) || 'marketplace',
+                        url: requestUrl,
+                        listingKey: marketplacePayload?.listingKey || '',
+                        title,
+                        selectedClues: clues,
+                        primaryClues,
+                        previewSignature: request.previewSignature || '',
+                        selectionRevision: request.selectionRevision ?? marketplacePayload?.selectionRevision ?? '',
+                        searchSignature,
+                        reason: 'in-flight',
+                    });
+                } else {
+                    void recordExtensionDebugEvent('background.search-start', {
+                        source: marketplacePayload?.source || safeUrlHostname(requestUrl) || 'marketplace',
+                        url: requestUrl,
+                        listingKey: marketplacePayload?.listingKey || '',
+                        title,
+                        selectedClues: clues,
+                        primaryClues,
+                        previewSignature: request.previewSignature || '',
+                        selectionRevision: request.selectionRevision ?? marketplacePayload?.selectionRevision ?? '',
+                        searchSignature,
+                    });
                     backgroundSearchInFlight.set(recentSearchKey, Promise.resolve()
                 .then(async () => {
                     if (directCardTraderBlueprintId) {
@@ -5368,6 +5602,19 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 })
                 .then((results) => {
                     recentSearchCacheSet(backgroundSearchResultCache, recentSearchKey, results);
+                    void recordExtensionDebugEvent('background.search-complete', {
+                        source: marketplacePayload?.source || safeUrlHostname(requestUrl) || 'marketplace',
+                        url: requestUrl,
+                        listingKey: marketplacePayload?.listingKey || '',
+                        title,
+                        selectedClues: clues,
+                        primaryClues,
+                        previewSignature: request.previewSignature || '',
+                        selectionRevision: request.selectionRevision ?? marketplacePayload?.selectionRevision ?? '',
+                        searchSignature,
+                        rowCount: results.length,
+                        durationMs: Date.now() - searchStartedAt,
+                    });
                     return results;
                 })
                 .finally(() => {
@@ -5408,6 +5655,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     url: currentUrl || tab.url || senderTab.url || '',
                     title: currentTitle || tab.title || senderTab.title || '',
                 }, 'open');
+                void recordExtensionDebugEvent('side-panel.open-request', {
+                    requestId: owner.requestId,
+                    tabId: senderTab.id,
+                    url: currentUrl || tab.url || senderTab.url || '',
+                    title: request.title || currentTitle || '',
+                    source: normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload)?.source || safeUrlHostname(currentUrl),
+                    selectedClues: request.selectedClues || request.clues || [],
+                    previewSignature: request.previewSignature || '',
+                    selectionRevision: request.selectionRevision || 0,
+                    previewRowCount: Array.isArray(request.previewRows) ? request.previewRows.length : 0,
+                    selectedCandidateId: request.selectedCandidateId || '',
+                });
                 openOwner = owner;
                 await openSidePanelPromise;
                 const marketplacePayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
@@ -5774,6 +6033,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 });
                 const hasPreviewRows = canonicalRequest?.previewRows?.length > 0;
                 const canonical = rememberEbayCanonicalPreview(canonicalRequest);
+                void recordExtensionDebugEvent('preview.ready', {
+                    source: 'ebay',
+                    url: currentUrl,
+                    listingKey: request.listingKey || '',
+                    previewSignature: request.previewSignature || '',
+                    selectionRevision: request.selectionRevision || 0,
+                    selectedClues: request.selectedClues || request.clues || [],
+                    previewRowCount: canonicalRequest?.previewRows?.length || 0,
+                    tokensReady: Boolean(request.tokensReady),
+                });
                 if (!canonical || !hasPreviewRows) {
                     return { success: true, ignored: true, reason: 'missing-ebay-canonical-preview' };
                 }
@@ -5834,6 +6103,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 const hasPreviewRows = canonicalRequest?.previewRows?.length > 0;
                 const canonical = rememberVintedCanonicalPreview(canonicalRequest, {
                     clearWaitTimer: hasPreviewRows,
+                });
+                void recordExtensionDebugEvent('preview.ready', {
+                    source: 'vinted',
+                    url: currentUrl,
+                    listingKey: request.listingKey || '',
+                    previewSignature: request.previewSignature || '',
+                    selectionRevision: request.selectionRevision || 0,
+                    selectedClues: request.selectedClues || request.clues || [],
+                    previewRowCount: canonicalRequest?.previewRows?.length || 0,
+                    tokensReady: Boolean(request.tokensReady),
                 });
                 if (!canonical) {
                     return { success: true, ignored: true, reason: 'missing-vinted-canonical-preview' };

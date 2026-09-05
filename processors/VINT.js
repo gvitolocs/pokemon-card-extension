@@ -1353,6 +1353,36 @@ class VintedProcessor {
             this.vintedDiagnostics.shift();
         }
         window.__pokoinVintedDiagnostics = this.vintedDiagnostics;
+        if (chrome.runtime?.id && typeof chrome.runtime.sendMessage === 'function' && [
+            'search-start',
+            'search-complete',
+            'search-skip',
+            'search-stale',
+            'search-apply',
+            'preview-ready',
+            'tokens-ready',
+            'side-panel-payload',
+            'listing-reset',
+            'ui-mount',
+        ].includes(event)) {
+            void Promise.resolve(chrome.runtime.sendMessage({
+                action: 'recordExtensionDebugEvent',
+                type: `vinted.${event}`,
+                details: {
+                    source: 'vinted',
+                    url: window.location.href,
+                    listingKey: entry.listingKey,
+                    searchSignature: entry.searchSignature,
+                    reason: entry.reason,
+                    trigger: entry.trigger,
+                    selectedChipCategories: entry.selectedChipCategories,
+                    skippedDuplicateReason: entry.skippedDuplicateReason,
+                    staleResponseIgnored: entry.staleResponseIgnored,
+                    title: entry.title,
+                    payload: entry.payload,
+                },
+            })).catch(() => null);
+        }
         return entry;
     }
 

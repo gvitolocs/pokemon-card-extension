@@ -900,9 +900,31 @@ class EbayProcessor {
         return results.filter((result) => this.isHighConfidenceMatch(result)).length;
     }
 
+    recordExtensionDebugEvent(type, details = {}) {
+        if (!chrome.runtime?.id || typeof chrome.runtime.sendMessage !== 'function') {
+            return Promise.resolve(null);
+        }
+        return Promise.resolve(chrome.runtime.sendMessage({
+            action: 'recordExtensionDebugEvent',
+            type,
+            details: {
+                source: 'ebay',
+                url: window.location.href,
+                ...details,
+            },
+        })).catch(() => null);
+    }
+
     async searchCardWithBackground(title, ebayPayload = this.buildEbayPayload(title)) {
         const signature = this.buildEbaySearchSignature(ebayPayload);
         if (this.searchResultsBySignature.has(signature)) {
+            void this.recordExtensionDebugEvent('processor.search-skip', {
+                searchSignature: signature,
+                skippedDuplicateReason: 'cached-results',
+                selectedClues: ebayPayload.selectedClues || [],
+                previewSignature: signature,
+                selectionRevision: this.currentSelectionRevision,
+            });
             return this.searchResultsBySignature.get(signature);
         }
         if (this.recentSearchResults.has(signature)) {
@@ -911,8 +933,25 @@ class EbayProcessor {
             this.recentSearchResults.set(signature, cachedResults);
             this.searchResultsBySignature.set(signature, cachedResults);
             this.storeMatchedResults(window.location.href, title, cachedResults);
+            void this.recordExtensionDebugEvent('processor.search-skip', {
+                searchSignature: signature,
+                skippedDuplicateReason: 'recent-search-cache',
+                selectedClues: ebayPayload.selectedClues || [],
+                previewSignature: signature,
+                selectionRevision: this.currentSelectionRevision,
+                rowCount: cachedResults.length,
+            });
             return cachedResults;
         }
+        void this.recordExtensionDebugEvent('processor.search-start', {
+            searchSignature: signature,
+            title: ebayPayload.searchTitle || title,
+            listingKey: ebayPayload.listingKey || this.stableUrl(),
+            selectedClues: ebayPayload.selectedClues || [],
+            primaryClues: ebayPayload.primaryClues || [],
+            previewSignature: signature,
+            selectionRevision: this.currentSelectionRevision,
+        });
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: ebayPayload.searchTitle || title,
@@ -930,6 +969,15 @@ class EbayProcessor {
         this.searchResultsBySignature.set(signature, results);
         this.rememberRecentSearchResults(signature, results);
         this.storeMatchedResults(window.location.href, title, results);
+        void this.recordExtensionDebugEvent(response?.success ? 'processor.search-complete' : 'processor.search-failed', {
+            searchSignature: signature,
+            title: ebayPayload.searchTitle || title,
+            selectedClues: ebayPayload.selectedClues || [],
+            previewSignature: signature,
+            selectionRevision: this.currentSelectionRevision,
+            rowCount: results.length,
+            error: response?.success ? '' : response?.error || 'Search failed',
+        });
         return results;
     }
 
@@ -1327,6 +1375,13 @@ class EbayProcessor {
             if (afterSignature === beforeSignature) {
                 return;
             }
+            void this.recordExtensionDebugEvent('processor.manual-clue-changed', {
+                clue: value,
+                beforeSignature,
+                afterSignature,
+                selectedClues: this.selectedKeywordLabels(),
+                selectionRevision: this.currentSelectionRevision,
+            });
             this.renderKeywordTogglesFromCurrent();
             this.triggerEbaySelectionRefresh('manual-clue');
         };
@@ -1433,22 +1488,48 @@ class EbayProcessor {
         if (this.currentButton) {
             this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
         }
+        void this.recordExtensionDebugEvent('processor.selection-invalidated', {
+            selectionRevision: this.currentSelectionRevision,
+            selectedClues: this.selectedKeywordLabels(),
+            url: window.location.href,
+        });
     }
 
     async runEbaySearch(title = this.currentTitle, trigger = 'process') {
         const ebayPayload = this.buildSelectedEbayPayload(title);
         const searchSignature = this.buildEbaySearchSignature(ebayPayload);
         if (searchSignature === this.lastAppliedSearchSignature && this.searchResultsBySignature.has(searchSignature)) {
+            void this.recordExtensionDebugEvent('processor.search-skip', {
+                searchSignature,
+                trigger,
+                skippedDuplicateReason: 'already applied',
+                selectedClues: ebayPayload.selectedClues || [],
+                selectionRevision: this.currentSelectionRevision,
+            });
             this.applyEbaySearchResults(searchSignature, this.searchResultsBySignature.get(searchSignature), { trigger });
             return;
         }
         if (this.searchResultsBySignature.has(searchSignature)) {
+            void this.recordExtensionDebugEvent('processor.search-skip', {
+                searchSignature,
+                trigger,
+                skippedDuplicateReason: 'cached-results',
+                selectedClues: ebayPayload.selectedClues || [],
+                selectionRevision: this.currentSelectionRevision,
+            });
             this.applyEbaySearchResults(searchSignature, this.searchResultsBySignature.get(searchSignature), { trigger });
             return;
         }
         const searchToken = ++this.latestSearchToken;
         const backgroundResults = await this.searchCardWithBackground(title, ebayPayload);
         if (searchToken !== this.latestSearchToken || searchSignature !== this.buildEbaySearchSignature(this.buildSelectedEbayPayload(title))) {
+            void this.recordExtensionDebugEvent('processor.search-stale', {
+                searchSignature,
+                trigger,
+                staleResponseIgnored: true,
+                selectedClues: ebayPayload.selectedClues || [],
+                selectionRevision: this.currentSelectionRevision,
+            });
             console.log('🚫 [EBAYE] Ignored stale eBay overlay search response');
             return;
         }
@@ -1462,6 +1543,12 @@ class EbayProcessor {
         this.pendingSearchApplications.delete(searchSignature);
         this.searchResultsBySignature.set(searchSignature, results);
         this.renderCandidatePreview(results);
+        void this.recordExtensionDebugEvent('processor.search-apply', {
+            searchSignature,
+            rowCount: Array.isArray(results) ? results.length : 0,
+            uiMounted: isConnected,
+            selectionRevision: this.currentSelectionRevision,
+        });
         this.sendEbayPreviewReady(searchSignature, results);
         return isConnected;
     }
@@ -1480,6 +1567,12 @@ class EbayProcessor {
         }
         const rowIds = this.ebayPreviewRowIds(results);
         if (this.lastSentEbayPreviewReadySignature === searchSignature && this.lastSentEbayPreviewReadyRowIds === rowIds) {
+            void this.recordExtensionDebugEvent('processor.preview-skip', {
+                searchSignature,
+                skippedDuplicateReason: 'same preview rows already sent',
+                rowIds,
+                selectionRevision: this.currentSelectionRevision,
+            });
             return Promise.resolve();
         }
         const ebayPayload = this.buildSelectedEbayPayload(this.currentTitle || document.title);
@@ -1489,6 +1582,13 @@ class EbayProcessor {
         }
         this.lastSentEbayPreviewReadySignature = searchSignature;
         this.lastSentEbayPreviewReadyRowIds = rowIds;
+        void this.recordExtensionDebugEvent('processor.preview-ready', {
+            searchSignature,
+            rowCount: previewPayload.previewRows.length,
+            rowIds,
+            selectedClues: ebayPayload.selectedClues || [],
+            selectionRevision: this.currentSelectionRevision,
+        });
         return Promise.resolve(chrome.runtime.sendMessage({
             action: 'marketplacePreviewReady',
             source: 'ebay',

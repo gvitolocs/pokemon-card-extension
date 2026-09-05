@@ -1,0 +1,12 @@
+---
+description: Use Qwen 3.8 27B on nezopt for Cursor offload, never the heretic tag
+alwaysApply: true
+---
+
+# Qwen offload
+
+When using the nezopt Qwen MCP, call `qwen3.8:27b-128k` with `num_ctx` 131072.
+
+Do not use `qwen3.6-heretic` or any Heretic tag. That model is operator personal and university study only, not Cursor, Honcho, Obsidian, or Pokoin project work.
+
+Do not attribute reviews or docs to Heretic. Write **Qwen 3.8 27B**.
