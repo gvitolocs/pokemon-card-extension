@@ -26,19 +26,145 @@ class EbayProcessor {
         this.lastSentEbayPreviewReadySignature = '';
         this.lastSentEbayPreviewReadyRowIds = '';
         this.currentMatchCount = 0;
+        this.pokoinButtonScanState = 'idle';
+        this.currentListingKind = '';
+        this.ebayOverlayCollapsed = true;
+        this.overlayDock = { side: 'left', top: 12, left: 12 };
+        this.overlayDockRestored = false;
+        this.overlayDockHydratedFromSync = this.hydrateOverlayDockFromSyncCache();
+        this.overlayDrag = null;
+        this.overlayDragMoved = false;
     }
 
     pokoinIconUrl() {
         return chrome.runtime.getURL('assets/pokoin-512.png');
     }
 
+    pokoinExtensionVersionSuffix() {
+        const version = chrome?.runtime?.getManifest?.()?.version || '';
+        return version ? ` v${version}` : '';
+    }
+
     setPokoinButtonLabel(button, matchCount = null) {
-        const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
-        button.innerHTML = `
-            <img data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:20px;height:20px;min-width:20px;min-height:20px;max-width:20px;max-height:20px;flex:0 0 20px;border-radius:50%;object-fit:cover;display:block;">
-            <span>Pokoin.com${suffix}</span>
+        const displayedMatchCount = Number.isFinite(matchCount)
+            ? Math.max(0, Math.trunc(matchCount))
+            : Math.max(0, Math.trunc(Number(this.currentMatchCount) || 0));
+        button?.setAttribute?.('data-pokoin-match-count', String(displayedMatchCount));
+        const matchLabel = `${displayedMatchCount} ${displayedMatchCount === 1 ? 'match' : 'matches'}`;
+        const versionSuffix = this.pokoinExtensionVersionSuffix();
+        const collapsed = Boolean(this.ebayOverlayCollapsed);
+        const label = displayedMatchCount > 0
+            ? (collapsed ? matchLabel : `Pokoin.com${versionSuffix} (${matchLabel})`)
+            : `Pokoin.com${versionSuffix}`;
+        const iconSize = collapsed ? 28 : 20;
+        button.innerHTML = collapsed
+            ? `
+            <img class="pokoin-icon" data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" draggable="false" style="width:${iconSize}px;height:${iconSize}px;min-width:${iconSize}px;min-height:${iconSize}px;max-width:${iconSize}px;max-height:${iconSize}px;flex:0 0 ${iconSize}px;border-radius:50%;object-fit:cover;display:block;">
+        `
+            : `
+            <img class="pokoin-icon" data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" draggable="false" style="width:${iconSize}px;height:${iconSize}px;min-width:${iconSize}px;min-height:${iconSize}px;max-width:${iconSize}px;max-height:${iconSize}px;flex:0 0 ${iconSize}px;border-radius:50%;object-fit:cover;display:block;">
+            <span data-pokoin-button-label="true">${label}</span>
         `;
-        this.applyPokoinButtonStyles(button);
+        button.setAttribute?.('aria-label', collapsed ? `Show Pokoin results (${matchLabel})` : label);
+        button.setAttribute?.('title', collapsed ? 'Show Pokoin results' : label);
+    }
+
+    applyPokoinButtonCollapsedLayout(button = this.currentButton) {
+        if (!button) {
+            return;
+        }
+        const collapsed = Boolean(this.ebayOverlayCollapsed);
+        const background = button.style.background || '#075985';
+        const border = button.style.border || '1px solid rgba(56, 189, 248, 0.35)';
+        const boxShadow = button.style.boxShadow || '0 4px 12px rgba(2, 132, 199, 0.18)';
+        if (collapsed) {
+            button.style.cssText = `
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 40px;
+                width: 40px;
+                min-width: 40px;
+                max-width: 40px;
+                height: 40px;
+                padding: 0;
+                gap: 0;
+                border-radius: 12px;
+                background: ${background};
+                color: white;
+                border: ${border};
+                box-shadow: ${boxShadow};
+                cursor: grab;
+                touch-action: none;
+                font-weight: bold;
+                transition: all 0.2s ease;
+            `;
+            Object.assign(button.style, {
+                flex: '0 0 40px',
+                width: '40px',
+                minWidth: '40px',
+                maxWidth: '40px',
+                height: '40px',
+                padding: '0',
+                gap: '0',
+                borderRadius: '12px',
+                background,
+                border,
+                boxShadow,
+                cursor: 'grab',
+                touchAction: 'none',
+            });
+        } else {
+            button.style.cssText = `
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex: 1 1 auto;
+                width: auto;
+                min-width: 0;
+                padding: 10px 14px;
+                gap: 8px;
+                border-radius: 8px;
+                background: ${background};
+                color: white;
+                border: ${border};
+                box-shadow: ${boxShadow};
+                cursor: pointer;
+                font-weight: bold;
+                font-size: 14px;
+                font-family: Arial, sans-serif;
+                transition: all 0.2s ease;
+            `;
+            Object.assign(button.style, {
+                flex: '1 1 auto',
+                width: 'auto',
+                minWidth: '0',
+                maxWidth: '',
+                height: '',
+                padding: '10px 14px',
+                gap: '8px',
+                borderRadius: '8px',
+                background,
+                border,
+                boxShadow,
+            });
+        }
+        const icon = button.querySelector?.('img[data-pokoin-button-icon], img.pokoin-icon, img');
+        if (icon) {
+            const iconSize = collapsed ? 28 : 20;
+            Object.assign(icon.style, {
+                width: `${iconSize}px`,
+                height: `${iconSize}px`,
+                minWidth: `${iconSize}px`,
+                minHeight: `${iconSize}px`,
+                maxWidth: `${iconSize}px`,
+                maxHeight: `${iconSize}px`,
+                flex: `0 0 ${iconSize}px`,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                display: 'block',
+            });
+        }
     }
 
     pokoinBlue() {
@@ -47,6 +173,72 @@ class EbayProcessor {
 
     pokoinBlueHover() {
         return '#0284c7';
+    }
+
+    pokoinScanRed() {
+        return '#dc2626';
+    }
+
+    pokoinScanRedHover() {
+        return '#b91c1c';
+    }
+
+    pokoinScanGreen() {
+        return '#16a34a';
+    }
+
+    pokoinScanGreenHover() {
+        return '#15803d';
+    }
+
+    pokoinButtonScanAppearance(state = this.pokoinButtonScanState) {
+        if (state === 'scanning') {
+            return {
+                background: this.pokoinScanRed(),
+                border: '1px solid rgba(248, 113, 113, 0.7)',
+                boxShadow: '0 4px 12px rgba(220, 38, 38, 0.35)',
+            };
+        }
+        if (state === 'ready') {
+            return {
+                background: this.pokoinScanGreen(),
+                border: '1px solid rgba(74, 222, 128, 0.7)',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.35)',
+            };
+        }
+        return {
+            background: '#075985',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.18)',
+        };
+    }
+
+    pokoinButtonScanHoverBackground(state = this.pokoinButtonScanState) {
+        if (state === 'scanning') {
+            return this.pokoinScanRedHover();
+        }
+        if (state === 'ready') {
+            return this.pokoinScanGreenHover();
+        }
+        return '#0369a1';
+    }
+
+    setPokoinButtonScanState(state, button = this.currentButton) {
+        this.pokoinButtonScanState = state === 'scanning' || state === 'ready' ? state : 'idle';
+        if (!button) {
+            return;
+        }
+        button.setAttribute?.('data-pokoin-scan-state', this.pokoinButtonScanState);
+        this.applyPokoinButtonStyles(button, {
+            ...this.pokoinButtonScanAppearance(),
+            borderRadius: '8px',
+            color: '#ffffff',
+            cursor: 'pointer',
+            flex: '1 1 auto',
+            width: 'auto',
+            maxWidth: '',
+        });
+        this.applyPokoinButtonCollapsedLayout(button);
     }
 
     normalizeClueValue(value = '') {
@@ -84,6 +276,44 @@ class EbayProcessor {
             'full', 'art', 'holo', 'rare', 'ultra', 'secret', 'collection',
             'psa', 'bgs', 'cgc', 'sgc',
         ]);
+    }
+
+    isGenericTextPhraseChip(keyword = {}) {
+        if ((keyword.source || '') !== 'text') {
+            return false;
+        }
+        const wordCount = String(keyword.label || keyword.value || '')
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean).length;
+        if (wordCount <= 1) {
+            return false;
+        }
+        return !(
+            keyword.nameLike ||
+            keyword.compositeName ||
+            keyword.fullCardIdentityName ||
+            keyword.expansion ||
+            keyword.variation ||
+            keyword.collectorNumber ||
+            keyword.feature
+        );
+    }
+
+    keepTitleNameChipsUnlessAlbum(keywords = [], title = '', details = '') {
+        const listingKind = typeof classifyMarketplaceListingKindFromText === 'function'
+            ? classifyMarketplaceListingKindFromText(title, details).kind
+            : 'unknown';
+        if (listingKind === 'album') {
+            return keywords;
+        }
+        const titleCompact = this.compactClueValue(this.ebayTitleTokenSource(title));
+        return keywords.filter((keyword) => {
+            if (!keyword.nameLike && !keyword.compositeName && !keyword.fullCardIdentityName) {
+                return true;
+            }
+            return Boolean(keyword.compact && titleCompact.includes(keyword.compact));
+        });
     }
 
     addKeywordCandidate(candidates, value, source = 'text') {
@@ -160,6 +390,10 @@ class EbayProcessor {
 
     triggerEbaySelectionRefresh(trigger = 'keyword-toggle') {
         this.invalidateEbayPreviewForSelectionChange();
+        this.sendEbayTokensReady(trigger, {
+            skipListingScan: trigger === 'keyword-toggle',
+            forceListingScan: trigger === 'manual-clue',
+        });
         return this.runEbaySearch(this.currentTitle, trigger);
     }
 
@@ -206,7 +440,7 @@ class EbayProcessor {
     isPokemonNameLikeClue(value = '') {
         const label = this.removeEbayMarketplaceNoise(value);
         const compact = this.compactClueValue(label);
-        if (!label || compact.length < 3 || /\d/.test(label) || this.isVariationClue(label)) {
+        if (!label || compact.length < 3 || this.isVariationClue(label)) {
             return false;
         }
         if (typeof window.extractTitleInfo !== 'function') {
@@ -340,6 +574,24 @@ class EbayProcessor {
             .filter(Boolean)
             .join(' ');
         return this.normalizeClueValue(text).slice(0, 2000);
+    }
+
+    extractEbayListingImageUrls() {
+        if (typeof extractListingImageUrlsFromDocument === 'function') {
+            return extractListingImageUrlsFromDocument(document, { source: 'ebay' });
+        }
+        return [];
+    }
+
+    classifyEbayListingKind(title = '', details = '', photoCount = 0) {
+        if (typeof classifyMarketplaceListingKind === 'function') {
+            return classifyMarketplaceListingKind({ title, description: details, photoCount });
+        }
+        return { kind: 'unknown', reason: 'listing-scan-unavailable', photoCount };
+    }
+
+    ebayCandidateRowLimit() {
+        return Number.MAX_SAFE_INTEGER;
     }
 
     ebayCollectorNumberPatterns() {
@@ -521,10 +773,10 @@ class EbayProcessor {
                 }
             }
         }
-        return this.prepareEbayKeywordCandidates(candidates, sourceText);
+        return this.prepareEbayKeywordCandidates(candidates, sourceText, tokenizedTitle, tokenizedDetails);
     }
 
-    prepareEbayKeywordCandidates(candidates = [], sourceText = '') {
+    prepareEbayKeywordCandidates(candidates = [], sourceText = '', title = '', details = '') {
         const prepared = candidates.map((candidate, index) => {
             const label = candidate.label || candidate.value || '';
             const knownCompositeName = this.knownEbayCompositeName(label);
@@ -562,7 +814,7 @@ class EbayProcessor {
         const selectedCompositeNames = prepared
             .filter((keyword) => (keyword.compositeName || keyword.fullCardIdentityName) && keyword.selectedByDefault)
             .map((keyword) => keyword.compact);
-        return prepared
+        const filtered = prepared
             .map((keyword) => {
                 const shadowedByComposite = Boolean(
                     keyword.nameLike &&
@@ -589,8 +841,17 @@ class EbayProcessor {
                 if (left.variation !== right.variation) return left.variation ? -1 : 1;
                 return left._index - right._index;
             })
+            .filter((keyword) => !this.isGenericTextPhraseChip(keyword));
+        return this.keepTitleNameChipsUnlessAlbum(filtered, title, details)
             .slice(0, 16)
-            .map(({ _index, ...keyword }) => keyword);
+            .map(({ _index, ...keyword }) => {
+                const preferredChip = Boolean(keyword.selectedByDefault);
+                return {
+                    ...keyword,
+                    preferredChip,
+                    selectedByDefault: Boolean(keyword.manual || keyword.source === 'manual-input'),
+                };
+            });
     }
 
     numericCollectorNumber(value = '') {
@@ -623,11 +884,14 @@ class EbayProcessor {
     }
 
     extractCollectorNumber(titleInfo = {}, text = '') {
+        // Prefer bare slash collectors (14/100) before prefixed patterns. The
+        // prefixed matcher is case-insensitive and otherwise eats "Zangoose 14/100".
         return (
-            text.match(/\b[A-Z][A-Z0-9-]{0,7}\s?\d{1,4}[a-z]?\s*\/\s*(?:[A-Z][A-Z0-9-]{0,7}\s?)?\d{1,4}[a-z]?\b/i)?.[0] ||
-            text.match(/\b(?:BW|XY|SM|SWSH|SVP|SV-P)\s?-?\s?\d{1,4}[a-z]?\b/i)?.[0] ||
-            text.match(/\b[A-Z0-9][A-Z0-9-]{1,7}\s+\d{1,4}[a-z]?\b/i)?.[0] ||
             text.match(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/i)?.[0] ||
+            text.match(/\b(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?\d{1,4}[a-z]?\s*\/\s*(?:(?:TG|GG|SL|RC|SH|SV|BW|XY|SM|SWSH|SVP)\s?)?\d{1,4}[a-z]?\b/i)?.[0] ||
+            text.match(/\b(?:BW|XY|SM|SWSH|SVP|SV-P)\s?-?\s?\d{1,4}[a-z]?\b/i)?.[0] ||
+            text.match(/\b[A-Z][A-Z0-9-]{0,7}\s?\d{1,4}[a-z]?\s*\/\s*(?:[A-Z][A-Z0-9-]{0,7}\s?)?\d{1,4}[a-z]?\b/)?.[0] ||
+            text.match(/\b[A-Z0-9][A-Z0-9-]{1,7}\s+\d{1,4}[a-z]?\b/)?.[0] ||
             titleInfo.collectorNumber ||
             titleInfo.cardNumber ||
             ''
@@ -657,8 +921,16 @@ class EbayProcessor {
     }
 
     buildEbayPayload(title = document.title, titleInfo = this.extractTitleInfo(title), details = this.extractEbayDetails()) {
-        const keywords = this.extractEbayKeywords(title, details, titleInfo);
-        const selectedKeywords = keywords.filter((keyword) => keyword.selectedByDefault);
+        const keywords = Array.isArray(this.currentKeywords) && this.currentKeywords.length
+            ? this.currentKeywords
+            : this.extractEbayKeywords(title, details, titleInfo);
+        const hasExplicitSelection = this.selectedKeywordValues instanceof Set && this.selectedKeywordValues.size > 0;
+        // Without an explicit chip selection, honor selectedByDefault only (listing
+        // chips start unpressed). preferredChip is for UI defaults before the user
+        // presses Analyze, not for silent payload selection.
+        const selectedKeywords = keywords.filter((keyword) => hasExplicitSelection
+            ? this.selectedKeywordValues.has(keyword.compact)
+            : keyword.selectedByDefault);
         const selectedClues = selectedKeywords.map((keyword) => keyword.value);
         const nameKeyword = selectedKeywords.find((keyword) => keyword.nameLike);
         const collectorKeyword = selectedKeywords.find((keyword) => keyword.collectorNumber);
@@ -694,6 +966,10 @@ class EbayProcessor {
             collectorNumber,
             features,
         });
+        const enableListingScan = this.isProductPage();
+        const listingImageUrls = enableListingScan ? this.extractEbayListingImageUrls() : [];
+        const listingKindResult = this.classifyEbayListingKind(title, details, listingImageUrls.length);
+        this.currentListingKind = listingKindResult.kind;
 
         return {
             source: 'ebay',
@@ -715,6 +991,11 @@ class EbayProcessor {
             expansion,
             features,
             rarity,
+            listingKind: listingKindResult.kind,
+            listingKindSignals: listingKindResult,
+            listingDescription: String(details || '').slice(0, 2000),
+            listingImageUrls,
+            enableListingScan,
         };
     }
 
@@ -854,6 +1135,10 @@ class EbayProcessor {
             collectorNumber: collectorNumber || this.extractCollectorNumber(titleInfo, evidence),
             features,
         };
+        const enableListingScan = this.isProductPage();
+        const listingImageUrls = enableListingScan ? this.extractEbayListingImageUrls() : [];
+        const listingKindResult = this.classifyEbayListingKind(title, details, listingImageUrls.length);
+        this.currentListingKind = listingKindResult.kind;
         return {
             source: 'ebay',
             listingKey: this.stableUrl(),
@@ -874,6 +1159,11 @@ class EbayProcessor {
             expansion,
             features,
             rarity: featureKeywords.some((keyword) => /illustration|full\s*-?\s*art|fullart/i.test(keyword.value)) ? 'illustration' : '',
+            listingKind: listingKindResult.kind,
+            listingKindSignals: listingKindResult,
+            listingDescription: String(details || '').slice(0, 2000),
+            listingImageUrls,
+            enableListingScan,
         };
     }
 
@@ -915,9 +1205,12 @@ class EbayProcessor {
         })).catch(() => null);
     }
 
-    async searchCardWithBackground(title, ebayPayload = this.buildEbayPayload(title)) {
+    async searchCardWithBackground(title, ebayPayload = this.buildEbayPayload(title), trigger = 'process') {
         const signature = this.buildEbaySearchSignature(ebayPayload);
-        if (this.searchResultsBySignature.has(signature)) {
+        const userChipSearch = trigger === 'keyword-toggle';
+        const userInputScan = trigger === 'manual-clue';
+        const overlayExpandScan = trigger === 'overlay-expand' || trigger === 'overlay-refresh';
+        if (!userChipSearch && !userInputScan && !overlayExpandScan && this.searchResultsBySignature.has(signature)) {
             void this.recordExtensionDebugEvent('processor.search-skip', {
                 searchSignature: signature,
                 skippedDuplicateReason: 'cached-results',
@@ -927,7 +1220,7 @@ class EbayProcessor {
             });
             return this.searchResultsBySignature.get(signature);
         }
-        if (this.recentSearchResults.has(signature)) {
+        if (!userChipSearch && !userInputScan && !overlayExpandScan && this.recentSearchResults.has(signature)) {
             const cachedResults = this.recentSearchResults.get(signature);
             this.recentSearchResults.delete(signature);
             this.recentSearchResults.set(signature, cachedResults);
@@ -952,6 +1245,7 @@ class EbayProcessor {
             previewSignature: signature,
             selectionRevision: this.currentSelectionRevision,
         });
+        this.setPokoinButtonScanState('scanning');
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: ebayPayload.searchTitle || title,
@@ -964,6 +1258,10 @@ class EbayProcessor {
             previewSignature: this.buildEbaySearchSignature(ebayPayload),
             selectionRevision: this.currentSelectionRevision,
             url: window.location.href,
+            forceRefresh: userChipSearch || userInputScan || overlayExpandScan,
+            skipListingScan: userChipSearch,
+            forceListingScan: userInputScan || overlayExpandScan,
+            searchTrigger: trigger,
         });
         const results = response?.success && Array.isArray(response.results) ? response.results : [];
         this.searchResultsBySignature.set(signature, results);
@@ -976,6 +1274,13 @@ class EbayProcessor {
             previewSignature: signature,
             selectionRevision: this.currentSelectionRevision,
             rowCount: results.length,
+            resultRows: results.map((row) => ({
+                id: row?.card_id || row?.id || '',
+                name: row?.name || '',
+                collector: row?.collector_number || row?.collectorNumber || '',
+                score: Number(row?.score ?? row?.similarity ?? row?.confidence) || 0,
+                source: row?.source || row?.match_source || '',
+            })),
             error: response?.success ? '' : response?.error || 'Search failed',
         });
         return results;
@@ -1017,7 +1322,7 @@ class EbayProcessor {
 
     buildSidePanelPreviewRowsPayload(url = window.location.href, results = this.latestResultsByUrl.get(this.stableUrl(url)) || []) {
         const rows = (Array.isArray(results) ? results : [])
-            .slice(0, 8)
+            .slice(0, this.ebayCandidateRowLimit())
             .map((result) => {
                 const cardId = this.candidateCardId(result);
                 if (!cardId) {
@@ -1084,15 +1389,15 @@ class EbayProcessor {
         return Array.isArray(results) ? results : [];
     }
 
-    openPokoinSidePanel(url = window.location.href, title = document.title, ebayPayload = this.buildEbayPayload(title), candidate = null) {
+    openPokoinSidePanel(url = window.location.href, title = document.title, ebayPayload = this.buildEbayPayload(title), candidate = null, options = {}) {
         const stableUrl = this.stableUrl(url);
         const hasSelectedOverlayState = this.currentKeywords.length > 0 &&
             this.selectedKeywordValues.size > 0 &&
             this.compactClueValue(title || '') === this.compactClueValue(this.currentTitle || '');
         const payload = hasSelectedOverlayState ? ebayPayload : this.buildEbayPayload(title);
-        const previewResults = candidate
-            ? this.currentPreviewResults({ allowRenderedFallback: true })
-            : this.currentPreviewResults();
+        const previewResults = this.currentPreviewResults({
+            allowRenderedFallback: Boolean(candidate) || Boolean(options.all),
+        });
         const previewPayload = this.buildSidePanelPreviewRowsPayload(
             url,
             previewResults.length ? previewResults : (this.latestResultsByUrl.get(stableUrl) || [])
@@ -1100,6 +1405,8 @@ class EbayProcessor {
         if (!previewPayload.previewRows?.length && candidate) {
             previewPayload.previewRows = [this.buildSidePanelCandidatePayload(candidate).selectedCandidate].filter(Boolean);
         }
+        const previewRowCount = previewPayload.previewRows?.length || 0;
+        const openAllCards = Boolean(options.all) || (!candidate && previewRowCount > 1);
         return chrome.runtime.sendMessage({
             action: 'openSidePanelForCurrentTab',
             url,
@@ -1114,18 +1421,39 @@ class EbayProcessor {
             previewSource: this.currentButton ? 'ebay_overlay' : 'ebay_button_preview',
             selectionRevision: this.currentSelectionRevision,
             ...previewPayload,
-            ...this.buildSidePanelCandidatePayload(candidate || {}),
+            ...(options.all || !candidate ? {} : this.buildSidePanelCandidatePayload(candidate || {})),
+            openAllCards,
         }).catch((error) => {
             console.warn('⚠️ [EBAYE] Unable to open side panel:', error);
         });
     }
 
-    attachSidePanelClick(button, title = document.title, url = window.location.href, ebayPayload = this.buildEbayPayload(title)) {
+    attachSidePanelClick(button, title = document.title, url = window.location.href, ebayPayload = this.buildEbayPayload(title), options = {}) {
+        let searchInFlight = null;
         button.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation?.();
-            this.openPokoinSidePanel(url, title, ebayPayload);
+            if (this.consumeOverlayDragClick(event)) {
+                return;
+            }
+            const open = () => this.openPokoinSidePanel(url, title, ebayPayload);
+            if (!options.searchOnClick) {
+                open();
+                return;
+            }
+            if (!searchInFlight) {
+                searchInFlight = this.searchCardWithBackground(title, ebayPayload)
+                    .then((results) => {
+                        this.storeMatchedResults(url, title, results);
+                        if (results?.length) {
+                            this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
+                        }
+                        return results;
+                    })
+                    .catch(() => []);
+            }
+            return Promise.resolve(searchInFlight).then(() => open());
         });
     }
 
@@ -1183,34 +1511,259 @@ class EbayProcessor {
         const host = document.createElement('div');
         host.setAttribute('data-pokoin-extension-panel', 'ebay');
         host.setAttribute('data-pokoin-ebay-panel-host', 'true');
-        Object.assign(host.style, {
-            position: 'fixed',
-            left: '12px',
-            top: '12px',
-            bottom: 'auto',
-            zIndex: '2147483646',
-            width: 'min(340px, calc(100vw - 32px))',
-            maxHeight: 'calc(100vh - 24px)',
-            pointerEvents: 'none',
-        });
+        Object.assign(host.style, this.ebayPanelBaseStyles(), this.ebayFallbackPanelStyles());
         let root = host;
         if (typeof host.attachShadow === 'function') {
             root = host.attachShadow({ mode: 'open' });
             const style = document.createElement('style');
-            style.textContent = ':host{all:initial} button{font-family:Arial,sans-serif}';
+            style.textContent = this.ebayPanelResetStyles();
             root.appendChild(style);
         }
         const panel = document.createElement('div');
         panel.setAttribute('data-pokoin-ebay-panel', 'true');
-        Object.assign(panel.style, {
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-            pointerEvents: 'auto',
-            fontFamily: 'Arial, sans-serif',
-        });
+        Object.assign(panel.style, this.ebayInsertedPanelStyles());
         root.appendChild(panel);
         return { host, panel };
+    }
+
+    ebayInsertedPanelStyles() {
+        return {
+            position: 'static',
+            width: '100%',
+            maxWidth: '420px',
+            margin: '12px 0',
+            maxHeight: 'calc(100vh - 72px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '8px',
+            overflow: 'visible',
+            pointerEvents: 'auto',
+            fontFamily: 'Arial, sans-serif',
+        };
+    }
+
+    ebayPanelBaseStyles() {
+        return {
+            all: 'initial',
+            boxSizing: 'border-box',
+            contain: 'layout style',
+            colorScheme: 'light',
+            pointerEvents: 'none',
+            fontFamily: 'Arial, sans-serif',
+        };
+    }
+
+    ebayPanelResetStyles() {
+        return `
+            :host {
+                all: initial;
+                box-sizing: border-box;
+                contain: layout style;
+                color-scheme: light;
+                pointer-events: none;
+                font-family: Arial, sans-serif;
+            }
+            *, *::before, *::after {
+                box-sizing: border-box;
+                font-family: Arial, sans-serif;
+            }
+            button {
+                appearance: none;
+                -webkit-appearance: none;
+                font: inherit;
+            }
+            [data-pokoin-ebay-panel] img,
+            [data-pokoin-ebay-panel] svg,
+            [data-pokoin-ebay-header-row] img,
+            [data-pokoin-ebay-header-row] svg,
+            [data-pokemon-linker-button] img,
+            .pokoin-icon {
+                width: 20px !important;
+                height: 20px !important;
+                min-width: 20px !important;
+                min-height: 20px !important;
+                max-width: 20px !important;
+                max-height: 20px !important;
+                flex: 0 0 auto !important;
+                object-fit: contain !important;
+                display: block !important;
+            }
+            [data-pokoin-button-icon] {
+                width: 20px !important;
+                height: 20px !important;
+                min-width: 20px !important;
+                min-height: 20px !important;
+                max-width: 20px !important;
+                max-height: 20px !important;
+                flex: 0 0 20px !important;
+                border-radius: 50% !important;
+                object-fit: cover !important;
+                display: block !important;
+            }
+        `;
+    }
+
+    ebayFallbackPanelStyles() {
+        return {
+            position: 'fixed',
+            bottom: 'auto',
+            right: 'auto',
+            zIndex: '2147483646',
+            width: 'min(320px, calc(100vw - 32px))',
+            maxWidth: '320px',
+            maxHeight: 'calc(100vh - 24px)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: '8px',
+            pointerEvents: 'none',
+            fontFamily: 'Arial, sans-serif',
+            opacity: '0.96',
+        };
+    }
+
+    ebayHeaderRow() {
+        return this.ebayPanelRoot()?.querySelector?.('[data-pokoin-ebay-header-row]') || null;
+    }
+
+    ensureEbayHeaderRow() {
+        const root = this.ebayPanelRoot();
+        if (!root) {
+            return null;
+        }
+        let header = root.querySelector?.('[data-pokoin-ebay-header-row]');
+        if (header && typeof header.appendChild === 'function') {
+            return header;
+        }
+        header = document.createElement('div');
+        header.setAttribute('data-pokoin-ebay-header-row', 'true');
+        header.style.cssText = `
+            display: flex;
+            align-items: stretch;
+            gap: 8px;
+            width: 100%;
+        `;
+        const panel = this.currentPanel;
+        if (typeof panel?.prepend === 'function') {
+            panel.prepend(header);
+        } else {
+            panel?.appendChild(header);
+        }
+        return header;
+    }
+
+    renderEbayCollapseToggle() {
+        const header = this.ensureEbayHeaderRow();
+        if (!header) {
+            return;
+        }
+        if (header.querySelector?.('[data-pokoin-ebay-collapse-toggle]')) {
+            this.applyEbayOverlayCollapsedState();
+            return;
+        }
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.setAttribute('data-pokoin-ebay-collapse-toggle', 'true');
+        toggle.style.cssText = `
+            flex: 0 0 40px;
+            width: 40px;
+            min-width: 40px;
+            height: 40px;
+            padding: 0;
+            border: 1px solid rgba(148, 163, 184, 0.45);
+            border-radius: 10px;
+            background: rgba(15, 23, 42, 0.72);
+            color: #e0f2fe;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1;
+            cursor: pointer;
+            pointer-events: auto;
+        `;
+        toggle.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            this.setEbayOverlayCollapsed(!this.ebayOverlayCollapsed);
+        }, true);
+        header.appendChild(toggle);
+        this.applyEbayOverlayCollapsedState();
+    }
+
+    applyEbayOverlayCollapsedState() {
+        const collapsed = Boolean(this.ebayOverlayCollapsed);
+        this.currentPanelHost?.setAttribute('data-pokoin-ebay-collapsed', collapsed ? 'true' : 'false');
+        this.currentPanel?.setAttribute('data-pokoin-ebay-collapsed', collapsed ? 'true' : 'false');
+        this.ebayPanelRoot()?.querySelectorAll?.('[data-pokoin-ebay-keywords], [data-pokoin-candidate-preview]')
+            .forEach((element) => {
+                element.style.display = collapsed ? 'none' : '';
+                element.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+            });
+        const toggle = this.ebayPanelRoot()?.querySelector?.('[data-pokoin-ebay-collapse-toggle]');
+        if (toggle?.setAttribute) {
+            if (toggle.style) {
+                toggle.style.display = collapsed ? 'none' : '';
+            }
+            toggle.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
+            toggle.textContent = collapsed ? '+' : 'X';
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            toggle.setAttribute('aria-label', collapsed ? 'Expand Pokoin eBay overlay' : 'Collapse Pokoin eBay overlay');
+            toggle.setAttribute('title', collapsed ? 'Show Pokoin results' : 'Hide Pokoin results');
+        }
+        if (this.currentButton) {
+            this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+            this.applyPokoinButtonCollapsedLayout(this.currentButton);
+            this.bindOverlayDragHandle(this.currentButton);
+        }
+        const panel = this.currentPanel;
+        if (panel?.style) {
+            panel.style.margin = collapsed ? '0' : '12px 0';
+            panel.style.width = collapsed ? '40px' : '100%';
+            panel.style.maxWidth = collapsed ? '40px' : '420px';
+            panel.style.gap = collapsed ? '0' : '8px';
+            panel.style.pointerEvents = 'auto';
+        }
+        const header = this.ebayHeaderRow();
+        if (header?.style) {
+            header.style.gap = collapsed ? '0' : '8px';
+            header.style.width = collapsed ? '40px' : '100%';
+            header.style.cursor = collapsed ? 'grab' : '';
+            header.style.touchAction = collapsed ? 'none' : '';
+        }
+        this.applyOverlayDock();
+    }
+
+    setEbayOverlayCollapsed(collapsed) {
+        this.ebayOverlayCollapsed = Boolean(collapsed);
+        this.applyEbayOverlayCollapsedState();
+        this.persistOverlayDock();
+    }
+
+    expandEbayOverlayAndRecognize() {
+        return this.recognizeEbayListing('overlay-expand');
+    }
+
+    refreshEbayOverlayScan() {
+        return this.recognizeEbayListing('overlay-refresh');
+    }
+
+    recognizeEbayListing(trigger = 'overlay-expand') {
+        this.setEbayOverlayCollapsed(false);
+        const title = this.currentTitle || (typeof document !== 'undefined' ? document.title : '');
+        if (!title) {
+            return Promise.resolve();
+        }
+        return this.runEbaySearch(title, trigger);
+    }
+
+    ensurePokoinSidePanelOpen() {
+        if (typeof chrome.runtime?.sendMessage !== 'function') {
+            return Promise.resolve();
+        }
+        return Promise.resolve(chrome.runtime.sendMessage({ action: 'ensureSidePanelOpen' })).catch((error) => {
+            console.warn('⚠️ [EBAYE] Unable to open side panel:', error);
+        });
     }
 
     findExistingEbayPanelHost() {
@@ -1239,7 +1792,337 @@ class EbayProcessor {
         if (!host.parentNode || !document.contains(host)) {
             document.body?.appendChild(host);
         }
+        this.applyOverlayDock(host);
+        this.restoreOverlayDock();
+        this.bindOverlayDragHandle(this.currentButton);
         return panel;
+    }
+
+    overlayDockStorageKey() {
+        return 'pokoinOverlayDock';
+    }
+
+    overlayDockSyncCacheKey() {
+        return 'pokoin.overlayDock';
+    }
+
+    overlayDragRoot() {
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+            return document;
+        }
+        return this.currentButton || this.currentPanelHost;
+    }
+
+    overlayHostWidth() {
+        return this.ebayOverlayCollapsed ? 40 : 320;
+    }
+
+    overlayStorage() {
+        try {
+            return window?.localStorage || globalThis.localStorage || null;
+        } catch {
+            return null;
+        }
+    }
+
+    clampOverlayTop(top, viewportHeight = (typeof window !== 'undefined' && window.innerHeight) || 600) {
+        const maxTop = Math.max(8, Number(viewportHeight) - 56);
+        return Math.max(8, Math.min(maxTop, Math.round(Number(top) || 12)));
+    }
+
+    clampOverlayLeft(left, width = this.overlayHostWidth(), viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800) {
+        const maxLeft = Math.max(8, Number(viewportWidth) - Number(width) - 8);
+        return Math.max(8, Math.min(maxLeft, Math.round(Number(left) || 12)));
+    }
+
+    normalizeOverlayDock(dock = {}, collapsed = this.ebayOverlayCollapsed) {
+        const width = collapsed ? 40 : 320;
+        const viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800;
+        const side = dock?.side === 'right' ? 'right' : 'left';
+        const top = this.clampOverlayTop(dock?.top);
+        const hasLeft = Number.isFinite(Number(dock?.left));
+        const left = hasLeft
+            ? this.clampOverlayLeft(dock.left, width, viewportWidth)
+            : this.clampOverlayLeft(side === 'right' ? viewportWidth - width - 12 : 12, width, viewportWidth);
+        return {
+            side,
+            top,
+            left,
+            collapsed: typeof dock?.collapsed === 'boolean' ? dock.collapsed : undefined,
+        };
+    }
+
+    overlayDockPayload() {
+        const dock = this.normalizeOverlayDock(this.overlayDock);
+        return {
+            side: dock.side,
+            top: dock.top,
+            left: dock.left,
+            collapsed: Boolean(this.ebayOverlayCollapsed),
+        };
+    }
+
+    readOverlayDockSyncCache() {
+        try {
+            const raw = this.overlayStorage()?.getItem?.(this.overlayDockSyncCacheKey());
+            if (!raw) {
+                return null;
+            }
+            return this.normalizeOverlayDock(JSON.parse(raw));
+        } catch {
+            return null;
+        }
+    }
+
+    writeOverlayDockSyncCache(dock = this.overlayDockPayload()) {
+        try {
+            this.overlayStorage()?.setItem?.(this.overlayDockSyncCacheKey(), JSON.stringify(dock));
+        } catch {
+            // Page storage can be blocked; chrome.storage.local still persists.
+        }
+    }
+
+    hydrateOverlayDockFromSyncCache() {
+        const cached = this.readOverlayDockSyncCache();
+        if (!cached) {
+            return false;
+        }
+        this.overlayDock = { side: cached.side, top: cached.top, left: cached.left };
+        if (typeof cached.collapsed === 'boolean') {
+            this.ebayOverlayCollapsed = cached.collapsed;
+        }
+        return true;
+    }
+
+    snapOverlayDockFromRect(rect = {}, viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800) {
+        const width = Number(rect.width) || this.overlayHostWidth();
+        const left = this.clampOverlayLeft(rect.left, width, viewportWidth);
+        const top = this.clampOverlayTop(rect.top);
+        this.overlayDock = {
+            side: (left + (width / 2)) > (Number(viewportWidth) / 2) ? 'right' : 'left',
+            top,
+            left,
+        };
+        return this.overlayDock;
+    }
+
+    applyOverlayDock(host = this.currentPanelHost) {
+        if (!host?.style) {
+            return host;
+        }
+        const collapsed = Boolean(this.ebayOverlayCollapsed);
+        const dock = this.normalizeOverlayDock(this.overlayDock, collapsed);
+        this.overlayDock = { side: dock.side, top: dock.top, left: dock.left };
+        host.style.top = `${dock.top}px`;
+        host.style.left = `${dock.left}px`;
+        host.style.bottom = 'auto';
+        host.style.right = 'auto';
+        if (collapsed) {
+            host.style.width = '40px';
+            host.style.maxWidth = '40px';
+            host.style.height = '40px';
+            host.style.maxHeight = '40px';
+            host.style.gap = '0';
+            host.style.overflow = 'hidden';
+            host.style.contain = 'none';
+            host.style.pointerEvents = 'auto';
+            host.style.touchAction = 'none';
+        } else {
+            host.style.width = 'min(320px, calc(100vw - 32px))';
+            host.style.maxWidth = '320px';
+            host.style.height = '';
+            host.style.maxHeight = 'calc(100vh - 24px)';
+            host.style.gap = '8px';
+            host.style.overflow = '';
+            host.style.contain = 'layout style';
+            host.style.pointerEvents = 'none';
+            host.style.touchAction = '';
+        }
+        host.setAttribute?.('data-pokoin-overlay-side', dock.side);
+        return host;
+    }
+
+    persistOverlayDock() {
+        const payload = this.overlayDockPayload();
+        this.writeOverlayDockSyncCache(payload);
+        try {
+            chrome.storage?.local?.set?.({
+                [this.overlayDockStorageKey()]: payload,
+            });
+        } catch {
+            // Ignore storage failures; dock still applies for this page.
+        }
+    }
+
+    restoreOverlayDock() {
+        if (this.overlayDockHydratedFromSync) {
+            this.applyOverlayDock();
+            this.overlayDockRestored = true;
+            this.revealOverlayHost();
+            return;
+        }
+        this.applyOverlayDock();
+        if (this.overlayDockRestored) {
+            this.revealOverlayHost();
+            return;
+        }
+        const get = chrome.storage?.local?.get;
+        if (typeof get !== 'function') {
+            this.overlayDockRestored = true;
+            this.revealOverlayHost();
+            return;
+        }
+        this.overlayDockRestored = true;
+        this.hideOverlayHostUntilDocked();
+        Promise.resolve(get.call(chrome.storage.local, this.overlayDockStorageKey()))
+            .then((stored) => {
+                const dock = stored?.[this.overlayDockStorageKey()] || stored;
+                if (dock && typeof dock === 'object') {
+                    const normalized = this.normalizeOverlayDock(dock);
+                    this.overlayDock = { side: normalized.side, top: normalized.top, left: normalized.left };
+                    if (typeof dock.collapsed === 'boolean') {
+                        this.ebayOverlayCollapsed = dock.collapsed;
+                    }
+                    this.writeOverlayDockSyncCache(this.overlayDockPayload());
+                }
+                this.applyEbayOverlayCollapsedState();
+                this.revealOverlayHost();
+            })
+            .catch(() => {
+                this.revealOverlayHost();
+            });
+    }
+
+    hideOverlayHostUntilDocked(host = this.currentPanelHost) {
+        if (host?.style && !this.overlayDockHydratedFromSync) {
+            host.style.visibility = 'hidden';
+        }
+    }
+
+    revealOverlayHost(host = this.currentPanelHost) {
+        if (host?.style) {
+            host.style.visibility = 'visible';
+        }
+    }
+
+    consumeOverlayDragClick(event) {
+        if (!this.overlayDragMoved) {
+            return false;
+        }
+        this.overlayDragMoved = false;
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        event?.stopImmediatePropagation?.();
+        return true;
+    }
+
+    bindOverlayDragHandle(handle) {
+        if (!handle || handle.__pokoinOverlayDragBound) {
+            return;
+        }
+        handle.__pokoinOverlayDragBound = true;
+        if (handle.style) {
+            handle.style.touchAction = 'none';
+        }
+        handle.addEventListener('pointerdown', (event) => this.beginOverlayDrag(event, handle), true);
+    }
+
+    beginOverlayDrag(event, handle) {
+        if (event?.button != null && event.button !== 0) {
+            return;
+        }
+        if (this.overlayDrag) {
+            return;
+        }
+        const host = this.currentPanelHost;
+        if (!host) {
+            return;
+        }
+        event?.stopPropagation?.();
+        const startX = Number(event?.clientX) || 0;
+        const startY = Number(event?.clientY) || 0;
+        const rect = typeof host.getBoundingClientRect === 'function'
+            ? host.getBoundingClientRect()
+            : {
+                left: parseFloat(host.style.left) || 12,
+                top: parseFloat(host.style.top) || this.overlayDock.top || 12,
+                width: this.overlayHostWidth(),
+                height: 40,
+            };
+        const originLeft = Number(rect.left) || 12;
+        const originTop = Number(rect.top) || 12;
+        const width = Number(rect.width) || this.overlayHostWidth();
+        this.overlayDrag = {
+            startX,
+            startY,
+            originLeft,
+            originTop,
+            width,
+            left: originLeft,
+            top: originTop,
+            moved: false,
+            pointerId: event?.pointerId,
+        };
+        handle.setPointerCapture?.(event?.pointerId);
+        const dragThreshold = this.ebayOverlayCollapsed ? 3 : 8;
+        const root = this.overlayDragRoot();
+        const onMove = (moveEvent) => {
+            if (this.overlayDrag?.pointerId != null && moveEvent?.pointerId != null && moveEvent.pointerId !== this.overlayDrag.pointerId) {
+                return;
+            }
+            const dx = (Number(moveEvent?.clientX) || 0) - startX;
+            const dy = (Number(moveEvent?.clientY) || 0) - startY;
+            if (!this.overlayDrag.moved && (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold)) {
+                this.overlayDrag.moved = true;
+                this.overlayDragMoved = true;
+                if (handle.style) {
+                    handle.style.cursor = 'grabbing';
+                    handle.style.transform = 'none';
+                }
+            }
+            if (!this.overlayDrag.moved) {
+                return;
+            }
+            moveEvent?.preventDefault?.();
+            const viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800;
+            const viewportHeight = (typeof window !== 'undefined' && window.innerHeight) || 600;
+            const left = Math.max(8, Math.min(viewportWidth - this.overlayDrag.width - 8, originLeft + dx));
+            const top = this.clampOverlayTop(originTop + dy, viewportHeight);
+            this.overlayDrag.left = left;
+            this.overlayDrag.top = top;
+            host.style.left = `${Math.round(left)}px`;
+            host.style.right = 'auto';
+            host.style.top = `${Math.round(top)}px`;
+        };
+        const onUp = (upEvent) => {
+            root.removeEventListener?.('pointermove', onMove, true);
+            root.removeEventListener?.('pointerup', onUp, true);
+            root.removeEventListener?.('pointercancel', onUp, true);
+            handle.releasePointerCapture?.(this.overlayDrag?.pointerId ?? event?.pointerId);
+            if (handle.style) {
+                handle.style.cursor = this.ebayOverlayCollapsed ? 'grab' : 'pointer';
+            }
+            const drag = this.overlayDrag;
+            this.overlayDrag = null;
+            if (!drag?.moved) {
+                return;
+            }
+            upEvent?.preventDefault?.();
+            upEvent?.stopPropagation?.();
+            this.snapOverlayDockFromRect({
+                left: drag.left,
+                top: drag.top,
+                width: drag.width,
+            });
+            this.applyOverlayDock(host);
+            this.persistOverlayDock();
+            setTimeout(() => {
+                this.overlayDragMoved = false;
+            }, 50);
+        };
+        root.addEventListener?.('pointermove', onMove, true);
+        root.addEventListener?.('pointerup', onUp, true);
+        root.addEventListener?.('pointercancel', onUp, true);
     }
 
     isEbayOwnedNodeConnected(node) {
@@ -1254,30 +2137,73 @@ class EbayProcessor {
     createEbayPanelButton() {
         const panel = this.ensureEbayPanel();
         this.removeOwnedPanelChildren('[data-pokemon-linker-button]');
+        const header = this.ensureEbayHeaderRow();
         const button = document.createElement('button');
         button.setAttribute('data-pokemon-linker-button', 'true');
         button.setAttribute('data-pokoin-ebay-primary-button', 'true');
         this.setPokoinButtonLabel(button, this.currentMatchCount);
         button.style.cssText = `
-            width: 100%;
+            flex: 1 1 auto;
+            width: auto;
             padding: 10px 14px;
             font-size: 14px;
+            min-width: 0;
             font-family: Arial, sans-serif;
             box-shadow: 0 4px 12px rgba(2, 132, 199, 0.18);
         `;
         this.applyPokoinButtonStyles(button, {
-            borderRadius: '10px',
+            borderRadius: '8px',
             background: '#075985',
             border: '1px solid rgba(56, 189, 248, 0.35)',
+            cursor: 'pointer',
+            flex: '1 1 auto',
+            width: 'auto',
+            maxWidth: '',
+        });
+        this.currentButton = button;
+        this.setPokoinButtonScanState('scanning', button);
+        button.addEventListener('mouseenter', () => {
+            if (this.ebayOverlayCollapsed) {
+                return;
+            }
+            button.style.background = this.pokoinButtonScanHoverBackground();
+            button.style.transform = 'scale(1.05)';
+            button.style.boxShadow = this.pokoinButtonScanAppearance().boxShadow;
+        });
+        button.addEventListener('mouseleave', () => {
+            if (this.ebayOverlayCollapsed) {
+                button.style.transform = 'none';
+                return;
+            }
+            button.style.background = this.pokoinButtonScanAppearance().background;
+            button.style.transform = 'scale(1)';
+            button.style.boxShadow = this.pokoinButtonScanAppearance().boxShadow;
         });
         button.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation?.();
-            this.openPokoinSidePanel(window.location.href, this.currentTitle || document.title, this.buildSelectedEbayPayload(this.currentTitle || document.title));
+            if (this.consumeOverlayDragClick(event)) {
+                return;
+            }
+            if (this.ebayOverlayCollapsed) {
+                this.expandEbayOverlayAndRecognize();
+                this.ensurePokoinSidePanelOpen();
+                return;
+            }
+            this.refreshEbayOverlayScan();
         }, true);
-        panel.prepend?.(button) || panel.appendChild(button);
+        if (header) {
+            header.insertBefore(button, header.children?.[0] || null);
+            this.renderEbayCollapseToggle();
+        } else if (typeof panel.prepend === 'function') {
+            panel.prepend(button);
+        } else {
+            panel.appendChild(button);
+        }
         this.currentButton = button;
+        this.bindOverlayDragHandle(button);
+        this.applyPokoinButtonCollapsedLayout(button);
         return button;
     }
 
@@ -1396,6 +2322,7 @@ class EbayProcessor {
         input.addEventListener('blur', submitManualClue, true);
         container.appendChild(input);
         this.ensureEbayPanel().appendChild(container);
+        this.applyEbayOverlayCollapsedState();
     }
 
     renderKeywordTogglesFromCurrent() {
@@ -1406,12 +2333,54 @@ class EbayProcessor {
         this.renderKeywordToggles(this.currentTitle || document.title, this.extractEbayDetails());
     }
 
-    compactCandidateMeta(result = {}) {
+    overlayCandidateParts(result = {}) {
+        const name = String(result.name || result.name_en || result.pokemon_name || '').trim();
         const rawNumber = String(result.collector_number || result.card_number || result.collectorNumber || '').trim();
         const number = rawNumber.match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)(?:\s*\/\s*(?:[A-Z]{1,6}\s?)?\d{1,4}[a-z]?)?\b/i)?.[1] || '';
         const setName = result.expansion_name_en || result.expansionName || result.set_name || result.setName || '';
-        const price = result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '';
-        return [number || rawNumber, setName, price].filter(Boolean).join(' · ');
+        const price = String(result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '').trim();
+        return {
+            meta: [name, number || rawNumber, setName].filter(Boolean).join(' · '),
+            price,
+        };
+    }
+
+    compactCandidateMeta(result = {}) {
+        const { meta, price } = this.overlayCandidateParts(result);
+        return [meta, price].filter(Boolean).join(' · ');
+    }
+
+    candidateLanguageBadgesHtml(result = {}) {
+        const langs = result.print_langs || result.printLangs || {};
+        const available = (pack) => Boolean(
+            pack && (
+                pack === true ||
+                typeof pack === 'string' ||
+                pack.id ||
+                pack.image_url ||
+                pack.imageUrl
+            )
+        );
+        const badges = [
+            ['eur', '🇪🇺', 'EUR'],
+            ['jp', '🇯🇵', 'JP'],
+            ['cn', '🇨🇳', 'CN'],
+        ].filter(([key]) => available(langs[key]));
+        if (!badges.length) {
+            return '';
+        }
+        return `<span data-pokoin-language-badges="true" aria-label="Available print languages: ${badges.map(([, , label]) => label).join(', ')}" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">${badges.map(([key, flag, label]) => `<span data-pokoin-language="${key}" style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border:1px solid rgba(56,189,248,0.45);border-radius:999px;background:rgba(15,23,42,0.8);color:#bae6fd;font-size:10px;font-weight:800;line-height:1;"><span aria-hidden="true">${flag}</span>${label}</span>`).join('')}</span>`;
+    }
+
+    overlayCandidateRowHtml(result = {}) {
+        const logoUrl = this.candidateExpansionLogoUrl(result);
+        const { meta, price } = this.overlayCandidateParts(result);
+        const priceHtml = price
+            ? `${meta ? ' · ' : ''}<span data-pokoin-pkn-price="true" style="color:#ffcc03;font-weight:800;">${price}</span>`
+            : '';
+        const label = `${meta || (price ? '' : 'Candidate')}${priceHtml}`;
+        const languageBadges = this.candidateLanguageBadgesHtml(result);
+        return `${logoUrl ? `<img src="${logoUrl}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:999px;background:rgba(15,23,42,0.72);">` : ''}<span style="display:flex;min-width:0;flex-direction:column;gap:5px;"><span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label || 'Candidate'}</span>${languageBadges}</span>`;
     }
 
     candidateExpansionLogoUrl(result = {}) {
@@ -1421,11 +2390,13 @@ class EbayProcessor {
     renderCandidatePreview(results = []) {
         this.removeOwnedPanelChildren('[data-pokoin-candidate-preview]');
         this.lastRenderedPreviewResults = Array.isArray(results) ? results : [];
-        this.currentMatchCount = Array.isArray(results) ? results.slice(0, 8).length : 0;
+        this.currentMatchCount = Array.isArray(results) ? results.slice(0, this.ebayCandidateRowLimit()).length : 0;
         if (this.currentButton) {
             this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+            this.applyPokoinButtonCollapsedLayout(this.currentButton);
         }
         if (!this.isEbayOwnedNodeConnected(this.currentButton) || results.length === 0) {
+            this.applyEbayOverlayCollapsedState();
             return;
         }
         const preview = document.createElement('div');
@@ -1442,7 +2413,11 @@ class EbayProcessor {
             box-shadow: 0 18px 42px rgba(2, 6, 23, 0.35);
             font-family: Arial, sans-serif;
         `;
-        results.slice(0, 8).forEach((result) => {
+        const visibleResults = results.slice(0, this.ebayCandidateRowLimit());
+        if (visibleResults.length > 1) {
+            this.appendAllOverlayRow(preview);
+        }
+        visibleResults.forEach((result) => {
             const row = document.createElement('button');
             const logoUrl = this.candidateExpansionLogoUrl(result);
             row.type = 'button';
@@ -1463,7 +2438,7 @@ class EbayProcessor {
                 cursor: pointer;
                 pointer-events: auto;
             `;
-            row.innerHTML = `${logoUrl ? `<img src="${logoUrl}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:999px;background:rgba(15,23,42,0.72);">` : ''}<span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result) || 'Candidate'}</span>`;
+            row.innerHTML = this.overlayCandidateRowHtml(result);
             row.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1473,12 +2448,50 @@ class EbayProcessor {
             preview.appendChild(row);
         });
         this.ensureEbayPanel().appendChild(preview);
+        this.applyEbayOverlayCollapsedState();
+    }
+
+    appendAllOverlayRow(preview) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.setAttribute('data-pokoin-candidate-all', 'true');
+        row.setAttribute('aria-label', 'Show all cards in Pokoin side panel');
+        row.style.cssText = `
+            display: grid;
+            grid-template-columns: 1fr;
+            align-items: center;
+            width: 100%;
+            padding: 10px 0;
+            border: 0;
+            border-top: 1px solid rgba(148, 163, 184, 0.18);
+            background: transparent;
+            color: inherit;
+            text-align: left;
+            cursor: pointer;
+            pointer-events: auto;
+        `;
+        row.innerHTML = `<span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">ALL</span>`;
+        row.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            this.openPokoinSidePanel(
+                window.location.href,
+                this.currentTitle || document.title,
+                this.buildSelectedEbayPayload(this.currentTitle || document.title),
+                null,
+                { all: true }
+            );
+        }, true);
+        preview.appendChild(row);
     }
 
     invalidateEbayPreviewForSelectionChange() {
         this.currentSelectionRevision += 1;
         this.latestSearchToken += 1;
         this.lastAppliedSearchSignature = '';
+        this.searchResultsBySignature.clear();
+        this.recentSearchResults.clear();
         this.pendingSearchApplications.clear();
         this.lastRenderedPreviewResults = [];
         this.lastSentEbayPreviewReadySignature = '';
@@ -1487,6 +2500,7 @@ class EbayProcessor {
         this.currentMatchCount = 0;
         if (this.currentButton) {
             this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+            this.setPokoinButtonScanState('scanning');
         }
         void this.recordExtensionDebugEvent('processor.selection-invalidated', {
             selectionRevision: this.currentSelectionRevision,
@@ -1498,7 +2512,8 @@ class EbayProcessor {
     async runEbaySearch(title = this.currentTitle, trigger = 'process') {
         const ebayPayload = this.buildSelectedEbayPayload(title);
         const searchSignature = this.buildEbaySearchSignature(ebayPayload);
-        if (searchSignature === this.lastAppliedSearchSignature && this.searchResultsBySignature.has(searchSignature)) {
+        const userDriven = trigger === 'keyword-toggle' || trigger === 'manual-clue' || trigger === 'overlay-expand' || trigger === 'overlay-refresh';
+        if (!userDriven && searchSignature === this.lastAppliedSearchSignature && this.searchResultsBySignature.has(searchSignature)) {
             void this.recordExtensionDebugEvent('processor.search-skip', {
                 searchSignature,
                 trigger,
@@ -1509,7 +2524,7 @@ class EbayProcessor {
             this.applyEbaySearchResults(searchSignature, this.searchResultsBySignature.get(searchSignature), { trigger });
             return;
         }
-        if (this.searchResultsBySignature.has(searchSignature)) {
+        if (!userDriven && this.searchResultsBySignature.has(searchSignature)) {
             void this.recordExtensionDebugEvent('processor.search-skip', {
                 searchSignature,
                 trigger,
@@ -1521,7 +2536,8 @@ class EbayProcessor {
             return;
         }
         const searchToken = ++this.latestSearchToken;
-        const backgroundResults = await this.searchCardWithBackground(title, ebayPayload);
+        this.setPokoinButtonScanState('scanning');
+        const backgroundResults = await this.searchCardWithBackground(title, ebayPayload, trigger);
         if (searchToken !== this.latestSearchToken || searchSignature !== this.buildEbaySearchSignature(this.buildSelectedEbayPayload(title))) {
             void this.recordExtensionDebugEvent('processor.search-stale', {
                 searchSignature,
@@ -1543,9 +2559,17 @@ class EbayProcessor {
         this.pendingSearchApplications.delete(searchSignature);
         this.searchResultsBySignature.set(searchSignature, results);
         this.renderCandidatePreview(results);
+        this.setPokoinButtonScanState(Array.isArray(results) && results.length ? 'ready' : 'idle');
         void this.recordExtensionDebugEvent('processor.search-apply', {
             searchSignature,
             rowCount: Array.isArray(results) ? results.length : 0,
+            resultRows: (Array.isArray(results) ? results : []).map((row) => ({
+                id: row?.card_id || row?.id || '',
+                name: row?.name || '',
+                collector: row?.collector_number || row?.collectorNumber || '',
+                score: Number(row?.score ?? row?.similarity ?? row?.confidence) || 0,
+                source: row?.source || row?.match_source || '',
+            })),
             uiMounted: isConnected,
             selectionRevision: this.currentSelectionRevision,
         });
@@ -1555,16 +2579,13 @@ class EbayProcessor {
 
     ebayPreviewRowIds(results = []) {
         return (Array.isArray(results) ? results : [])
-            .slice(0, 8)
+            .slice(0, this.ebayCandidateRowLimit())
             .map((result) => String(this.candidateCardId(result) || ''))
             .filter(Boolean)
             .join('|');
     }
 
     sendEbayPreviewReady(searchSignature, results = []) {
-        if (!Array.isArray(results) || results.length === 0) {
-            return Promise.resolve();
-        }
         const rowIds = this.ebayPreviewRowIds(results);
         if (this.lastSentEbayPreviewReadySignature === searchSignature && this.lastSentEbayPreviewReadyRowIds === rowIds) {
             void this.recordExtensionDebugEvent('processor.preview-skip', {
@@ -1575,23 +2596,32 @@ class EbayProcessor {
             });
             return Promise.resolve();
         }
-        const ebayPayload = this.buildSelectedEbayPayload(this.currentTitle || document.title);
-        const previewPayload = this.buildSidePanelPreviewRowsPayload(window.location.href, results);
-        if (!previewPayload.previewRows?.length) {
-            return Promise.resolve();
-        }
         this.lastSentEbayPreviewReadySignature = searchSignature;
         this.lastSentEbayPreviewReadyRowIds = rowIds;
-        void this.recordExtensionDebugEvent('processor.preview-ready', {
+        return this.sendEbayTokensReady('preview-ready', {
             searchSignature,
-            rowCount: previewPayload.previewRows.length,
-            rowIds,
+            includePreviewRows: true,
+            previewResults: Array.isArray(results) ? results : [],
+        });
+    }
+
+    sendEbayTokensReady(trigger = 'tokens-ready', options = {}) {
+        const ebayPayload = this.buildSelectedEbayPayload(this.currentTitle || document.title);
+        const previewPayload = options.includePreviewRows
+            ? this.buildSidePanelPreviewRowsPayload(window.location.href, options.previewResults || [])
+            : {};
+        const previewSignature = options.searchSignature || this.buildEbaySearchSignature(ebayPayload);
+        void this.recordExtensionDebugEvent(options.includePreviewRows ? 'processor.preview-ready' : 'processor.tokens-ready', {
+            searchSignature: previewSignature,
+            trigger,
+            rowCount: previewPayload.previewRows?.length || 0,
             selectedClues: ebayPayload.selectedClues || [],
             selectionRevision: this.currentSelectionRevision,
         });
         return Promise.resolve(chrome.runtime.sendMessage({
             action: 'marketplacePreviewReady',
             source: 'ebay',
+            tokensReady: true,
             url: window.location.href,
             title: ebayPayload.searchTitle || this.currentTitle || document.title,
             originalTitle: this.currentTitle || document.title,
@@ -1601,12 +2631,17 @@ class EbayProcessor {
             selectedClues: ebayPayload.selectedClues || [],
             ebayPayload,
             marketplacePayload: ebayPayload,
-            previewSignature: searchSignature,
-            previewSource: 'ebay_overlay',
+            previewSignature,
+            previewSource: options.includePreviewRows ? 'ebay_overlay' : 'ebay_overlay_tokens',
             selectionRevision: this.currentSelectionRevision,
+            // Automatic title hydration must wait for the image scan. Treating
+            // title-ready like a manual chip click caused provisional clue
+            // matches to flash before the recognized card was available.
+            skipListingScan: Boolean(options.skipListingScan) || trigger === 'keyword-toggle',
+            forceListingScan: Boolean(options.forceListingScan) || trigger === 'manual-clue' || trigger === 'overlay-expand' || trigger === 'overlay-refresh',
             ...previewPayload,
         })).catch((error) => {
-            console.warn('⚠️ [EBAYE] Unable to send eBay preview:', error);
+            console.warn('⚠️ [EBAYE] Unable to send eBay tokens/preview:', error);
         });
     }
 
@@ -1631,9 +2666,16 @@ class EbayProcessor {
      * Check whether current page is an eBay product page
      */
     isProductPage() {
-        return window.location.hostname.includes('ebay') && 
-               (window.location.pathname.includes('/itm/') || 
-                document.querySelector('h1.x-item-title__mainTitle'));
+        const hostname = String(window.location?.hostname || '');
+        const pathname = String(window.location?.pathname || '');
+        if (!hostname.includes('ebay')) {
+            return false;
+        }
+        if (pathname.includes('/itm/')) {
+            return true;
+        }
+        return typeof document?.querySelector === 'function' &&
+            Boolean(document.querySelector('h1.x-item-title__mainTitle'));
     }
 
     /**
@@ -1641,14 +2683,10 @@ class EbayProcessor {
      */
     processProductPage() {
         const pageKey = this.stableUrl(window.location.href);
-        if (this.processedPages.has(pageKey) && this.isEbayOwnedNodeConnected(this.currentButton)) {
-            console.log('🚫 [EBAYE] Product page already processed, skipping');
-            return;
-        }
 
         try {
             console.log('🔍 [EBAYE] Processing eBay product page...');
-            
+
             // Find product title
             const titleSelectors = [
                 'h1.x-item-title__mainTitle',
@@ -1658,22 +2696,36 @@ class EbayProcessor {
                 'h1[class*="title"]',
                 'h1'
             ];
-            
+
             let titleElement = null;
             for (const selector of titleSelectors) {
                 titleElement = document.querySelector(selector);
                 if (titleElement) break;
             }
-            
+
             if (!titleElement) {
                 console.log('⚠️ [EBAYE] Product title not found');
                 return;
             }
-            
+
             const title = titleElement.textContent.trim();
             if (!title) {
                 console.log('⚠️ [EBAYE] Product title is empty');
                 return;
+            }
+
+            if (
+                this.processedPages.has(pageKey) &&
+                this.isEbayOwnedNodeConnected(this.currentButton) &&
+                this.compactClueValue(this.currentTitle) === this.compactClueValue(title)
+            ) {
+                console.log('🚫 [EBAYE] Product page already processed, skipping');
+                return;
+            }
+
+            if (!this.processedPages.has(pageKey)) {
+                this.ebayOverlayCollapsed = true;
+                this.persistOverlayDock();
             }
             
             console.log(`🔍 [EBAYE] Product title: "${title}"`);
@@ -1684,7 +2736,6 @@ class EbayProcessor {
             this.prepareEbayKeywords(title, details);
             this.createEbayPanelButton();
             this.renderKeywordToggles(title, details);
-            this.runEbaySearch(title, 'product-page');
             
             // Mark page as processed
             this.processedPages.add(pageKey);
@@ -1798,19 +2849,12 @@ class EbayProcessor {
             `;
             this.applyPokoinButtonStyles(button);
             const listingUrl = listingElement.querySelector?.('a[href*="/itm/"]')?.href || window.location.href;
-            this.attachSidePanelClick(button, title, listingUrl, { ...ebayPayload, listingKey: this.stableUrl(listingUrl) });
+            this.attachSidePanelClick(button, title, listingUrl, { ...ebayPayload, listingKey: this.stableUrl(listingUrl) }, { searchOnClick: true });
             
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
             if (inserted) {
                 console.log(`✅ [EBAYE] Added button for ${titleInfo.pokemonName || title}`);
-                
-                // Search database
-                const results = await this.searchCardInDatabase(titleInfo, title, ebayPayload);
-                this.storeMatchedResults(listingUrl, title, results);
-                if (results && results.length > 0) {
-                    this.setPokoinButtonLabel(button, this.countHighConfidenceMatches(results));
-                }
             }
             
             listingElement.setAttribute('data-pokemon-linker-processed', 'true');
@@ -1886,7 +2930,7 @@ class EbayProcessor {
      */
     async searchCardInDatabase(titleInfo, title, ebayPayload = this.buildEbayPayload(title, titleInfo)) {
         void titleInfo;
-        return this.searchCardWithBackground(title, ebayPayload);
+        return this.searchCardWithBackground(title, ebayPayload, 'listing-click');
     }
 
     /**
@@ -1895,6 +2939,43 @@ class EbayProcessor {
     generatePokoinLink(blueprintId) {
         return `https://pokoin.com/marketplace/en/cards/${blueprintId}`;
     }
+}
+
+if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage?.addListener && !window.__pokoinEbayScanMergedListener) {
+    window.__pokoinEbayScanMergedListener = true;
+    chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+        if (request?.action !== 'pokoinListingScanMerged') {
+            return undefined;
+        }
+        const processor = window.ebayProcessor;
+        if (!processor || typeof processor.applyEbaySearchResults !== 'function') {
+            sendResponse?.({ success: false });
+            return false;
+        }
+        const requestUrl = String(request.url || '').split('#')[0];
+        const pageUrl = String(window.location.href || '').split('#')[0];
+        if (requestUrl && pageUrl && requestUrl !== pageUrl) {
+            sendResponse?.({ success: true, ignored: true });
+            return false;
+        }
+        const ebayPayload = typeof processor.buildSelectedEbayPayload === 'function'
+            ? processor.buildSelectedEbayPayload(processor.currentTitle || document.title)
+            : {};
+        const signature = request.searchSignature
+            || (typeof processor.buildEbaySearchSignature === 'function'
+                ? processor.buildEbaySearchSignature(ebayPayload)
+                : '');
+        const results = Array.isArray(request.results) ? request.results : [];
+        if (request.listingKind) {
+            processor.currentListingKind = request.listingKind;
+        }
+        if (signature) {
+            processor.searchResultsBySignature?.set(signature, results);
+        }
+        processor.applyEbaySearchResults(signature, results, { trigger: 'listing-scan-merged' });
+        sendResponse?.({ success: true, rowCount: results.length });
+        return false;
+    });
 }
 
 // Export for global usage

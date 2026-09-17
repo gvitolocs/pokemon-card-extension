@@ -1,6 +1,6 @@
 /**
  * VINT.js - Vinted-specific processor
- * Simplified processor for single-card product pages.
+ * Product-page overlay for singles and album/lot listings.
  */
 
 class VintedProcessor {
@@ -20,6 +20,7 @@ class VintedProcessor {
         this.searchResultsBySignature = new Map();
         this.recentSearchResults = new Map();
         this.inFlightSearches = new Map();
+        this.listingScanFinalSignatures = new Set();
         this.pendingSearchApplications = new Map();
         this.lastRenderedPreviewResults = [];
         this.vintedPanelObserver = null;
@@ -32,14 +33,29 @@ class VintedProcessor {
         this.vintedSessionId = `vinted-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
         this.vintedSequenceId = 0;
         this.vintedDiagnostics = [];
-        this.vintedOverlayCollapsed = false;
+        this.vintedOverlayCollapsed = true;
+        this.overlayDock = { side: 'left', top: 12, left: 12 };
+        this.overlayDockRestored = false;
+        this.overlayDockHydratedFromSync = this.hydrateOverlayDockFromSyncCache();
+        this.overlayDrag = null;
+        this.overlayDragMoved = false;
         this.currentMatchCount = 0;
+        this.pokoinButtonScanState = 'idle';
         this.currentSelectionRevision = 0;
         this.lastVintedCatalogueWarmupSignature = '';
+        this.currentListingKind = '';
+        this.lastSentListingImageCount = -1;
+        this.vintedListingPhotoObserver = null;
+        this.vintedListingPhotoTimer = null;
     }
 
     pokoinIconUrl() {
         return chrome.runtime.getURL('assets/pokoin-512.png');
+    }
+
+    pokoinExtensionVersionSuffix() {
+        const version = chrome?.runtime?.getManifest?.()?.version || '';
+        return version ? ` v${version}` : '';
     }
 
     setPokoinButtonLabel(button, matchCount = null) {
@@ -48,15 +64,121 @@ class VintedProcessor {
             : Math.max(0, Math.trunc(Number(this.currentMatchCount) || 0));
         button?.setAttribute?.('data-pokoin-match-count', String(displayedMatchCount));
         const matchLabel = `${displayedMatchCount} ${displayedMatchCount === 1 ? 'match' : 'matches'}`;
+        const versionSuffix = this.pokoinExtensionVersionSuffix();
+        const collapsed = Boolean(this.vintedOverlayCollapsed);
         const label = displayedMatchCount > 0
-            ? (this.vintedOverlayCollapsed ? matchLabel : `Pokoin.com (${matchLabel})`)
-            : 'Pokoin.com';
-        button.innerHTML = `
-            <img class="pokoin-icon" data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" style="width:20px;height:20px;min-width:20px;min-height:20px;max-width:20px;max-height:20px;flex:0 0 20px;border-radius:50%;object-fit:cover;display:block;">
-            <span>${label}</span>
+            ? (collapsed ? matchLabel : `Pokoin.com${versionSuffix} (${matchLabel})`)
+            : `Pokoin.com${versionSuffix}`;
+        const iconSize = collapsed ? 28 : 20;
+        button.innerHTML = collapsed
+            ? `
+            <img class="pokoin-icon" data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" draggable="false" style="width:${iconSize}px;height:${iconSize}px;min-width:${iconSize}px;min-height:${iconSize}px;max-width:${iconSize}px;max-height:${iconSize}px;flex:0 0 ${iconSize}px;border-radius:50%;object-fit:cover;display:block;">
+        `
+            : `
+            <img class="pokoin-icon" data-pokoin-button-icon="true" src="${this.pokoinIconUrl()}" alt="" aria-hidden="true" draggable="false" style="width:${iconSize}px;height:${iconSize}px;min-width:${iconSize}px;min-height:${iconSize}px;max-width:${iconSize}px;max-height:${iconSize}px;flex:0 0 ${iconSize}px;border-radius:50%;object-fit:cover;display:block;">
+            <span data-pokoin-button-label="true">${label}</span>
         `;
+        button.setAttribute?.('aria-label', collapsed ? `Show Pokoin results (${matchLabel})` : label);
+        button.setAttribute?.('title', collapsed ? 'Show Pokoin results' : label);
     }
 
+    applyPokoinButtonCollapsedLayout(button = this.currentButton) {
+        if (!button) {
+            return;
+        }
+        const collapsed = Boolean(this.vintedOverlayCollapsed);
+        const background = button.style.background || this.pokoinBlue();
+        const border = button.style.border || 'none';
+        const boxShadow = button.style.boxShadow || 'none';
+        if (collapsed) {
+            button.style.cssText = `
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex: 0 0 40px;
+                width: 40px;
+                min-width: 40px;
+                max-width: 40px;
+                height: 40px;
+                padding: 0;
+                gap: 0;
+                border-radius: 12px;
+                background: ${background};
+                color: white;
+                border: ${border};
+                box-shadow: ${boxShadow};
+                cursor: grab;
+                touch-action: none;
+                font-weight: bold;
+                transition: all 0.2s ease;
+            `;
+            Object.assign(button.style, {
+                flex: '0 0 40px',
+                width: '40px',
+                minWidth: '40px',
+                maxWidth: '40px',
+                height: '40px',
+                padding: '0',
+                gap: '0',
+                borderRadius: '12px',
+                background,
+                border,
+                boxShadow,
+                cursor: 'grab',
+                touchAction: 'none',
+            });
+        } else {
+            button.style.cssText = `
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                flex: 1 1 auto;
+                width: auto;
+                min-width: 0;
+                padding: 10px 14px;
+                gap: 8px;
+                border-radius: 8px;
+                background: ${background};
+                color: white;
+                border: ${border};
+                box-shadow: ${boxShadow};
+                cursor: pointer;
+                font-weight: bold;
+                font-size: 14px;
+                font-family: Arial, sans-serif;
+                transition: all 0.2s ease;
+            `;
+            Object.assign(button.style, {
+                flex: '1 1 auto',
+                width: 'auto',
+                minWidth: '0',
+                maxWidth: '',
+                height: '',
+                padding: '10px 14px',
+                gap: '8px',
+                borderRadius: '8px',
+                background,
+                border,
+                boxShadow,
+            });
+        }
+        const icon = button.querySelector?.('img[data-pokoin-button-icon], img.pokoin-icon, img');
+        if (icon) {
+            const iconSize = collapsed ? 28 : 20;
+            Object.assign(icon.style, {
+                width: `${iconSize}px`,
+                height: `${iconSize}px`,
+                minWidth: `${iconSize}px`,
+                minHeight: `${iconSize}px`,
+                maxWidth: `${iconSize}px`,
+                maxHeight: `${iconSize}px`,
+                flex: `0 0 ${iconSize}px`,
+                borderRadius: '50%',
+                objectFit: 'cover',
+                display: 'block',
+            });
+        }
+    }
     isHighConfidenceMatch(result = {}) {
         const rawScore = result.search_score ?? result.relevanceScore ?? result.score ?? result.search_rank;
         const score = Number(rawScore);
@@ -71,9 +193,13 @@ class VintedProcessor {
     }
 
     countPreviewCandidateMatches(results = []) {
-        const previewResults = Array.isArray(results) ? results.slice(0, 8) : [];
+        const previewResults = Array.isArray(results) ? results.slice(0, this.vintedCandidateRowLimit()) : [];
         const highConfidenceCount = this.countHighConfidenceMatches(previewResults);
         return highConfidenceCount > 0 ? highConfidenceCount : previewResults.length;
+    }
+
+    vintedCandidateRowLimit() {
+        return Number.MAX_SAFE_INTEGER;
     }
 
     pokoinBlue() {
@@ -82,6 +208,67 @@ class VintedProcessor {
 
     pokoinBlueHover() {
         return '#0284c7';
+    }
+
+    pokoinScanRed() {
+        return '#dc2626';
+    }
+
+    pokoinScanRedHover() {
+        return '#b91c1c';
+    }
+
+    pokoinScanGreen() {
+        return '#16a34a';
+    }
+
+    pokoinScanGreenHover() {
+        return '#15803d';
+    }
+
+    pokoinButtonScanAppearance(state = this.pokoinButtonScanState) {
+        if (state === 'scanning') {
+            return {
+                background: this.pokoinScanRed(),
+                border: '1px solid rgba(248, 113, 113, 0.7)',
+                boxShadow: '0 4px 12px rgba(220, 38, 38, 0.35)',
+            };
+        }
+        if (state === 'ready') {
+            return {
+                background: this.pokoinScanGreen(),
+                border: '1px solid rgba(74, 222, 128, 0.7)',
+                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.35)',
+            };
+        }
+        return {
+            background: '#075985',
+            border: '1px solid rgba(56, 189, 248, 0.35)',
+            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.18)',
+        };
+    }
+
+    pokoinButtonScanHoverBackground(state = this.pokoinButtonScanState) {
+        if (state === 'scanning') {
+            return this.pokoinScanRedHover();
+        }
+        if (state === 'ready') {
+            return this.pokoinScanGreenHover();
+        }
+        return '#0369a1';
+    }
+
+    setPokoinButtonScanState(state, button = this.currentButton) {
+        this.pokoinButtonScanState = state === 'scanning' || state === 'ready' ? state : 'idle';
+        if (!button) {
+            return;
+        }
+        button.setAttribute?.('data-pokoin-scan-state', this.pokoinButtonScanState);
+        this.applyPokoinButtonStyles(button, {
+            ...this.pokoinButtonScanAppearance(),
+            color: '#ffffff',
+        });
+        this.applyPokoinButtonCollapsedLayout(button);
     }
 
     normalizeClueValue(value = '') {
@@ -170,6 +357,7 @@ class VintedProcessor {
             'vendo', 'vendita', 'spedizione', 'scambio', 'scrivimi', 'lotto', 'lot', 'bundle',
             'originale', 'original', 'italiano', 'italiana', 'inglese', 'english', 'japanese', 'giapponese',
             'liv', 'lv', 'level', 'specie',
+            'psa', 'bgs', 'cgc', 'sgc',
         ]);
     }
 
@@ -206,7 +394,7 @@ class VintedProcessor {
     isPokemonNameLikeClue(value = '') {
         const label = this.removeVintedMarketplaceNoise(typeof value === 'object' ? value.label || value.value : value);
         const compact = this.compactClueValue(label);
-        if (!label || compact.length < 3 || /\d/.test(label)) {
+        if (!label || compact.length < 3) {
             return false;
         }
         if (this.isRarityFeatureClue(label) || this.isExpansionClue(label)) {
@@ -507,7 +695,10 @@ class VintedProcessor {
 
     triggerVintedSelectionRefresh(trigger = 'keyword-toggle') {
         this.invalidateVintedPreviewForSelectionChange();
-        this.sendVintedTokensReady(trigger);
+        this.sendVintedTokensReady(trigger, {
+            skipListingScan: trigger === 'keyword-toggle',
+            forceListingScan: trigger === 'manual-clue',
+        });
         return this.runVintedSearch(this.extractTitleInfo(this.buildVintedSearchTitle(this.currentTitle)), this.currentTitle, trigger);
     }
 
@@ -727,18 +918,90 @@ class VintedProcessor {
             });
     }
 
+    parseVintedSlashCollectorClue(value = '') {
+        const match = String(value || '').trim().match(/^(\d{1,4}[a-z]?)\/(\d{1,4}[a-z]?)$/i);
+        if (!match) {
+            return null;
+        }
+        return {
+            left: match[1].toLowerCase(),
+            right: match[2].toLowerCase(),
+            label: `${match[1]}/${match[2]}`,
+        };
+    }
+
+    /**
+     * Seller title typos like 231/1818 must not beat description 231/191.
+     * Title collectors are auto-selected; description ones were not — so the
+     * typo became the structured collector and fought identify (Drasna 231/191).
+     */
+    reconcileVintedCollectorClues(collectorClues = []) {
+        const list = Array.isArray(collectorClues) ? collectorClues : [];
+        const descriptionSlashByLeft = new Map();
+        list.forEach((entry) => {
+            if (!entry || entry.source === 'title-pattern' || /^title/.test(String(entry.source || ''))) {
+                return;
+            }
+            const parsed = this.parseVintedSlashCollectorClue(entry.label);
+            if (!parsed) {
+                return;
+            }
+            if (!descriptionSlashByLeft.has(parsed.left)) {
+                descriptionSlashByLeft.set(parsed.left, { ...entry, parsed });
+            }
+        });
+        if (descriptionSlashByLeft.size === 0) {
+            return list;
+        }
+
+        const droppedTitleCompacts = new Set();
+        const kept = list.filter((entry) => {
+            const parsed = this.parseVintedSlashCollectorClue(entry?.label);
+            if (!parsed) {
+                return true;
+            }
+            const descriptionHit = descriptionSlashByLeft.get(parsed.left);
+            if (!descriptionHit || descriptionHit.parsed.right === parsed.right) {
+                return true;
+            }
+            if (entry.source === 'title-pattern' || /^title/.test(String(entry.source || ''))) {
+                droppedTitleCompacts.add(this.compactClueValue(entry.label));
+                return false;
+            }
+            return true;
+        });
+
+        if (droppedTitleCompacts.size === 0) {
+            return kept;
+        }
+
+        return kept.map((entry) => {
+            const parsed = this.parseVintedSlashCollectorClue(entry?.label);
+            if (!parsed || entry.source === 'title-pattern' || /^title/.test(String(entry.source || ''))) {
+                return entry;
+            }
+            const descriptionHit = descriptionSlashByLeft.get(parsed.left);
+            if (!descriptionHit || descriptionHit.parsed.right !== parsed.right) {
+                return entry;
+            }
+            return { ...entry, source: 'title-pattern' };
+        });
+    }
+
     vintedExpansionAliases() {
         return [
             { pattern: /\bevoluzioni\b/i, label: 'Evolutions' },
             { pattern: /\borigine\s+perduta\b/i, label: 'Lost Origin' },
             { pattern: /\bneo\s+discovery\b/i, label: 'Neo Discovery' },
             { pattern: /\btesori\s+misteriosi\b/i, label: 'Mysterious Treasures' },
+            { pattern: /\bdiamante\s+e?\s*perla\b/i, label: 'Diamond & Pearl' },
+            { pattern: /\bdiamond\s*(?:and|&)\s*pearl\b/i, label: 'Diamond & Pearl' },
         ];
     }
 
     isExpansionClue(value = '') {
         return this.isBaseSetClue(value) ||
-            /\b(?:team\s+rocket|evolutions|evoluzioni|lost\s+origin|origine\s+perduta|neo\s+discovery|mysterious\s+treasures|tesori\s+misteriosi|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
+            /\b(?:team\s+rocket|evolutions|evoluzioni|lost\s+origin|origine\s+perduta|neo\s+discovery|mysterious\s+treasures|tesori\s+misteriosi|diamond\s*(?:and|&)\s*pearl|diamante\s+e?\s*perla|black\s+star\s+promos?|pokemon\s+151|evolving\s+skies|fusion\s+strike|paldean\s+fates|scarlet\s+violet|obsidian\s+flames|crown\s+zenith|chilling\s+reign|silver\s+tempest|brilliant\s+stars|astral\s+radiance)\b/i.test(this.normalizeClueValue(value));
     }
 
     sourceContainsClue(value = '', sourceText = '') {
@@ -760,6 +1023,94 @@ class VintedProcessor {
         if (keyword.variation || keyword.attachedVariation) return 'variation';
         if (keyword.illustration) return 'feature';
         return 'context';
+    }
+
+    isGenericTextPhraseChip(keyword = {}) {
+        if ((keyword.source || '') !== 'text') {
+            return false;
+        }
+        const label = String(keyword.label || keyword.value || '').trim();
+        const wordCount = label.split(/\s+/).filter(Boolean).length;
+        if (wordCount <= 1) {
+            return false;
+        }
+        if (keyword.illustration && !/^(?:special illustration rare|illustration rare|secret rare|ultra rare|holo rare|reverse holo|full art)$/i.test(label)) {
+            return true;
+        }
+        return !(
+            keyword.nameLike ||
+            keyword.compositeName ||
+            keyword.fullCardIdentityName ||
+            keyword.attachedNamePhrase ||
+            keyword.expansion ||
+            keyword.variation ||
+            keyword.collectorNumber ||
+            keyword.levelNumber ||
+            keyword.illustration
+        );
+    }
+
+    keepTitleNameChipsUnlessAlbum(keywords = [], title = '', description = '') {
+        const listingKind = typeof classifyMarketplaceListingKindFromText === 'function'
+            ? classifyMarketplaceListingKindFromText(title, description).kind
+            : 'unknown';
+        if (listingKind === 'album') {
+            return keywords;
+        }
+
+        // Chip labels are often normalized (typo aliases, Italian "e" -> &,
+        // specie delta -> Delta Species, Mimikyu del Team Rocket -> Team Rocket's Mimikyu).
+        // Build comparable title compacts from those same normalizations so identity
+        // chips are not dropped by a raw-title includes() check.
+        const titleSource = this.vintedTitleTokenSource(title);
+        const aliasedTitle = this.normalizeTargetedVintedNameAliasPhrase(titleSource) || titleSource;
+        const connectorNormalized = this.normalizeClueValue(titleSource)
+            .replace(/\s+(?:e|and|&|\+|\/)\s+/gi, ' & ');
+        const deltaNormalized = this.normalizeClueValue(connectorNormalized)
+            .replace(/\bspecie\s+delta\b/gi, 'Delta Species')
+            .replace(/\bspecies\s+delta\b/gi, 'Delta Species');
+        const rocketNormalized = this.normalizeClueValue(deltaNormalized)
+            .replace(/\b([A-Za-z][A-Za-z']*)\s+(?:del|della|di|de|of)\s+Team\s+Rocket\b/gi, "Team Rocket's $1")
+            .replace(/\bTeam\s+Rocket(?:'s)?\s+([A-Za-z][A-Za-z']*)\b/gi, "Team Rocket's $1");
+        const titleCompacts = [...new Set([
+            this.compactClueValue(aliasedTitle),
+            this.compactClueValue(titleSource),
+            this.compactClueValue(connectorNormalized),
+            this.compactClueValue(deltaNormalized),
+            this.compactClueValue(rocketNormalized),
+        ].filter(Boolean))];
+
+        const titleHasNameChip = keywords.some((keyword) => {
+            if (!keyword.nameLike && !keyword.compositeName && !keyword.fullCardIdentityName && !keyword.attachedNamePhrase) {
+                return false;
+            }
+            return Boolean(keyword.compact && titleCompacts.some((titleCompact) => titleCompact.includes(keyword.compact)));
+        });
+
+        return keywords.filter((keyword) => {
+            if (!keyword.nameLike && !keyword.compositeName && !keyword.fullCardIdentityName && !keyword.attachedNamePhrase) {
+                return true;
+            }
+            // Strong identity chips may appear only in the description on singles.
+            if (keyword.compositeName || keyword.fullCardIdentityName) {
+                return true;
+            }
+            if (
+                keyword.attachedNamePhrase &&
+                /['’]s\b|\bteam\s*rockets?\b/i.test(String(keyword.label || keyword.value || ''))
+            ) {
+                return true;
+            }
+            if (keyword.compact && titleCompacts.some((titleCompact) => titleCompact.includes(keyword.compact))) {
+                return true;
+            }
+            // Noisy marketplace titles ("Carta Pokemon") with no title identity: keep
+            // validated description name chips so search still has a Pokemon clue.
+            if (!titleHasNameChip && (keyword.nameLike || keyword.attachedNamePhrase)) {
+                return true;
+            }
+            return false;
+        });
     }
 
     limitVintedKeywords(keywords = [], limit = 10) {
@@ -786,7 +1137,7 @@ class VintedProcessor {
         return limited;
     }
 
-    prepareVintedKeywordCandidates(candidates = [], sourceText = '') {
+    prepareVintedKeywordCandidates(candidates = [], sourceText = '', title = '', description = '') {
         const prepared = candidates
             .map((candidate, index) => {
                 const aliasPhraseLabel = this.normalizeTargetedVintedNameAliasPhrase(candidate.label || candidate.value);
@@ -799,7 +1150,6 @@ class VintedProcessor {
                     ? { ...normalizedCandidate, label: knownCompositeName, value: knownCompositeName, compact: this.compactClueValue(knownCompositeName) }
                     : normalizedCandidate;
                 const fullCardIdentityName = !compositeName && this.isVintedFullCardIdentityPhrase(compositeNormalizedCandidate);
-                const nameLike = compositeName || fullCardIdentityName || this.isPokemonNameLikeClue(compositeNormalizedCandidate);
                 const variation = this.isVariationClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value) ||
                     this.isMegaFormClue(compositeNormalizedCandidate, sourceText);
                 const baseSet = this.isBaseSetClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
@@ -809,11 +1159,16 @@ class VintedProcessor {
                 const illustration = this.isIllustrationClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value) ||
                     this.isRarityFeatureClue(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value);
                 const attachedNamePhrase = this.isAttachedNamePhraseClue(compositeNormalizedCandidate);
+                // Attached name+variation phrases (Tornadus ex) are name identity chips.
+                // Keep nameLike true so side-panel selection filters that key on nameLike
+                // still pick the composite phrase instead of only the bare species token.
+                const nameLike = compositeName || fullCardIdentityName || attachedNamePhrase ||
+                    this.isPokemonNameLikeClue(compositeNormalizedCandidate);
                 const selectedNameLike = nameLike &&
                     (compositeName || !this.hasAttachedVariationForName(compositeNormalizedCandidate.label || compositeNormalizedCandidate.value, sourceText));
                 const selectedHighConfidenceContext =
                     (collectorNumber || levelNumber || expansion) &&
-                    /^(?:title|title-pattern|title-expansion)$/.test(candidate.source || '') &&
+                    /^(?:title|title-pattern|title-expansion|expansion)$/.test(candidate.source || '') &&
                     (
                         this.sourceContainsClue(candidate.label || candidate.value, sourceText) ||
                         (levelNumber && sourceText.includes(this.normalizeVintedLevelNumber(candidate.label || candidate.value)))
@@ -941,12 +1296,25 @@ class VintedProcessor {
                     return left.illustration ? -1 : 1;
                 }
                 return left._index - right._index;
+            })
+            .filter((keyword) => !this.isGenericTextPhraseChip(keyword));
+        const titleScoped = this.keepTitleNameChipsUnlessAlbum(sorted, title, description);
+        return this.limitVintedKeywords(titleScoped, 12)
+            .map(({ _index, ...keyword }) => {
+                const preferredChip = Boolean(keyword.selectedByDefault);
+                return {
+                    ...keyword,
+                    preferredChip,
+                    // Listing chips stay visible but unpressed. Typed Add clue stays selected.
+                    selectedByDefault: Boolean(keyword.manual || keyword.source === 'manual-input'),
+                };
             });
-        return this.limitVintedKeywords(sorted, 12)
-            .map(({ _index, ...keyword }) => keyword);
     }
 
     extractVintedDescription() {
+        if (typeof document?.querySelector !== 'function') {
+            return '';
+        }
         const selectors = [
             '[data-testid="item-description"]',
             '[data-testid="item-description"] p',
@@ -955,7 +1323,6 @@ class VintedProcessor {
             '[data-testid="item-details-description"]',
             '[data-testid="item-details"] [class*="description"]',
             '[class*="item-description"]',
-            '[class*="description"]',
             'meta[property="og:description"]',
             'meta[name="description"]',
         ];
@@ -970,6 +1337,26 @@ class VintedProcessor {
         }
 
         return '';
+    }
+
+    extractVintedListingImageUrls() {
+        if (!this.isVintedItemListingPage()) {
+            return [];
+        }
+        if (typeof extractListingImageUrlsFromDocument === 'function') {
+            return extractListingImageUrlsFromDocument(document, {
+                source: 'vinted',
+                pageUrl: window.location.href,
+            });
+        }
+        return [];
+    }
+
+    classifyVintedListingKind(title = '', description = '', photoCount = 0) {
+        if (typeof classifyMarketplaceListingKind === 'function') {
+            return classifyMarketplaceListingKind({ title, description, photoCount });
+        }
+        return { kind: 'unknown', reason: 'listing-scan-unavailable', photoCount };
     }
 
     extractVintedKeywords(title = '', description = '') {
@@ -987,7 +1374,7 @@ class VintedProcessor {
         const expansionHints = [
             'Base Set', 'Base Set 2', 'Base Set Shadowless', 'Jungle', 'Fossil', 'Team Rocket',
             'Evolutions',
-            'Legendary Treasures', 'Mysterious Treasures', 'Black Star Promos', 'Evolving Skies', 'Fusion Strike',
+            'Legendary Treasures', 'Mysterious Treasures', 'Diamond & Pearl', 'Black Star Promos', 'Evolving Skies', 'Fusion Strike',
             'Paldean Fates', 'Pokemon 151', 'Scarlet Violet', 'Obsidian Flames', 'Crown Zenith',
             'Chilling Reign', 'Silver Tempest', 'Brilliant Stars', 'Astral Radiance',
         ];
@@ -1011,7 +1398,7 @@ class VintedProcessor {
         this.addKeywordCandidate(candidates, 'illustration', titleHasIllustrationHint ? 'title-illustration' : 'manual-illustration');
 
         const collectorContextText = sourceText;
-        const collectorClues = [
+        const collectorClues = this.reconcileVintedCollectorClues([
             ...this.collectVintedCollectorClues(tokenizedTitle, {
                 includeBareNumbers: true,
                 contextText: collectorContextText,
@@ -1020,8 +1407,28 @@ class VintedProcessor {
                 includeBareNumbers: true,
                 contextText: collectorContextText,
             }).map((label) => ({ label, source: 'pattern' })),
-        ];
+        ]);
         collectorClues.forEach(({ label, source }) => this.addKeywordCandidate(candidates, label, source));
+        const reconciledSlashByLeft = new Map();
+        collectorClues.forEach(({ label }) => {
+            const parsed = this.parseVintedSlashCollectorClue(label);
+            if (parsed) {
+                reconciledSlashByLeft.set(parsed.left, parsed);
+            }
+        });
+        const phraseConflictsReconciledCollector = (phrase = '') => {
+            for (const match of String(phrase || '').matchAll(/\b\d{1,4}[a-z]?\s*\/\s*\d{1,4}[a-z]?\b/gi)) {
+                const parsed = this.parseVintedSlashCollectorClue(match[0].replace(/\s*\/\s*/g, '/'));
+                if (!parsed) {
+                    continue;
+                }
+                const kept = reconciledSlashByLeft.get(parsed.left);
+                if (kept && kept.right !== parsed.right) {
+                    return true;
+                }
+            }
+            return false;
+        };
 
         for (const match of tokenizedTitle.matchAll(/\b(?:liv|lv|level)\.?\s*(\d{1,4}[a-z]?)\b/gi)) {
             this.addKeywordCandidate(candidates, `Lv. ${match[1]}`, 'title-pattern');
@@ -1087,13 +1494,18 @@ class VintedProcessor {
         for (let size = Math.min(3, words.length); size >= 1; size -= 1) {
             for (let index = 0; index <= words.length - size; index += 1) {
                 const phrase = words.slice(index, index + size).join(' ');
-                if (phrase.length >= 3 && !/^\d+$/.test(phrase) && !phraseOverlapsCollector(phrase)) {
+                if (
+                    phrase.length >= 3 &&
+                    !/^\d+$/.test(phrase) &&
+                    !phraseOverlapsCollector(phrase) &&
+                    !phraseConflictsReconciledCollector(phrase)
+                ) {
                     this.addKeywordCandidate(candidates, phrase, 'text');
                 }
             }
         }
 
-        return this.prepareVintedKeywordCandidates(candidates, sourceText);
+        return this.prepareVintedKeywordCandidates(candidates, sourceText, tokenizedTitle, tokenizedDescription);
     }
 
     selectedKeywordLabels() {
@@ -1179,12 +1591,27 @@ class VintedProcessor {
         const selectedClues = Array.from(clues);
         const primaryClues = this.selectedPrimaryClues(selectedClues);
         const selectedKeywords = this.selectedVintedKeywords();
+        // Chips intentionally start unpressed, but title-derived identity is still
+        // authoritative listing evidence. `preferredChip` preserves the extractor's
+        // pre-unpress confidence without treating description-only names as selected.
+        const preferredTitleKeywords = selectedClues.length === 0
+            ? this.currentKeywords.filter((keyword) => keyword.preferredChip)
+            : [];
+        const passiveCollectorKeyword = preferredTitleKeywords.find((keyword) => keyword.collectorNumber);
+        const passiveIdentityKeywords = passiveCollectorKeyword ? preferredTitleKeywords : [];
         const keywordFor = (category) => selectedKeywords.find((keyword) => keyword.category === category);
         const nameKeyword = selectedKeywords.find((keyword) => keyword.nameLike) ||
-            selectedKeywords.find((keyword) => keyword.attachedNamePhrase);
-        const collectorKeyword = keywordFor('collector');
+            selectedKeywords.find((keyword) => keyword.attachedNamePhrase) ||
+            passiveIdentityKeywords.find((keyword) => keyword.nameLike) ||
+            passiveIdentityKeywords.find((keyword) => keyword.attachedNamePhrase);
+        const collectorKeyword = keywordFor('collector') ||
+            passiveCollectorKeyword;
         const levelKeyword = keywordFor('level');
-        const expansionKeyword = keywordFor('expansion');
+        const expansionKeyword = keywordFor('expansion') ||
+            passiveIdentityKeywords.find((keyword) => keyword.expansion) ||
+            (passiveCollectorKeyword
+                ? this.currentKeywords.find((keyword) => keyword.source === 'title-expansion')
+                : null);
         const featureKeywords = selectedKeywords.filter((keyword) => keyword.category === 'feature');
         const variationKeywords = selectedKeywords.filter((keyword) => keyword.category === 'variation');
         const levelNumber = levelKeyword ? this.normalizeVintedLevelNumber(levelKeyword.value) : '';
@@ -1210,7 +1637,19 @@ class VintedProcessor {
                 nameKeyword.value
             )
             : (primaryClues.find((clue) => !this.isVariationClue(clue)) || primaryClues[0] || '');
-        const collectorNumber = collectorKeyword ? this.normalizeVintedCollectorNumber(collectorKeyword.value) : '';
+        let collectorNumber = collectorKeyword ? this.normalizeVintedCollectorNumber(collectorKeyword.value) : '';
+        if (
+            collectorNumber &&
+            levelNumber &&
+            /^\d{1,4}[a-z]?$/i.test(collectorNumber) &&
+            this.numericVintedCollectorNumber(collectorNumber) === levelNumber
+        ) {
+            collectorNumber = '';
+        }
+        const description = this.extractVintedDescription();
+        const listingImageUrls = this.extractVintedListingImageUrls();
+        const listingKindResult = this.classifyVintedListingKind(title, description, listingImageUrls.length);
+        this.currentListingKind = listingKindResult.kind;
         return {
             source: 'vinted',
             listingKey: this.currentVintedListingKey(),
@@ -1232,6 +1671,11 @@ class VintedProcessor {
             features: featureKeywords.map((keyword) => keyword.value),
             levelNumber,
             rarity: featureKeywords.some((keyword) => this.isIllustrationClue(keyword.value)) ? 'illustration' : '',
+            listingKind: listingKindResult.kind,
+            listingKindSignals: listingKindResult,
+            listingDescription: String(description || '').slice(0, 2000),
+            listingImageUrls,
+            enableListingScan: this.isVintedItemListingPage(),
         };
     }
 
@@ -1246,28 +1690,28 @@ class VintedProcessor {
         }
     }
 
+    isVintedItemListingPage(url = window.location.href) {
+        if (typeof isVintedItemListingUrl === 'function') {
+            return isVintedItemListingUrl(url);
+        }
+        try {
+            const parsed = new URL(url, window.location.href);
+            return parsed.hostname.toLowerCase().includes('vinted')
+                && /(?:^|\/)items\/\d+/i.test(parsed.pathname);
+        } catch (error) {
+            return /vinted\.[^/?#]+\/(?:[a-z]{2}\/)?items\/\d+/i.test(String(url || ''));
+        }
+    }
+
     isVintedCataloguePage(url = window.location.href) {
         try {
             const parsed = new URL(url);
-            if (!parsed.hostname.includes('vinted')) {
+            if (!parsed.hostname.toLowerCase().includes('vinted')) {
                 return false;
             }
-
-            const path = parsed.pathname.replace(/\/+$/, '') || '/';
-            if (/^\/(?:item|items)(?:\/|$)/i.test(path)) {
-                return false;
-            }
-
-            if (/^\/catalog(?:\/|$)/i.test(path)) {
-                return true;
-            }
-
-            const searchParams = parsed.searchParams;
-            const hasSearchQuery = ['search_text', 'search_id', 'catalog[]', 'catalog_ids[]', 'brand_ids[]', 'status_ids[]']
-                .some((param) => searchParams.has(param));
-            return hasSearchQuery && !/^\/(?:item|items)(?:\/|$)/i.test(path);
+            return !this.isVintedItemListingPage(parsed.href);
         } catch (error) {
-            return /vinted\.[^/]+\/catalog(?:[/?#]|$)/i.test(String(url || ''));
+            return /vinted\./i.test(String(url || '')) && !this.isVintedItemListingPage(url);
         }
     }
 
@@ -1316,6 +1760,8 @@ class VintedProcessor {
             this.clearVintedOwnedUi('Vinted catalogue/search page');
         }
 
+        this.notifyVintedIdlePage();
+
         const searchText = this.vintedCatalogueSearchText();
         const warmupSignature = `${pageKey}|${this.compactClueValue(searchText)}`;
         if (searchText && warmupSignature !== this.lastVintedCatalogueWarmupSignature) {
@@ -1326,6 +1772,16 @@ class VintedProcessor {
                 title: searchText,
             });
         }
+    }
+
+    notifyVintedIdlePage() {
+        if (typeof chrome.runtime?.sendMessage !== 'function') {
+            return;
+        }
+        void Promise.resolve(chrome.runtime.sendMessage({
+            action: 'vintedIdlePage',
+            url: window.location.href,
+        })).catch(() => null);
     }
 
     recordVintedDiagnostic(event, details = {}) {
@@ -1346,6 +1802,7 @@ class VintedProcessor {
             title: String(details.title || this.currentTitle || '').slice(0, 160),
             selectedChipCategories: details.selectedChipCategories || this.selectedVintedKeywords().map((keyword) => `${keyword.category}:${keyword.value}`),
             payload: details.payload || null,
+            resultRows: details.resultRows || [],
             timestamp: Date.now(),
         };
         this.vintedDiagnostics.push(entry);
@@ -1353,33 +1810,29 @@ class VintedProcessor {
             this.vintedDiagnostics.shift();
         }
         window.__pokoinVintedDiagnostics = this.vintedDiagnostics;
-        if (chrome.runtime?.id && typeof chrome.runtime.sendMessage === 'function' && [
-            'search-start',
-            'search-complete',
-            'search-skip',
-            'search-stale',
-            'search-apply',
-            'preview-ready',
-            'tokens-ready',
-            'side-panel-payload',
-            'listing-reset',
-            'ui-mount',
-        ].includes(event)) {
+        if (chrome.runtime?.id && typeof chrome.runtime.sendMessage === 'function') {
             void Promise.resolve(chrome.runtime.sendMessage({
                 action: 'recordExtensionDebugEvent',
                 type: `vinted.${event}`,
                 details: {
                     source: 'vinted',
+                    sessionId: entry.sessionId,
+                    sequenceId: entry.sequenceId,
                     url: window.location.href,
                     listingKey: entry.listingKey,
                     searchSignature: entry.searchSignature,
                     reason: entry.reason,
                     trigger: entry.trigger,
+                    anchorMounted: entry.anchorMounted,
+                    uiMounted: entry.uiMounted,
+                    hasCachedResults: entry.hasCachedResults,
+                    inFlight: entry.inFlight,
                     selectedChipCategories: entry.selectedChipCategories,
                     skippedDuplicateReason: entry.skippedDuplicateReason,
                     staleResponseIgnored: entry.staleResponseIgnored,
                     title: entry.title,
                     payload: entry.payload,
+                    resultRows: entry.resultRows,
                 },
             })).catch(() => null);
         }
@@ -1421,15 +1874,19 @@ class VintedProcessor {
         this.currentPanel = null;
         this.currentPanelHost = null;
         this.currentButton = null;
+        this.vintedOverlayCollapsed = true;
         this.currentKeywords = [];
         this.selectedKeywordValues = new Set();
         this.currentMatchCount = 0;
         this.latestSearchToken += 1;
         this.lastAppliedSearchSignature = '';
         this.searchResultsBySignature.clear();
+        this.listingScanFinalSignatures.clear();
         this.inFlightSearches.clear();
         this.pendingSearchApplications.clear();
         this.lastRenderedPreviewResults = [];
+        this.lastSentListingImageCount = -1;
+        this.persistOverlayDock();
         this.recordVintedDiagnostic('listing-reset', {
             listingKey: nextListingKey,
             reason: 'stable listing URL changed',
@@ -1512,14 +1969,56 @@ class VintedProcessor {
             .join(' ');
     }
 
-    compactCandidateMeta(result = {}) {
+    overlayCandidateParts(result = {}) {
+        const name = String(result.name || result.name_en || result.pokemon_name || '').trim();
         const rawNumber = String(result.collector_number || result.card_number || result.collectorNumber || '')
             .trim();
         const number = rawNumber
             .match(/\b(?:[A-Z]{1,6}\s?)?(\d{1,4}[a-z]?)(?:\s*\/\s*\d{1,4}[a-z]?)?\b/i)?.[1] || '';
         const setName = result.expansion_name_en || result.expansionName || result.set_name || result.setName || '';
-        const price = result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '';
-        return [number || rawNumber, setName, price].filter(Boolean).join(' · ');
+        const price = String(result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '').trim();
+        return {
+            meta: [name, number || rawNumber, setName].filter(Boolean).join(' · '),
+            price,
+        };
+    }
+
+    compactCandidateMeta(result = {}) {
+        const { meta, price } = this.overlayCandidateParts(result);
+        return [meta, price].filter(Boolean).join(' · ');
+    }
+
+    candidateLanguageBadgesHtml(result = {}) {
+        const langs = result.print_langs || result.printLangs || {};
+        const available = (pack) => Boolean(
+            pack && (
+                pack === true ||
+                typeof pack === 'string' ||
+                pack.id ||
+                pack.image_url ||
+                pack.imageUrl
+            )
+        );
+        const badges = [
+            ['eur', '🇪🇺', 'EUR'],
+            ['jp', '🇯🇵', 'JP'],
+            ['cn', '🇨🇳', 'CN'],
+        ].filter(([key]) => available(langs[key]));
+        if (!badges.length) {
+            return '';
+        }
+        return `<span data-pokoin-language-badges="true" aria-label="Available print languages: ${badges.map(([, , label]) => label).join(', ')}" style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;">${badges.map(([key, flag, label]) => `<span data-pokoin-language="${key}" style="display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border:1px solid rgba(56,189,248,0.45);border-radius:999px;background:rgba(15,23,42,0.8);color:#bae6fd;font-size:10px;font-weight:800;line-height:1;"><span aria-hidden="true">${flag}</span>${label}</span>`).join('')}</span>`;
+    }
+
+    overlayCandidateRowHtml(result = {}) {
+        const logoUrl = this.candidateExpansionLogoUrl(result);
+        const { meta, price } = this.overlayCandidateParts(result);
+        const priceHtml = price
+            ? `${meta ? ' · ' : ''}<span data-pokoin-pkn-price="true" style="color:#ffcc03;font-weight:800;">${price}</span>`
+            : '';
+        const label = `${meta || (price ? '' : 'Candidate')}${priceHtml}`;
+        const languageBadges = this.candidateLanguageBadgesHtml(result);
+        return `${logoUrl ? `<img src="${logoUrl}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:999px;background:rgba(15,23,42,0.72);">` : ''}<span style="display:flex;min-width:0;flex-direction:column;gap:5px;"><span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${label || 'Candidate'}</span>${languageBadges}</span>`;
     }
 
     candidateExpansionLogoUrl(result = {}) {
@@ -1557,20 +2056,43 @@ class VintedProcessor {
                 element.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
             });
         const toggle = this.vintedPanelRoot()?.querySelector?.('[data-pokoin-vinted-collapse-toggle]');
-        if (toggle) {
+        if (toggle?.setAttribute) {
+            if (toggle.style) {
+                toggle.style.display = collapsed ? 'none' : '';
+            }
+            toggle.setAttribute('aria-hidden', collapsed ? 'true' : 'false');
             toggle.textContent = collapsed ? '+' : 'X';
-            toggle.setAttribute?.('aria-expanded', collapsed ? 'false' : 'true');
-            toggle.setAttribute?.('aria-label', collapsed ? 'Expand Pokoin Vinted overlay' : 'Collapse Pokoin Vinted overlay');
-            toggle.setAttribute?.('title', collapsed ? 'Show Pokoin results' : 'Hide Pokoin results');
+            toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            toggle.setAttribute('aria-label', collapsed ? 'Expand Pokoin Vinted overlay' : 'Collapse Pokoin Vinted overlay');
+            toggle.setAttribute('title', collapsed ? 'Show Pokoin results' : 'Hide Pokoin results');
         }
         if (this.currentButton) {
             this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+            this.applyPokoinButtonCollapsedLayout(this.currentButton);
+            this.bindOverlayDragHandle(this.currentButton);
         }
+        const panel = this.currentPanel;
+        if (panel?.style) {
+            panel.style.margin = collapsed ? '0' : '12px 0';
+            panel.style.width = collapsed ? '40px' : '100%';
+            panel.style.maxWidth = collapsed ? '40px' : '420px';
+            panel.style.gap = collapsed ? '0' : '8px';
+            panel.style.pointerEvents = 'auto';
+        }
+        const header = this.vintedHeaderRow();
+        if (header?.style) {
+            header.style.gap = collapsed ? '0' : '8px';
+            header.style.width = collapsed ? '40px' : '100%';
+            header.style.cursor = collapsed ? 'grab' : '';
+            header.style.touchAction = collapsed ? 'none' : '';
+        }
+        this.applyOverlayDock();
     }
 
     setVintedOverlayCollapsed(collapsed) {
         this.vintedOverlayCollapsed = Boolean(collapsed);
         this.applyVintedOverlayCollapsedState();
+        this.persistOverlayDock();
     }
 
     ensureVintedHeaderRow() {
@@ -1693,8 +2215,10 @@ class VintedProcessor {
         this.currentMatchCount = this.countPreviewCandidateMatches(results);
         if (this.currentButton) {
             this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+            this.applyPokoinButtonCollapsedLayout(this.currentButton);
         }
         if (!this.isVintedOwnedNodeConnected(this.currentButton) || results.length === 0) {
+            this.applyVintedOverlayCollapsedState();
             return;
         }
 
@@ -1718,7 +2242,11 @@ class VintedProcessor {
             overflowY: 'auto',
         });
 
-        results.slice(0, 8).forEach((result) => {
+        const visibleResults = results.slice(0, this.vintedCandidateRowLimit());
+        if (visibleResults.length > 1) {
+            this.appendAllOverlayRow(preview);
+        }
+        visibleResults.forEach((result) => {
             const row = document.createElement('button');
             const logoUrl = this.candidateExpansionLogoUrl(result);
             row.type = 'button';
@@ -1739,10 +2267,7 @@ class VintedProcessor {
                 cursor: pointer;
                 pointer-events: auto;
             `;
-            row.innerHTML = `
-                ${logoUrl ? `<img src="${logoUrl}" alt="" style="width:20px;height:20px;object-fit:contain;border-radius:999px;background:rgba(15,23,42,0.72);">` : ''}
-                <span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${this.compactCandidateMeta(result) || 'Candidate'}</span>
-            `;
+            row.innerHTML = this.overlayCandidateRowHtml(result);
             row.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
@@ -1758,6 +2283,35 @@ class VintedProcessor {
             this.ensureVintedPanel(this.currentTitleElement).appendChild(preview);
         }
         this.applyVintedOverlayCollapsedState();
+    }
+
+    appendAllOverlayRow(preview) {
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.setAttribute('data-pokoin-candidate-all', 'true');
+        row.setAttribute('aria-label', 'Show all cards in Pokoin side panel');
+        row.style.cssText = `
+            display: grid;
+            grid-template-columns: 1fr;
+            align-items: center;
+            width: 100%;
+            padding: 10px 0;
+            border: 0;
+            border-top: 1px solid rgba(148, 163, 184, 0.18);
+            background: transparent;
+            color: inherit;
+            text-align: left;
+            cursor: pointer;
+            pointer-events: auto;
+        `;
+        row.innerHTML = `<span style="display:block;color:#f8fafc;font-size:13px;font-weight:700;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">ALL</span>`;
+        row.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            event.stopImmediatePropagation?.();
+            this.openPokoinSidePanel(null, { all: true });
+        }, true);
+        preview.appendChild(row);
     }
 
     candidateCardId(result = {}) {
@@ -1780,9 +2334,12 @@ class VintedProcessor {
                 expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
                 preview_image_url: result.preview_image_url || result.previewImageUrl || result.image_url || result.imageUrl || result.cdn_image_url || '',
                 image_url: result.image_url || result.imageUrl || result.cdn_image_url || result.cdnImageUrl || '',
+                print_langs: result.print_langs || result.printLangs || null,
                 source: result.source || 'vinted_overlay',
                 search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
                 pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                print_lang_prices: result.print_lang_prices || null,
+                print_lang_price_pkn: result.print_lang_price_pkn || null,
                 canonicalUrl: result.canonicalUrl || result.canonical_url || '',
                 marketplaceUrl: result.marketplaceUrl || result.marketplace_url || '',
                 canonicalPath: result.canonicalPath || result.canonical_path || '',
@@ -1793,7 +2350,7 @@ class VintedProcessor {
 
     buildSidePanelPreviewRowsPayload(results = this.currentPreviewResults()) {
         const rows = (Array.isArray(results) ? results : [])
-            .slice(0, 8)
+            .slice(0, this.vintedCandidateRowLimit())
             .map((result) => {
                 const cardId = this.candidateCardId(result);
                 if (!cardId) {
@@ -1807,9 +2364,12 @@ class VintedProcessor {
                     expansion_symbol_url: result.expansion_symbol_url || result.expansionSymbolUrl || result.symbolImageUrl || '',
                     preview_image_url: result.preview_image_url || result.previewImageUrl || result.image_url || result.imageUrl || result.cdn_image_url || '',
                     image_url: result.image_url || result.imageUrl || result.cdn_image_url || result.cdnImageUrl || '',
+                    print_langs: result.print_langs || result.printLangs || null,
                     source: result.source || 'vinted_overlay_preview',
                     search_rank: result.search_rank || result.searchScore || result.search_score || result.relevanceScore || result.score || '',
                     pokoin_price: result.pokoin_price || result.pokoinPrice || result.price_formatted || result.priceFormatted || '',
+                    print_lang_prices: result.print_lang_prices || null,
+                    print_lang_price_pkn: result.print_lang_price_pkn || null,
                     canonicalUrl: result.canonicalUrl || result.canonical_url || '',
                     marketplaceUrl: result.marketplaceUrl || result.marketplace_url || '',
                     canonicalPath: result.canonicalPath || result.canonical_path || '',
@@ -1828,26 +2388,34 @@ class VintedProcessor {
         this.currentSelectionRevision += 1;
         this.latestSearchToken += 1;
         this.lastAppliedSearchSignature = '';
+        this.searchResultsBySignature.clear();
+        this.recentSearchResults.clear();
+        this.inFlightSearches.clear();
         this.pendingSearchApplications.clear();
         this.lastRenderedPreviewResults = [];
         this.removeOwnedPanelChildren('[data-pokoin-candidate-preview]');
         this.currentMatchCount = 0;
         if (this.currentButton) {
             this.setPokoinButtonLabel(this.currentButton, this.currentMatchCount);
+            this.setPokoinButtonScanState('scanning');
         }
     }
 
-    openPokoinSidePanel(candidate = null) {
+    openPokoinSidePanel(candidate = null, options = {}) {
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
         const vintedPayload = this.buildVintedPayload(this.currentTitle || document.title, clues);
         const previewPayload = this.buildSidePanelPreviewRowsPayload(
-            candidate ? this.currentPreviewResults({ allowRenderedFallback: true }) : this.currentPreviewResults()
+            this.currentPreviewResults({
+                allowRenderedFallback: Boolean(candidate) || Boolean(options.all),
+            })
         );
         if (!previewPayload.previewRows?.length && candidate) {
             previewPayload.previewRows = [this.buildSidePanelCandidatePayload(candidate).selectedCandidate]
                 .filter(Boolean);
         }
+        const previewRowCount = previewPayload.previewRows?.length || 0;
+        const openAllCards = Boolean(options.all) || (!candidate && previewRowCount > 1);
         const message = {
             action: 'openSidePanelForCurrentTab',
             url: window.location.href,
@@ -1861,10 +2429,11 @@ class VintedProcessor {
             previewSource: 'vinted_overlay',
             selectionRevision: this.currentSelectionRevision,
             ...previewPayload,
-            ...this.buildSidePanelCandidatePayload(candidate || {}),
+            ...(options.all || !candidate ? {} : this.buildSidePanelCandidatePayload(candidate || {})),
+            openAllCards,
         };
         this.recordVintedDiagnostic('side-panel-payload', {
-            trigger: candidate ? 'candidate-click' : 'main-button',
+            trigger: candidate ? 'candidate-click' : (options.all ? 'all-click' : 'main-button'),
             searchSignature: message.previewSignature,
             selectedChipCategories: vintedPayload.selectedChipCategories,
             payload: vintedPayload,
@@ -1875,9 +2444,10 @@ class VintedProcessor {
         });
     }
 
-    async searchCardWithBackground(title, clues = this.selectedKeywordLabels()) {
+    async searchCardWithBackground(title, clues = this.selectedKeywordLabels(), trigger = 'background-preview') {
         const signature = this.buildVintedSearchSignature(title, clues);
-        if (this.searchResultsBySignature.has(signature)) {
+        const bypassResultCache = trigger === 'overlay-expand' || trigger === 'overlay-refresh' || trigger === 'manual-clue' || trigger === 'keyword-toggle' || trigger === 'listing-gallery-grown';
+        if (!bypassResultCache && this.searchResultsBySignature.has(signature)) {
             this.recordVintedDiagnostic('search-skip', {
                 searchSignature: signature,
                 skippedDuplicateReason: 'cached-results',
@@ -1886,7 +2456,7 @@ class VintedProcessor {
             });
             return this.searchResultsBySignature.get(signature);
         }
-        if (this.recentSearchResults.has(signature)) {
+        if (!bypassResultCache && this.recentSearchResults.has(signature)) {
             const cachedResults = this.recentSearchResults.get(signature);
             this.recentSearchResults.delete(signature);
             this.recentSearchResults.set(signature, cachedResults);
@@ -1912,9 +2482,12 @@ class VintedProcessor {
         const primaryClues = this.selectedPrimaryClues(clues);
         const vintedPayload = this.buildVintedPayload(title, clues);
         const requestUrl = window.location.href;
+        const userChipSearch = trigger === 'keyword-toggle';
+        const userInputScan = trigger === 'manual-clue';
+        const overlayExpandScan = trigger === 'overlay-expand' || trigger === 'overlay-refresh';
         this.recordVintedDiagnostic('search-start', {
             searchSignature: signature,
-            trigger: 'background-preview',
+            trigger,
             title,
             selectedChipCategories: vintedPayload.selectedChipCategories,
             payload: vintedPayload,
@@ -1929,7 +2502,22 @@ class VintedProcessor {
             vintedPayload,
             selectionRevision: this.currentSelectionRevision,
             url: requestUrl,
+            forceRefresh: userChipSearch || userInputScan || overlayExpandScan,
+            skipListingScan: userChipSearch,
+            forceListingScan: userInputScan || overlayExpandScan || trigger === 'listing-gallery-grown',
+            searchTrigger: trigger,
         }).then((response) => {
+            if (this.listingScanFinalSignatures.has(signature)) {
+                const finalResults = this.searchResultsBySignature.get(signature) || [];
+                this.recordVintedDiagnostic('search-stale', {
+                    searchSignature: signature,
+                    trigger,
+                    staleResponseIgnored: true,
+                    reason: 'listing scan already finalized this signature',
+                    title,
+                });
+                return finalResults;
+            }
             const results = response?.success && Array.isArray(response.results) ? response.results : [];
             this.searchResultsBySignature.set(signature, results);
             this.rememberRecentSearchResults(signature, results);
@@ -1938,6 +2526,13 @@ class VintedProcessor {
                 reason: `${results.length} result(s)`,
                 hasCachedResults: true,
                 title,
+                resultRows: results.map((row) => ({
+                    id: row?.card_id || row?.id || '',
+                    name: row?.name || '',
+                    collector: row?.collector_number || row?.collectorNumber || '',
+                    score: Number(row?.score ?? row?.similarity ?? row?.confidence) || 0,
+                    source: row?.source || row?.match_source || '',
+                })),
             });
             return results;
         }).finally(() => {
@@ -2029,8 +2624,6 @@ class VintedProcessor {
     vintedFallbackPanelStyles() {
         return {
             position: 'fixed',
-            left: '12px',
-            top: '12px',
             bottom: 'auto',
             right: 'auto',
             zIndex: '2147483647',
@@ -2049,6 +2642,337 @@ class VintedProcessor {
 
     vintedFloatingPanelStyles() {
         return this.vintedFallbackPanelStyles();
+    }
+
+    overlayDockStorageKey() {
+        return 'pokoinOverlayDock';
+    }
+
+    overlayDockSyncCacheKey() {
+        return 'pokoin.overlayDock';
+    }
+
+    overlayDragRoot() {
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+            return document;
+        }
+        return this.currentButton || this.currentPanelHost;
+    }
+
+    overlayHostWidth() {
+        return this.vintedOverlayCollapsed ? 40 : 320;
+    }
+
+    overlayStorage() {
+        try {
+            return window?.localStorage || globalThis.localStorage || null;
+        } catch {
+            return null;
+        }
+    }
+
+    clampOverlayTop(top, viewportHeight = (typeof window !== 'undefined' && window.innerHeight) || 600) {
+        const maxTop = Math.max(8, Number(viewportHeight) - 56);
+        return Math.max(8, Math.min(maxTop, Math.round(Number(top) || 12)));
+    }
+
+    clampOverlayLeft(left, width = this.overlayHostWidth(), viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800) {
+        const maxLeft = Math.max(8, Number(viewportWidth) - Number(width) - 8);
+        return Math.max(8, Math.min(maxLeft, Math.round(Number(left) || 12)));
+    }
+
+    normalizeOverlayDock(dock = {}, collapsed = this.vintedOverlayCollapsed) {
+        const width = collapsed ? 40 : 320;
+        const viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800;
+        const side = dock?.side === 'right' ? 'right' : 'left';
+        const top = this.clampOverlayTop(dock?.top);
+        const hasLeft = Number.isFinite(Number(dock?.left));
+        const left = hasLeft
+            ? this.clampOverlayLeft(dock.left, width, viewportWidth)
+            : this.clampOverlayLeft(side === 'right' ? viewportWidth - width - 12 : 12, width, viewportWidth);
+        return {
+            side,
+            top,
+            left,
+            collapsed: typeof dock?.collapsed === 'boolean' ? dock.collapsed : undefined,
+        };
+    }
+
+    overlayDockPayload() {
+        const dock = this.normalizeOverlayDock(this.overlayDock);
+        return {
+            side: dock.side,
+            top: dock.top,
+            left: dock.left,
+            collapsed: Boolean(this.vintedOverlayCollapsed),
+        };
+    }
+
+    readOverlayDockSyncCache() {
+        try {
+            const raw = this.overlayStorage()?.getItem?.(this.overlayDockSyncCacheKey());
+            if (!raw) {
+                return null;
+            }
+            return this.normalizeOverlayDock(JSON.parse(raw));
+        } catch {
+            return null;
+        }
+    }
+
+    writeOverlayDockSyncCache(dock = this.overlayDockPayload()) {
+        try {
+            this.overlayStorage()?.setItem?.(this.overlayDockSyncCacheKey(), JSON.stringify(dock));
+        } catch {
+            // Page storage can be blocked; chrome.storage.local still persists.
+        }
+    }
+
+    hydrateOverlayDockFromSyncCache() {
+        const cached = this.readOverlayDockSyncCache();
+        if (!cached) {
+            return false;
+        }
+        this.overlayDock = { side: cached.side, top: cached.top, left: cached.left };
+        if (typeof cached.collapsed === 'boolean') {
+            this.vintedOverlayCollapsed = cached.collapsed;
+        }
+        return true;
+    }
+
+    snapOverlayDockFromRect(rect = {}, viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800) {
+        const width = Number(rect.width) || this.overlayHostWidth();
+        const left = this.clampOverlayLeft(rect.left, width, viewportWidth);
+        const top = this.clampOverlayTop(rect.top);
+        this.overlayDock = {
+            side: (left + (width / 2)) > (Number(viewportWidth) / 2) ? 'right' : 'left',
+            top,
+            left,
+        };
+        return this.overlayDock;
+    }
+
+    applyOverlayDock(host = this.currentPanelHost) {
+        if (!host?.style) {
+            return host;
+        }
+        const collapsed = Boolean(this.vintedOverlayCollapsed);
+        const dock = this.normalizeOverlayDock(this.overlayDock, collapsed);
+        this.overlayDock = { side: dock.side, top: dock.top, left: dock.left };
+        host.style.top = `${dock.top}px`;
+        host.style.left = `${dock.left}px`;
+        host.style.bottom = 'auto';
+        host.style.right = 'auto';
+        if (collapsed) {
+            host.style.width = '40px';
+            host.style.maxWidth = '40px';
+            host.style.height = '40px';
+            host.style.maxHeight = '40px';
+            host.style.gap = '0';
+            host.style.overflow = 'hidden';
+            host.style.contain = 'none';
+            host.style.pointerEvents = 'auto';
+            host.style.touchAction = 'none';
+        } else {
+            host.style.width = 'min(320px, calc(100vw - 32px))';
+            host.style.maxWidth = '320px';
+            host.style.height = '';
+            host.style.maxHeight = 'calc(100vh - 24px)';
+            host.style.gap = '8px';
+            host.style.overflow = '';
+            host.style.contain = 'layout style';
+            host.style.pointerEvents = 'none';
+            host.style.touchAction = '';
+        }
+        host.setAttribute?.('data-pokoin-overlay-side', dock.side);
+        return host;
+    }
+
+    persistOverlayDock() {
+        const payload = this.overlayDockPayload();
+        this.writeOverlayDockSyncCache(payload);
+        try {
+            chrome.storage?.local?.set?.({
+                [this.overlayDockStorageKey()]: payload,
+            });
+        } catch {
+            // Ignore storage failures; dock still applies for this page.
+        }
+    }
+
+    restoreOverlayDock() {
+        if (this.overlayDockHydratedFromSync) {
+            this.applyOverlayDock();
+            this.overlayDockRestored = true;
+            this.revealOverlayHost();
+            return;
+        }
+        this.applyOverlayDock();
+        if (this.overlayDockRestored) {
+            this.revealOverlayHost();
+            return;
+        }
+        const get = chrome.storage?.local?.get;
+        if (typeof get !== 'function') {
+            this.overlayDockRestored = true;
+            this.revealOverlayHost();
+            return;
+        }
+        this.overlayDockRestored = true;
+        this.hideOverlayHostUntilDocked();
+        Promise.resolve(get.call(chrome.storage.local, this.overlayDockStorageKey()))
+            .then((stored) => {
+                const dock = stored?.[this.overlayDockStorageKey()] || stored;
+                if (dock && typeof dock === 'object') {
+                    const normalized = this.normalizeOverlayDock(dock);
+                    this.overlayDock = { side: normalized.side, top: normalized.top, left: normalized.left };
+                    if (typeof dock.collapsed === 'boolean') {
+                        this.vintedOverlayCollapsed = dock.collapsed;
+                    }
+                    this.writeOverlayDockSyncCache(this.overlayDockPayload());
+                }
+                this.applyVintedOverlayCollapsedState();
+                this.revealOverlayHost();
+            })
+            .catch(() => {
+                this.revealOverlayHost();
+            });
+    }
+
+    hideOverlayHostUntilDocked(host = this.currentPanelHost) {
+        if (host?.style && !this.overlayDockHydratedFromSync) {
+            host.style.visibility = 'hidden';
+        }
+    }
+
+    revealOverlayHost(host = this.currentPanelHost) {
+        if (host?.style) {
+            host.style.visibility = 'visible';
+        }
+    }
+
+    consumeOverlayDragClick(event) {
+        if (!this.overlayDragMoved) {
+            return false;
+        }
+        this.overlayDragMoved = false;
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        event?.stopImmediatePropagation?.();
+        return true;
+    }
+
+    bindOverlayDragHandle(handle) {
+        if (!handle || handle.__pokoinOverlayDragBound) {
+            return;
+        }
+        handle.__pokoinOverlayDragBound = true;
+        if (handle.style) {
+            handle.style.touchAction = 'none';
+        }
+        handle.addEventListener('pointerdown', (event) => this.beginOverlayDrag(event, handle), true);
+    }
+
+    beginOverlayDrag(event, handle) {
+        if (event?.button != null && event.button !== 0) {
+            return;
+        }
+        if (this.overlayDrag) {
+            return;
+        }
+        const host = this.currentPanelHost;
+        if (!host) {
+            return;
+        }
+        event?.stopPropagation?.();
+        const startX = Number(event?.clientX) || 0;
+        const startY = Number(event?.clientY) || 0;
+        const rect = typeof host.getBoundingClientRect === 'function'
+            ? host.getBoundingClientRect()
+            : {
+                left: parseFloat(host.style.left) || 12,
+                top: parseFloat(host.style.top) || this.overlayDock.top || 12,
+                width: this.overlayHostWidth(),
+                height: 40,
+            };
+        const originLeft = Number(rect.left) || 12;
+        const originTop = Number(rect.top) || 12;
+        const width = Number(rect.width) || this.overlayHostWidth();
+        this.overlayDrag = {
+            startX,
+            startY,
+            originLeft,
+            originTop,
+            width,
+            left: originLeft,
+            top: originTop,
+            moved: false,
+            pointerId: event?.pointerId,
+        };
+        handle.setPointerCapture?.(event?.pointerId);
+        const dragThreshold = this.vintedOverlayCollapsed ? 3 : 8;
+        const root = this.overlayDragRoot();
+        const onMove = (moveEvent) => {
+            if (this.overlayDrag?.pointerId != null && moveEvent?.pointerId != null && moveEvent.pointerId !== this.overlayDrag.pointerId) {
+                return;
+            }
+            const dx = (Number(moveEvent?.clientX) || 0) - startX;
+            const dy = (Number(moveEvent?.clientY) || 0) - startY;
+            if (!this.overlayDrag.moved && (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold)) {
+                this.overlayDrag.moved = true;
+                this.overlayDragMoved = true;
+                if (handle.style) {
+                    handle.style.cursor = 'grabbing';
+                    handle.style.transform = 'none';
+                }
+            }
+            if (!this.overlayDrag.moved) {
+                return;
+            }
+            moveEvent?.preventDefault?.();
+            const viewportWidth = (typeof window !== 'undefined' && window.innerWidth) || 800;
+            const viewportHeight = (typeof window !== 'undefined' && window.innerHeight) || 600;
+            const left = Math.max(8, Math.min(viewportWidth - this.overlayDrag.width - 8, originLeft + dx));
+            const top = this.clampOverlayTop(originTop + dy, viewportHeight);
+            this.overlayDrag.left = left;
+            this.overlayDrag.top = top;
+            host.style.left = `${Math.round(left)}px`;
+            host.style.right = 'auto';
+            host.style.top = `${Math.round(top)}px`;
+        };
+        const onUp = (upEvent) => {
+            root.removeEventListener?.('pointermove', onMove, true);
+            root.removeEventListener?.('pointerup', onUp, true);
+            root.removeEventListener?.('pointercancel', onUp, true);
+            root.removeEventListener?.('mousemove', onMove, true);
+            root.removeEventListener?.('mouseup', onUp, true);
+            handle.releasePointerCapture?.(this.overlayDrag?.pointerId ?? event?.pointerId);
+            if (handle.style) {
+                handle.style.cursor = this.vintedOverlayCollapsed ? 'grab' : 'pointer';
+            }
+            const drag = this.overlayDrag;
+            this.overlayDrag = null;
+            if (!drag?.moved) {
+                return;
+            }
+            upEvent?.preventDefault?.();
+            upEvent?.stopPropagation?.();
+            this.snapOverlayDockFromRect({
+                left: drag.left,
+                top: drag.top,
+                width: drag.width,
+            });
+            this.applyOverlayDock(host);
+            this.persistOverlayDock();
+            setTimeout(() => {
+                this.overlayDragMoved = false;
+            }, 50);
+        };
+        root.addEventListener?.('pointermove', onMove, true);
+        root.addEventListener?.('pointerup', onUp, true);
+        root.addEventListener?.('pointercancel', onUp, true);
+        root.addEventListener?.('mousemove', onMove, true);
+        root.addEventListener?.('mouseup', onUp, true);
     }
 
     nearestElement(node) {
@@ -2302,7 +3226,10 @@ class VintedProcessor {
         void titleElement;
         Object.assign(host.style, this.vintedPanelBaseStyles(), this.vintedFallbackPanelStyles());
         host.setAttribute('data-pokoin-vinted-placement', 'overlay-fixed');
+        this.applyOverlayDock(host);
         document.body.appendChild(host);
+        this.restoreOverlayDock();
+        this.bindOverlayDragHandle(this.currentButton);
         return true;
     }
 
@@ -2402,6 +3329,35 @@ class VintedProcessor {
         }
     }
 
+    expandVintedOverlayAndRecognize() {
+        return this.recognizeVintedListing('overlay-expand');
+    }
+
+    refreshVintedOverlayScan() {
+        return this.recognizeVintedListing('overlay-refresh');
+    }
+
+    recognizeVintedListing(trigger = 'overlay-expand') {
+        this.setVintedOverlayCollapsed(false);
+        const title = this.currentTitle || (typeof document !== 'undefined' ? document.title : '');
+        if (!title) {
+            return Promise.resolve();
+        }
+        const titleInfo = typeof this.extractTitleInfo === 'function'
+            ? this.extractTitleInfo(title)
+            : {};
+        return this.runVintedSearch(titleInfo, title, trigger);
+    }
+
+    ensurePokoinSidePanelOpen() {
+        if (typeof chrome.runtime?.sendMessage !== 'function') {
+            return Promise.resolve();
+        }
+        return Promise.resolve(chrome.runtime.sendMessage({ action: 'ensureSidePanelOpen' })).catch((error) => {
+            console.warn('⚠️ [VINT] Unable to open side panel:', error);
+        });
+    }
+
     attachVintedSidePanelClick(button) {
         if (!button) {
             return;
@@ -2410,11 +3366,20 @@ class VintedProcessor {
             return;
         }
         button.__pokoinVintedSidePanelClickAttached = true;
+        this.bindOverlayDragHandle(button);
         button.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
             event.stopImmediatePropagation?.();
-            this.openPokoinSidePanel();
+            if (this.consumeOverlayDragClick(event)) {
+                return;
+            }
+            if (this.vintedOverlayCollapsed) {
+                this.expandVintedOverlayAndRecognize();
+                this.ensurePokoinSidePanelOpen();
+                return;
+            }
+            this.refreshVintedOverlayScan();
         }, true);
     }
 
@@ -2441,30 +3406,15 @@ class VintedProcessor {
      */
     isProductPage() {
         const isVinted = window.location.hostname.includes('vinted');
-        if (!isVinted || this.isVintedCataloguePage()) {
-            const result = {
-                isVinted,
-                hasItemPath: false,
-                hasItemTitle: false,
-                pathname: window.location.pathname,
-                excludedCataloguePage: this.isVintedCataloguePage(),
-            };
-            console.log('🔍 [VINT] Product page check:', result);
-            return false;
-        }
-        const hasItemPath = window.location.pathname.includes('/item/') || window.location.pathname.includes('/items/');
-        const hasItemTitle = document.querySelector('[data-testid="item-title"]') || document.querySelector('h1');
-        
+        const hasItemPath = this.isVintedItemListingPage();
         const result = {
             isVinted,
             hasItemPath,
-            hasItemTitle: !!hasItemTitle,
-            pathname: window.location.pathname
+            pathname: window.location.pathname,
+            excludedCataloguePage: this.isVintedCataloguePage(),
         };
-        
         console.log('🔍 [VINT] Product page check:', result);
-        
-        return isVinted && (hasItemPath || hasItemTitle);
+        return isVinted && hasItemPath;
     }
 
     scheduleVintedPageProcess() {
@@ -2512,6 +3462,57 @@ class VintedProcessor {
         });
         this.vintedNavigationObserver = new MutationObserver(() => this.scheduleVintedPageProcess());
         this.vintedNavigationObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
+        this.ensureVintedListingPhotoObserver();
+    }
+
+    listingImageCountForScan() {
+        return this.extractVintedListingImageUrls().length;
+    }
+
+    rememberSentListingImageCount(count = 0) {
+        this.lastSentListingImageCount = Math.max(this.lastSentListingImageCount, Number(count) || 0);
+    }
+
+    notifyVintedListingGalleryIfGrown() {
+        if (!this.isVintedItemListingPage() || this.lastSentListingImageCount < 0) {
+            return;
+        }
+        const urls = this.extractVintedListingImageUrls();
+        if (urls.length <= this.lastSentListingImageCount) {
+            return;
+        }
+        this.rememberSentListingImageCount(urls.length);
+        this.recordVintedDiagnostic('listing-gallery-grown', {
+            listingKey: this.currentVintedListingKey(),
+            imageCount: urls.length,
+            reason: 'more listing photos became available after the first auto-scan',
+        });
+        this.sendVintedTokensReady('listing-gallery-grown', { forceListingScan: true });
+    }
+
+    ensureVintedListingPhotoObserver() {
+        if (this.vintedListingPhotoObserver || typeof MutationObserver !== 'function') {
+            return;
+        }
+        this.vintedListingPhotoObserver = new MutationObserver(() => {
+            if (this.vintedListingPhotoTimer || typeof setTimeout !== 'function') {
+                return;
+            }
+            this.vintedListingPhotoTimer = setTimeout(() => {
+                this.vintedListingPhotoTimer = null;
+                this.notifyVintedListingGalleryIfGrown();
+            }, 250);
+        });
+        const root = document.documentElement || document.body;
+        if (!root) {
+            return;
+        }
+        this.vintedListingPhotoObserver.observe(root, {
+            childList: true,
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['src', 'srcset', 'data-src', 'data-srcset'],
+        });
     }
 
     /**
@@ -2562,9 +3563,6 @@ class VintedProcessor {
                 title: searchSource.title,
             });
             this.prepareVintedKeywords(searchSource.title, searchSource.description);
-            this.sendVintedTokensReady('title-ready');
-            const titleInfo = this.extractTitleInfo(searchSource.title);
-            this.runVintedSearch(titleInfo, searchSource.title, 'product-data');
 
             this.currentTitle = searchSource.title;
             this.currentTitleElement = searchSource.titleElement;
@@ -2577,6 +3575,7 @@ class VintedProcessor {
             this.renderKeywordToggles(this.currentTitle, searchSource.description);
             this.applyPendingVintedSearchResults();
             this.processedPages.add(pageKey);
+            this.ensureVintedListingPhotoObserver();
 
         } catch (error) {
             console.error('❌ [VINT] Error while processing product page:', error);
@@ -2717,9 +3716,14 @@ class VintedProcessor {
     }
 
     async runVintedSearch(titleInfo, title, trigger = 'process') {
+        if (this.isVintedCataloguePage()) {
+            this.notifyVintedIdlePage();
+            return;
+        }
         const clues = this.selectedKeywordLabels();
         const searchSignature = this.buildVintedSearchSignature(title, clues);
-        if (searchSignature === this.lastAppliedSearchSignature && this.searchResultsBySignature.has(searchSignature)) {
+        const forceNewSearch = trigger === 'keyword-toggle' || trigger === 'manual-clue' || trigger === 'overlay-expand' || trigger === 'overlay-refresh';
+        if (!forceNewSearch && searchSignature === this.lastAppliedSearchSignature && this.searchResultsBySignature.has(searchSignature)) {
             this.recordVintedDiagnostic('search-skip', {
                 searchSignature,
                 trigger,
@@ -2729,7 +3733,8 @@ class VintedProcessor {
             });
             return;
         }
-        if (this.hasActivePreviewRows()) {
+        const reuseOverlayPreview = !forceNewSearch;
+        if (reuseOverlayPreview && this.hasActivePreviewRows()) {
             this.recordVintedDiagnostic('search-skip', {
                 searchSignature,
                 trigger,
@@ -2743,7 +3748,8 @@ class VintedProcessor {
 
         const searchToken = ++this.latestSearchToken;
         void titleInfo;
-        const backgroundResults = await this.searchCardWithBackground(title, clues);
+        this.setPokoinButtonScanState('scanning');
+        const backgroundResults = await this.searchCardWithBackground(title, clues, trigger);
 
         if (searchToken !== this.latestSearchToken || searchSignature !== this.buildVintedSearchSignature(title, clues)) {
             this.recordVintedDiagnostic('search-stale', {
@@ -2780,28 +3786,43 @@ class VintedProcessor {
             hasCachedResults: true,
             uiMounted: true,
             title: details.title || this.currentTitle,
+            resultRows: results.map((row) => ({
+                id: row?.card_id || row?.id || '',
+                name: row?.name || '',
+                collector: row?.collector_number || row?.collectorNumber || '',
+                score: Number(row?.score ?? row?.similarity ?? row?.confidence) || 0,
+                source: row?.source || row?.match_source || '',
+            })),
         });
         if (results.length > 0) {
             this.updateButtonWithResults(results);
-            this.sendVintedPreviewReady(searchSignature, details);
         } else {
             this.updateButtonWithoutResults();
         }
+        this.sendVintedPreviewReady(searchSignature, details, results);
         return true;
     }
 
-    sendVintedPreviewReady(searchSignature, details = {}) {
+    sendVintedPreviewReady(searchSignature, details = {}, results = null) {
         return this.sendVintedTokensReady(details.trigger || 'preview-ready', {
             searchSignature,
             includePreviewRows: true,
+            previewResults: Array.isArray(results) ? results : this.currentPreviewResults(),
         });
     }
 
     sendVintedTokensReady(trigger = 'tokens-ready', options = {}) {
+        if (this.isVintedCataloguePage()) {
+            this.notifyVintedIdlePage();
+            return Promise.resolve();
+        }
         const clues = this.selectedKeywordLabels();
         const primaryClues = this.selectedPrimaryClues(clues);
         const vintedPayload = this.buildVintedPayload(this.currentTitle || document.title, clues);
-        const previewPayload = options.includePreviewRows ? this.buildSidePanelPreviewRowsPayload() : {};
+        this.rememberSentListingImageCount(vintedPayload.listingImageUrls?.length || 0);
+        const previewPayload = options.includePreviewRows
+            ? this.buildSidePanelPreviewRowsPayload(options.previewResults || this.currentPreviewResults())
+            : {};
         const previewSignature = options.searchSignature || this.buildVintedSearchSignature(this.currentTitle || document.title, clues);
         const message = {
             action: 'marketplacePreviewReady',
@@ -2818,6 +3839,15 @@ class VintedProcessor {
             previewSignature,
             previewSource: options.includePreviewRows ? 'vinted_overlay' : 'vinted_overlay_tokens',
             selectionRevision: this.currentSelectionRevision,
+            // Automatic title hydration must wait for the image scan. Treating
+            // title-ready like a manual chip click allowed broad clue results to
+            // reach the side panel before the recognizer finished.
+            skipListingScan: Boolean(options.skipListingScan) || trigger === 'keyword-toggle',
+            forceListingScan: Boolean(options.forceListingScan)
+                || trigger === 'manual-clue'
+                || trigger === 'overlay-expand'
+                || trigger === 'overlay-refresh'
+                || trigger === 'listing-gallery-grown',
             ...previewPayload,
         };
         this.recordVintedDiagnostic(options.includePreviewRows ? 'preview-ready' : 'tokens-ready', {
@@ -2873,11 +3903,7 @@ class VintedProcessor {
         this.currentMatchCount = 0;
         this.setPokoinButtonLabel(this.currentButton);
         this.currentButton.setAttribute('data-pokemon-linker-fallback', 'true');
-        this.applyPokoinButtonStyles(this.currentButton, {
-            background: '#075985',
-            border: '1px solid rgba(56, 189, 248, 0.35)',
-            boxShadow: '0 4px 12px rgba(2, 132, 199, 0.18)',
-        });
+        this.setPokoinButtonScanState('idle');
         this.renderCandidatePreview([]);
     }
 
@@ -2919,18 +3945,27 @@ class VintedProcessor {
             border: '1px solid rgba(56, 189, 248, 0.35)',
             boxShadow: '0 4px 12px rgba(2, 132, 199, 0.18)',
         });
+        this.currentButton = button;
+        this.setPokoinButtonScanState('scanning', button);
         
-        // Hover effects (gray)
+        // Hover effects follow the current scan state (red / green / muted blue)
         button.addEventListener('mouseenter', () => {
-            button.style.background = '#0369a1';
+            if (this.vintedOverlayCollapsed) {
+                return;
+            }
+            button.style.background = this.pokoinButtonScanHoverBackground();
             button.style.transform = 'scale(1.05)';
-            button.style.boxShadow = '0 6px 16px rgba(2, 132, 199, 0.28)';
+            button.style.boxShadow = this.pokoinButtonScanAppearance().boxShadow;
         });
         
         button.addEventListener('mouseleave', () => {
-            button.style.background = '#075985';
+            if (this.vintedOverlayCollapsed) {
+                button.style.transform = 'none';
+                return;
+            }
+            button.style.background = this.pokoinButtonScanAppearance().background;
             button.style.transform = 'scale(1)';
-            button.style.boxShadow = '0 4px 12px rgba(2, 132, 199, 0.18)';
+            button.style.boxShadow = this.pokoinButtonScanAppearance().boxShadow;
         });
         
         if (header) {
@@ -2944,6 +3979,7 @@ class VintedProcessor {
         console.log(`✅ [VINT] Added compact panel button`);
         this.currentButton = button;
         this.attachVintedSidePanelClick(button);
+        this.applyVintedOverlayCollapsedState();
     }
 
     createFixedPositionButton() {
@@ -3051,12 +4087,7 @@ class VintedProcessor {
             button.removeAttribute('data-pokemon-linker-fallback');
             this.currentMatchCount = this.countPreviewCandidateMatches(results);
             this.setPokoinButtonLabel(button, this.currentMatchCount);
-            this.applyPokoinButtonStyles(button, {
-                background: this.pokoinBlue(),
-                color: '#ffffff',
-                border: '2px solid #38bdf8',
-                boxShadow: '0 4px 12px rgba(14, 165, 233, 0.35)',
-            });
+            this.setPokoinButtonScanState('ready', button);
         };
         
         // Update button
@@ -3068,17 +4099,23 @@ class VintedProcessor {
         }
         this.attachVintedSidePanelClick(this.currentButton);
         
-        // Hover effects (blue)
         this.currentButton.addEventListener('mouseenter', () => {
-            this.currentButton.style.background = this.pokoinBlueHover();
+            if (this.vintedOverlayCollapsed) {
+                return;
+            }
+            this.currentButton.style.background = this.pokoinButtonScanHoverBackground();
             this.currentButton.style.transform = 'scale(1.05)';
-            this.currentButton.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+            this.currentButton.style.boxShadow = this.pokoinButtonScanAppearance().boxShadow;
         });
         
         this.currentButton.addEventListener('mouseleave', () => {
-            this.currentButton.style.background = this.pokoinBlue();
+            if (this.vintedOverlayCollapsed) {
+                this.currentButton.style.transform = 'none';
+                return;
+            }
+            this.currentButton.style.background = this.pokoinButtonScanAppearance().background;
             this.currentButton.style.transform = 'scale(1)';
-            this.currentButton.style.boxShadow = 'none';
+            this.currentButton.style.boxShadow = this.pokoinButtonScanAppearance().boxShadow;
         });
 
         this.renderCandidatePreview(results);
@@ -3151,27 +4188,11 @@ class VintedProcessor {
     }
 
     /**
-     * Search database (delegates to `content.js`)
+     * Search database through the background service worker.
      */
     async searchCardInDatabase(titleInfo, title) {
-        // Delegate to global function when available
-        if (typeof window.searchCardInDatabase === 'function') {
-            console.log(`🔍 [VINT] Using global searchCardInDatabase for: "${title}"`);
-            console.log(`🔍 [VINT] Sent parameters:`, { titleInfo, title });
-            
-            try {
-                const results = await window.searchCardInDatabase(titleInfo, title);
-                console.log(`🔍 [VINT] Results received from global function:`, results);
-                console.log(`🔍 [VINT] Result type:`, typeof results);
-                console.log(`🔍 [VINT] Result length:`, results ? results.length : 'null/undefined');
-                return results;
-            } catch (error) {
-                console.warn(`⚠️ [VINT] Global searchCardInDatabase unavailable:`, error);
-                return [];
-            }
-        }
-        console.log(`⚠️ [VINT] Global searchCardInDatabase unavailable, returning empty array`);
-        return [];
+        void titleInfo;
+        return this.searchCardWithBackground(title);
     }
 
     /**
@@ -3183,4 +4204,71 @@ class VintedProcessor {
 }
 
 // Export for global usage
-window.VintedProcessor = VintedProcessor; 
+window.VintedProcessor = VintedProcessor;
+
+if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+        if (request?.action === 'pokoinRequestMatchTokens') {
+            if (!String(window.location.hostname || '').includes('vinted')) {
+                return undefined;
+            }
+            const processor = window.vintedProcessor;
+            if (!processor || typeof processor.sendVintedTokensReady !== 'function') {
+                sendResponse?.({ success: false });
+                return false;
+            }
+            if (typeof processor.isVintedCataloguePage === 'function' && processor.isVintedCataloguePage()) {
+                processor.notifyVintedIdlePage?.();
+                sendResponse?.({ success: true, idle: true });
+                return false;
+            }
+            const title = processor.currentTitle || document.title;
+            processor.sendVintedTokensReady('service-worker-request');
+            if (typeof processor.runVintedSearch === 'function' && title) {
+                const titleInfo = typeof processor.extractTitleInfo === 'function'
+                    ? processor.extractTitleInfo(title)
+                    : {};
+                void processor.runVintedSearch(titleInfo, title, 'service-worker-request');
+            }
+            sendResponse?.({ success: true });
+            return false;
+        }
+        if (request?.action !== 'pokoinListingScanMerged') {
+            return undefined;
+        }
+        const processor = window.vintedProcessor;
+        if (!processor || typeof processor.applyVintedSearchResults !== 'function') {
+            sendResponse?.({ success: false });
+            return false;
+        }
+        const requestUrl = String(request.url || '').split('#')[0];
+        const pageUrl = String(window.location.href || '').split('#')[0];
+        if (requestUrl && pageUrl && requestUrl !== pageUrl) {
+            sendResponse?.({ success: true, ignored: true });
+            return false;
+        }
+        const clues = typeof processor.selectedKeywordLabels === 'function'
+            ? processor.selectedKeywordLabels()
+            : [];
+        const signature = request.searchSignature
+            || (typeof processor.buildVintedSearchSignature === 'function'
+                ? processor.buildVintedSearchSignature(processor.currentTitle || document.title, clues)
+                : '');
+        const results = Array.isArray(request.results) ? request.results : [];
+        if (request.listingKind) {
+            processor.currentListingKind = request.listingKind;
+        }
+        if (signature) {
+            processor.listingScanFinalSignatures?.add(signature);
+            processor.searchResultsBySignature?.set(signature, results);
+            processor.rememberRecentSearchResults?.(signature, results);
+        }
+        processor.latestSearchToken += 1;
+        processor.applyVintedSearchResults(signature, results, {
+            title: processor.currentTitle,
+            trigger: 'listing-scan-merged',
+        });
+        sendResponse?.({ success: true, rowCount: results.length });
+        return false;
+    });
+} 

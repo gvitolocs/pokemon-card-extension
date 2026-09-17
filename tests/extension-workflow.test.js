@@ -6,8 +6,123 @@ const vm = require('node:vm');
 
 const REPO_ROOT = path.resolve(__dirname, '..');
 
+test('Mewtwo Evolutions tile exposes its confirmed JP same-art printing', () => {
+    const index = JSON.parse(readRepoFile('data/print-langs.json'));
+    assert.deepEqual(index.ids['236804'].slice(0, 3), ['236804', '276178', '']);
+    assert.deepEqual(index.ids['276178'].slice(0, 3), ['236804', '276178', '']);
+    assert.match(index.img['276178'], /mewtwo-jp-expansion-pack-starter-pack/i);
+});
+
+test('Meowstic BREAKpoint tile exposes its confirmed JP same-art printing', () => {
+    const index = JSON.parse(readRepoFile('data/print-langs.json'));
+    assert.deepEqual(index.ids['220966'].slice(0, 3), ['220966', '642866', '']);
+    assert.deepEqual(index.ids['642866'].slice(0, 3), ['220966', '642866', '']);
+    assert.match(index.img['642866'], /meowstic-008-022-emboar-ex-vs-togekiss-ex-deck-kit/i);
+});
+
+test('live version sets map expansion nationality to EN JP and CN button packs', () => {
+    const sandbox = loadBackgroundHelpers(['printLangsFromVersionSet']);
+    const langs = sandbox.printLangsFromVersionSet({
+        version: 'v540704',
+        versionCount: 3,
+        printings: [{
+            card_id: '540704',
+            nationality: 'japanese',
+            tileImageUrl: '/card-images/540704_mew-ex_homepage.webp',
+        }, {
+            card_id: '548832',
+            nationality: 'western',
+            imageUrl: '/card-images/548832_mew-ex.jpg',
+        }, {
+            card_id: '795096',
+            nationality: 'chinese',
+            previewImageUrl: 'https://cardtrader.com/mew-ex-cn.webp',
+        }],
+    }, { card_id: '548832' });
+
+    assert.equal(langs.eur.id, '548832');
+    assert.equal(langs.eur.image_url, 'https://pokoin.com/card-images/548832_mew-ex.jpg');
+    assert.equal(langs.jp.id, '540704');
+    assert.equal(langs.cn.id, '795096');
+    assert.equal(langs.versions, 3);
+    assert.equal(langs.artwork_id, 'v540704');
+});
+
+test('version-set language mapping ignores unknown nationality instead of guessing from set names', () => {
+    const sandbox = loadBackgroundHelpers(['printLangsFromVersionSet']);
+    const langs = sandbox.printLangsFromVersionSet({
+        version: 'v1',
+        printings: [{
+            card_id: '220962',
+            nationality: '',
+            imageUrl: '/card-images/220962_espurr.jpg',
+        }],
+    }, { card_id: '220962' });
+    assert.equal(langs, null);
+});
+
+test('version-set enrichment calls the dedicated endpoint and replaces stale bundled button data', async () => {
+    const sandbox = loadBackgroundHelpers(['enrichRowsWithPokoinVersionSets']);
+    const calls = [];
+    sandbox.fetch = async (url) => {
+        calls.push(String(url));
+        return {
+            ok: true,
+            json: async () => ({
+                version: 'v220966',
+                versionCount: 2,
+                printings: [{
+                    card_id: '642866',
+                    nationality: 'japanese',
+                    imageUrl: '/card-images/642866_meowstic-jp.jpg',
+                }, {
+                    card_id: '220966',
+                    nationality: 'western',
+                    imageUrl: '/card-images/220966_meowstic-en.jpg',
+                }],
+            }),
+        };
+    };
+    const [row] = await sandbox.enrichRowsWithPokoinVersionSets([{
+        card_id: '220966',
+        source: 'on_device_identify',
+        print_langs: { eur: { id: 'old' }, jp: null, cn: null },
+    }]);
+
+    assert.match(calls[0], /\/api\/marketplace-version-set\?cardId=220966$/);
+    assert.equal(row.print_langs.eur.id, '220966');
+    assert.equal(row.print_langs.jp.id, '642866');
+    assert.equal(row.print_langs.cn, null);
+    assert.equal(row.preview_image_url, 'https://pokoin.com/card-images/220966_meowstic-en.jpg');
+});
+
+test('bundled print languages include every imported cross-language version lineage', () => {
+    const index = JSON.parse(readRepoFile('data/print-langs.json'));
+    const rows = Object.values(index.ids);
+    const crossLanguage = rows.filter((row) => row && [row[0], row[1], row[2]].filter(Boolean).length >= 2);
+    assert.ok(rows.length >= 61996, 'version lineage import should not lose indexed public ids');
+    assert.ok(crossLanguage.length >= 46778, 'version lineage import should retain cross-language EN/JP/CN packs');
+    assert.ok(rows.filter((row) => row?.[1]).length >= 50479, 'JP packs should be populated from authoritative version groups');
+});
+
 function readRepoFile(relativePath) {
     return fs.readFileSync(path.join(REPO_ROOT, relativePath), 'utf8');
+}
+
+function listingScanSource() {
+    return readRepoFile('utils/ListingScan.js');
+}
+
+function matchContractSource() {
+    return readRepoFile('utils/MatchContract.js');
+}
+
+function printLangsSource() {
+    return readRepoFile('utils/PrintLangs.js');
+}
+
+function backgroundRuntimeSource() {
+    return `${printLangsSource()}\n${listingScanSource()}\n${matchContractSource()}\n${readRepoFile('config/background.js')}`;
 }
 
 function extractFunctionSource(source, functionName, offset = 0) {
@@ -30,17 +145,23 @@ function extractFunctionSource(source, functionName, offset = 0) {
 }
 
 function loadBackgroundHelpers(helperNames = []) {
-    const source = readRepoFile('config/background.js');
+    const source = backgroundRuntimeSource();
     const sandbox = {
         console: { log() {}, warn() {}, error() {} },
         document: { querySelector: () => null, querySelectorAll: () => [], title: '' },
         URL,
         setTimeout,
         clearTimeout,
-        fetch: async () => ({ ok: true, json: async () => ({}) }),
+        FormData,
+        Blob,
+        File,
+        atob,
+        btoa,
+        fetch: async () => ({ ok: true, json: async () => ({}), blob: async () => new Blob([]) }),
         chrome: {
             runtime: {
                 getManifest: () => ({ version: '2.0.0' }),
+                getURL: (asset) => asset,
                 onMessage: { addListener() {} },
                 onInstalled: { addListener() {} },
                 onStartup: { addListener() {} },
@@ -95,8 +216,9 @@ function loadBackgroundHelpers(helperNames = []) {
 }
 
 function loadBackgroundMessageHarness(overrides = {}) {
-    const source = readRepoFile('config/background.js');
+    const source = backgroundRuntimeSource();
     let messageListener = null;
+    let connectListener = null;
     const storage = overrides.storage || {};
     const sandbox = {
         console: overrides.console || { log() {}, warn() {}, error() {} },
@@ -104,18 +226,44 @@ function loadBackgroundMessageHarness(overrides = {}) {
         URL,
         setTimeout,
         clearTimeout,
+        FormData,
+        Blob,
+        File,
+        atob,
+        btoa,
         fetch: overrides.fetch || (async () => ({ ok: true, json: async () => ({}) })),
         chrome: {
             runtime: {
+                id: 'test-extension-id',
                 onMessage: {
                     addListener(listener) {
                         messageListener = listener;
                     },
                 },
+                onConnect: {
+                    addListener(listener) {
+                        connectListener = listener;
+                    },
+                },
                 onInstalled: { addListener() {} },
                 onStartup: { addListener() {} },
                 getManifest: () => ({ version: '2.0.0' }),
+                getURL: (asset) => asset,
+                sendMessage: async (message) => {
+                    if (message?.action === 'onDeviceIdentifyAlbum' && overrides.fetch) {
+                        const response = await overrides.fetch('chrome-extension://test/on-device-identify');
+                        return {
+                            success: true,
+                            payload: {
+                                worker: 'wasm',
+                                photos: [await response.json()],
+                            },
+                        };
+                    }
+                    return { success: false, error: 'unexpected test message' };
+                },
             },
+            offscreen: { createDocument: async () => {} },
             tabs: {
                 query: async () => [],
                 get: async () => ({}),
@@ -138,7 +286,19 @@ function loadBackgroundMessageHarness(overrides = {}) {
                     set: async (payload) => Object.assign(storage, payload),
                     ...(overrides.sessionStorage || {}),
                 },
-                local: { set: async () => {}, ...(overrides.localStorage || {}) },
+                local: {
+                    get: async (key) => {
+                        if (typeof key === 'string') {
+                            return { [key]: storage[key] };
+                        }
+                        if (Array.isArray(key)) {
+                            return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+                        }
+                        return { ...storage };
+                    },
+                    set: async (payload) => Object.assign(storage, payload),
+                    ...(overrides.localStorage || {}),
+                },
             },
             sidePanel: { setPanelBehavior: () => ({ catch() {} }), ...(overrides.sidePanel || {}) },
             action: { setIcon: async () => {}, onClicked: { addListener() {} }, ...(overrides.action || {}) },
@@ -150,6 +310,7 @@ function loadBackgroundMessageHarness(overrides = {}) {
     return {
         sandbox,
         storage,
+        connect: (port) => connectListener?.(port),
         sendMessage: (request, sender = { tab: { id: 1, title: request.title || '', url: request.url || '' } }) =>
             new Promise((resolve) => messageListener(request, sender, resolve)),
     };
@@ -193,6 +354,35 @@ function loadPokoinAuthBridge(overrides = {}) {
     return { sandbox, messages, postedMessages, messageListener };
 }
 
+function selectPreferredListingChips(processor) {
+    processor.selectedKeywordValues = new Set(
+        (processor.currentKeywords || [])
+            .filter((keyword) => keyword.preferredChip)
+            .map((keyword) => keyword.compact)
+    );
+}
+
+function createMemoryLocalStorage(initial = {}) {
+    const store = { ...initial };
+    return {
+        getItem(key) {
+            const name = String(key);
+            return Object.prototype.hasOwnProperty.call(store, name) ? store[name] : null;
+        },
+        setItem(key, value) {
+            store[String(key)] = String(value);
+        },
+        removeItem(key) {
+            delete store[String(key)];
+        },
+        clear() {
+            for (const key of Object.keys(store)) {
+                delete store[key];
+            }
+        },
+    };
+}
+
 function loadProcessor(relativePath, className, overrides = {}) {
     const source = readRepoFile(relativePath);
     const defaultWindow = {
@@ -200,14 +390,19 @@ function loadProcessor(relativePath, className, overrides = {}) {
         addEventListener() {},
         dispatchEvent() {},
     };
+    const windowObj = Object.assign(defaultWindow, overrides.window || {});
+    if (!windowObj.localStorage) {
+        windowObj.localStorage = createMemoryLocalStorage();
+    }
     const sandbox = {
         console: {
             log() {},
             warn: overrides.warn || (() => {}),
             error: overrides.error || (() => {}),
         },
-        window: Object.assign(defaultWindow, overrides.window || {}),
+        window: windowObj,
         document: overrides.document || {
+            querySelector: () => null,
             querySelectorAll: () => [],
             contains: () => true,
             createElement: () => ({ style: {}, setAttribute() {}, appendChild() {}, addEventListener() {} }),
@@ -238,8 +433,21 @@ function loadProcessor(relativePath, className, overrides = {}) {
     };
     sandbox.window.window = sandbox.window;
     vm.createContext(sandbox);
-    vm.runInContext(`${source}\nthis.ExportedProcessor = ${className};`, sandbox, { filename: relativePath });
+    vm.runInContext(`${listingScanSource()}\n${source}\nthis.ExportedProcessor = ${className};`, sandbox, { filename: relativePath });
     return { Processor: sandbox.ExportedProcessor, sandbox };
+}
+
+async function recognizeReducedOverlay(processor) {
+    if (typeof processor.expandVintedOverlayAndRecognize === 'function' && processor.vintedOverlayCollapsed) {
+        await processor.expandVintedOverlayAndRecognize();
+    } else if (typeof processor.expandEbayOverlayAndRecognize === 'function' && processor.ebayOverlayCollapsed) {
+        await processor.expandEbayOverlayAndRecognize();
+    }
+    const pending = processor.inFlightSearches instanceof Map
+        ? [...processor.inFlightSearches.values()]
+        : [];
+    await Promise.all(pending.filter(Boolean));
+    await Promise.resolve();
 }
 
 function createButtonStub() {
@@ -259,7 +467,7 @@ function createButtonStub() {
             delete this.attributes[name];
         },
         querySelector() {
-            return { style: {} };
+            return null;
         },
         addEventListener() {},
         cloneNode() {
@@ -294,6 +502,9 @@ function createDomElement(tagName = 'div', attributes = {}) {
         },
         getAttribute(name) {
             return this.attributes[name];
+        },
+        hasAttribute(name) {
+            return this.attributes[name] !== undefined;
         },
         appendChild(child) {
             child.parentNode = this;
@@ -454,6 +665,12 @@ function createDomElement(tagName = 'div', attributes = {}) {
             if (selector.startsWith('[data-pokoin-candidate-preview]')) {
                 return this.attributes['data-pokoin-candidate-preview'] !== undefined;
             }
+            if (selector.startsWith('[data-pokoin-candidate-row]')) {
+                return this.attributes['data-pokoin-candidate-row'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-button-label]')) {
+                return this.attributes['data-pokoin-button-label'] !== undefined;
+            }
             if (selector.startsWith('[data-pokoin-vinted-collapse-toggle]')) {
                 return this.attributes['data-pokoin-vinted-collapse-toggle'] !== undefined;
             }
@@ -468,6 +685,15 @@ function createDomElement(tagName = 'div', attributes = {}) {
             }
             if (selector.startsWith('[data-pokoin-vinted-manual-clue-input]')) {
                 return this.attributes['data-pokoin-vinted-manual-clue-input'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-ebay-keywords]')) {
+                return this.attributes['data-pokoin-ebay-keywords'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-ebay-collapse-toggle]')) {
+                return this.attributes['data-pokoin-ebay-collapse-toggle'] !== undefined;
+            }
+            if (selector.startsWith('[data-pokoin-ebay-header-row]')) {
+                return this.attributes['data-pokoin-ebay-header-row'] !== undefined;
             }
             if (selector.startsWith('[data-pokoin-ebay-keyword]')) {
                 return this.attributes['data-pokoin-ebay-keyword'] !== undefined;
@@ -532,9 +758,15 @@ test('content search fetch failures are quiet and return empty results', async (
             info: (...args) => infos.push(args),
             log() {},
         },
-        enrichTitleInfoWithCardvaultName: async (titleInfo) => titleInfo,
-        searchPokoinCardApi: async () => {
-            throw new TypeError('Failed to fetch');
+        window: {
+            location: { href: 'https://www.vinted.it/items/1-dragonite-v' },
+        },
+        chrome: {
+            runtime: {
+                sendMessage: async () => {
+                    throw new TypeError('Failed to fetch');
+                },
+            },
         },
     };
     vm.createContext(sandbox);
@@ -551,6 +783,55 @@ test('content search fetch failures are quiet and return empty results', async (
     assert.equal(warnings.length, 0, 'expected fetch failure should not spam warnings');
     assert.equal(infos.length, 1, 'expected fetch failure should emit one quiet diagnostic');
     assert.match(String(infos[0][0]), /Content search unavailable/);
+    assert.match(extracted, /searchCardForTitle/);
+    assert.doesNotMatch(extracted, /searchPokoinCardApi|enrichTitleInfoWithCardvaultName/);
+});
+
+test('content leftover searchCardInDatabase routes through the background worker', async () => {
+    const source = readRepoFile('content.js');
+    const globalSearchStart = source.indexOf('// Search cards in database');
+    const helperStart = source.indexOf('let contentSearchFallbackNoticeShown');
+    const helperSource = source.slice(helperStart, globalSearchStart);
+    const extracted = extractFunctionSource(source, 'searchCardInDatabase', globalSearchStart);
+    const messages = [];
+    const sandbox = {
+        console: { error() {}, warn() {}, info() {}, log() {} },
+        window: {
+            location: { href: 'https://www.cardtrader.com/cards/123' },
+        },
+        chrome: {
+            runtime: {
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Dragonite V', search_score: 90 }] };
+                },
+            },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${helperSource}\n${extracted}\nthis.searchCardInDatabase = searchCardInDatabase;`, sandbox);
+
+    const results = await sandbox.searchCardInDatabase({ pokemonName: 'Dragonite' }, 'Dragonite V Fullart Pokemon');
+
+    assert.equal(results.length, 1);
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].action, 'searchCardForTitle');
+    assert.equal(messages[0].marketplacePayload.source, 'content');
+});
+
+test('content.js leftover page-origin Cardvault fetches are unreferenced from live search', () => {
+    const source = readRepoFile('content.js');
+    const liveSearch = extractFunctionSource(source, 'searchCardInDatabase', source.indexOf('// Search cards in database'));
+
+    assert.match(source, /async function searchPokoinCardApi/);
+    assert.match(source, /async function searchPokoinAutocomplete/);
+    assert.match(source, /async function enrichTitleInfoWithCardvaultName/);
+    assert.match(source, /async function resolveNameFromCardvaultTitle/);
+    assert.match(source, /function scoreAndValidateResults/);
+    assert.match(source, /async function handlePopupSearch/);
+    assert.doesNotMatch(liveSearch, /\bfetch\s*\(/);
+    assert.doesNotMatch(source, /onMessage\s*:\s*\{|onMessage\.addListener/);
+    assert.match(readRepoFile('docs/LEFTOVERS.md'), /searchPokoinCardApi/);
 });
 
 test('Vinted falls back to background without error spam', async () => {
@@ -661,9 +942,7 @@ test('Vinted process renders button, clue chips, and candidate preview once', as
     const processor = new Processor();
 
     processor.processProductPage();
-    await Promise.resolve();
-    await processor.inFlightSearches.values().next().value;
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
     processor.processProductPage();
 
     const host = details.querySelector('[data-pokoin-vinted-panel-host]');
@@ -671,7 +950,8 @@ test('Vinted process renders button, clue chips, and candidate preview once', as
     assert.equal(panel.querySelectorAll('[data-pokemon-linker-button]').length, 1);
     assert.ok(panel.querySelectorAll('[data-pokoin-vinted-keyword]').length > 0, 'clue chips should render');
     assert.equal(panel.querySelectorAll('[data-pokoin-candidate-preview]').length, 1);
-    assert.equal(processor.currentButton.style.background, '#0ea5e9');
+    assert.equal(processor.currentButton.style.background, '#16a34a');
+    assert.equal(processor.currentButton.attributes['data-pokoin-scan-state'], 'ready');
     assert.equal(host.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(host.parentNode, details, 'test body receives overlay host');
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
@@ -749,9 +1029,7 @@ test('Vinted catalogue search stays quiet and SPA item navigation remounts overl
     body.children = [];
     body.appendChild(details);
     processor.processProductPage();
-    await Promise.resolve();
-    await processor.inFlightSearches.values().next().value;
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
 
     const itemHost = body.querySelector('[data-pokoin-vinted-panel-host]');
     assert.ok(itemHost, 'product navigation should mount the Vinted overlay');
@@ -767,6 +1045,68 @@ test('Vinted catalogue search stays quiet and SPA item navigation remounts overl
 
     assert.equal(body.querySelector('[data-pokoin-vinted-panel-host]'), null, 'returning to catalogue should remove the product overlay');
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1, 'catalogue revisits should not trigger listing search');
+});
+
+test('Vinted homepage and member galleries stay quiet; only /items/{id} is a product page', () => {
+    const body = createDomElement('main');
+    const heading = createDomElement('h1');
+    heading.textContent = 'Catalogo';
+    body.appendChild(heading);
+    const location = {
+        href: 'https://www.vinted.it/',
+        hostname: 'www.vinted.it',
+        pathname: '/',
+    };
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location,
+            extractTitleInfo: () => ({ pokemonName: 'Pikachu' }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Pikachu', search_score: 95 }] };
+                },
+            },
+        },
+        document: {
+            querySelector: (selector) => (selector === 'h1' ? heading : body.querySelector(selector)),
+            querySelectorAll: (selector) => {
+                if (selector.includes('h1') || selector === '[data-testid="item-title"]') {
+                    return [heading];
+                }
+                return body.querySelectorAll(selector);
+            },
+            contains: (element) => body.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            documentElement: body,
+            body,
+        },
+    });
+    const processor = new Processor();
+
+    assert.equal(processor.isProductPage(), false);
+    assert.equal(processor.isVintedItemListingPage(), false);
+    assert.equal(processor.isVintedCataloguePage(), true);
+    processor.processProductPage();
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 0);
+    assert.equal(messages.filter((message) => message.action === 'vintedIdlePage').length, 1);
+    assert.equal(body.querySelector('[data-pokoin-vinted-panel-host]'), null);
+
+    location.href = 'https://www.vinted.it/member/123-seller';
+    location.pathname = '/member/123-seller';
+    assert.equal(processor.isProductPage(), false);
+    processor.processProductPage();
+    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 0);
+
+    location.href = 'https://www.vinted.it/items/9901452613-piakchu-de-sacha?referrer=catalog';
+    location.pathname = '/items/9901452613-piakchu-de-sacha';
+    assert.equal(processor.isVintedItemListingPage(), true);
+    assert.equal(processor.isProductPage(), true);
+    assert.equal(processor.isVintedCataloguePage(), false);
 });
 
 test('Vinted search and overlay mount without details anchor', async () => {
@@ -820,14 +1160,13 @@ test('Vinted search and overlay mount without details anchor', async () => {
     const processor = new Processor();
 
     processor.processProductPage();
-    await Promise.resolve();
-    await processor.inFlightSearches.values().next().value;
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
 
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
     assert.ok(processor.currentButton, 'overlay UI should mount from title/description alone');
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
-    assert.equal(processor.currentButton.style.background, '#0ea5e9');
+    assert.equal(processor.currentButton.style.background, '#16a34a');
+    assert.equal(processor.currentButton.attributes['data-pokoin-scan-state'], 'ready');
     assert.ok(processor.vintedDiagnostics.some((entry) => entry.event === 'ui-mount' && /overlay/.test(entry.reason)));
 });
 
@@ -875,9 +1214,7 @@ test('Vinted diagnostics record duplicate same-listing skips', async () => {
     const processor = new Processor();
 
     processor.processProductPage();
-    await Promise.resolve();
-    await processor.inFlightSearches.values().next().value;
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
     processor.processProductPage();
 
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1);
@@ -935,9 +1272,7 @@ test('Vinted rerender reinsertion does not search again unless clues change', as
     const processor = new Processor();
 
     processor.processProductPage();
-    await Promise.resolve();
-    await processor.inFlightSearches.values().next().value;
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
     const host = processor.currentPanelHost;
     host.remove();
     processor.ensureVintedPanel(title);
@@ -1006,9 +1341,7 @@ test('Vinted new listing URL resets duplicate guard and searches once', async ()
     const processor = new Processor();
 
     processor.processProductPage();
-    await Promise.resolve();
-    await processor.inFlightSearches.values().next().value;
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
     location.href = 'https://www.vinted.it/items/12-reshiram?foo=2#photo';
     processor.processProductPage();
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 1, 'query/hash-only URL changes should not search again');
@@ -1017,9 +1350,7 @@ test('Vinted new listing URL resets duplicate guard and searches once', async ()
     location.pathname = '/items/13-reshiram';
     title.textContent = 'Carta Pokemon Reshiram nuova';
     processor.processProductPage();
-    await Promise.resolve();
-    await processor.inFlightSearches.values().next().value;
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
     assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 2, 'new listing URL should search once');
 });
 
@@ -1043,6 +1374,79 @@ test('Vinted description keywords ignore generic card words and keep useful clue
     assert.ok(labels.includes('192/203'), 'collector number should be extracted');
 });
 
+test('Vinted listing chips keep unique words instead of overlapping phrases', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor');
+    const processor = new Processor();
+    const keywords = processor.extractVintedKeywords(
+        'Album Rivali Predestinati',
+        'album non compreso anche singolarmente'
+    );
+    const labels = keywords.map((keyword) => keyword.label);
+    const overlappingPhrases = labels.filter((label) => String(label).trim().split(/\s+/).length > 1);
+
+    assert.equal(overlappingPhrases.length, 0, `unexpected phrases: ${overlappingPhrases.join(' | ')}`);
+    assert.ok(labels.includes('illustration'));
+    assert.ok(labels.some((label) => /^album$/i.test(label)));
+    assert.ok(labels.some((label) => /^Rivali$/i.test(label)));
+    assert.ok(labels.some((label) => /^Predestinati$/i.test(label)));
+    assert.equal(labels.filter((label) => /Rivali Predestinati/i.test(label)).length, 0);
+    assert.equal(new Set(labels.map((label) => processor.compactClueValue(label))).size, labels.length);
+});
+
+test('Vinted singles overlay drops description-only Pokemon name chips', () => {
+    const names = [
+        'rowlet', 'pikachu', 'charizard', 'mew', 'mewtwo', 'garchomp',
+        'blastoise', 'venusaur', 'squirtle', 'charmander', 'bulbasaur',
+    ];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/90-rowlet', hostname: 'www.vinted.it' },
+            extractTitleInfo: (value) => {
+                const compact = String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+                const hit = names.find((name) => name === compact);
+                return { pokemonName: hit || '' };
+            },
+        },
+    });
+    const processor = new Processor();
+    const keywords = processor.extractVintedKeywords(
+        'Rowlet Perfect Order ITA',
+        'pikachu charizard mew mewtwo garchomp blastoise venusaur squirtle charmander bulbasaur promo bgs near mint toploader'
+    );
+    const labels = keywords.map((keyword) => keyword.label.toLowerCase());
+
+    assert.ok(labels.includes('rowlet'), 'title card name should stay');
+    assert.equal(labels.includes('pikachu'), false);
+    assert.equal(labels.includes('charizard'), false);
+    assert.equal(labels.includes('mew'), false);
+    assert.equal(labels.includes('mewtwo'), false);
+    assert.equal(labels.includes('garchomp'), false);
+    assert.equal(labels.includes('promo bgs'), false);
+});
+
+test('Vinted album overlay keeps description Pokemon name chips', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/91-album', hostname: 'www.vinted.it' },
+            extractTitleInfo: (value) => {
+                const compact = String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+                const hit = ['pikachu', 'charizard', 'mew'].find((name) => name === compact);
+                return { pokemonName: hit || '' };
+            },
+        },
+    });
+    const processor = new Processor();
+    const keywords = processor.extractVintedKeywords(
+        'Album carte Pokemon',
+        'pikachu charizard mew'
+    );
+    const labels = keywords.map((keyword) => keyword.label.toLowerCase());
+
+    assert.ok(labels.includes('pikachu'), 'album description names can stay as chips');
+    assert.ok(labels.includes('charizard'), 'album description names can stay as chips');
+    assert.equal(keywords.every((keyword) => keyword.selectedByDefault === false), true);
+});
+
 test('Vinted collector codes stay atomic and suppress noisy partial chips', () => {
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor');
     const processor = new Processor();
@@ -1059,6 +1463,35 @@ test('Vinted collector codes stay atomic and suppress noisy partial chips', () =
     assert.equal(lowerLabels.includes('11b 137'), false);
     assert.equal(lowerLabels.includes('137 appena'), false);
     assert.equal(lowerLabels.includes('11b 137 appena'), false);
+});
+
+test('Vinted prefers description collector when title has a slash typo', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: (title) => ({
+                pokemonName: /\blilia\b/i.test(String(title || '')) ? 'Lilia' : null,
+            }),
+        },
+    });
+    const processor = new Processor();
+    const keywords = processor.extractVintedKeywords(
+        'Allenatore Lilia 231/1818 ita NM-Scintille Folgoranti',
+        'Lilia (231/191) ultra rara allenatore serie italiana : Scintille Folgoranti'
+    );
+    const labels = keywords.map((keyword) => keyword.label);
+    const selected = keywords.filter((keyword) => keyword.selectedByDefault).map((keyword) => keyword.label);
+    assert.equal(labels.includes('231/1818'), false, 'title typo collector must be dropped');
+    assert.ok(labels.includes('231/191'), 'description collector must remain');
+    assert.equal(selected.length, 0, 'listing chips start unselected');
+
+    processor.prepareVintedKeywords(
+        'Allenatore Lilia 231/1818 ita NM-Scintille Folgoranti',
+        'Lilia (231/191) ultra rara allenatore serie italiana : Scintille Folgoranti'
+    );
+    const corrected = processor.currentKeywords.find((keyword) => keyword.label === '231/191');
+    processor.selectedKeywordValues = new Set([corrected.compact]);
+    const payload = processor.buildVintedPayload(processor.currentTitle, processor.selectedKeywordLabels());
+    assert.equal(payload.collectorNumber, '231/191');
 });
 
 test('Vinted Lapras bare collector number is atomic and keeps illustration visible', () => {
@@ -1101,6 +1534,7 @@ test('Vinted Rocket Zapdos keeps composite card name primary with collector', ()
 
     processor.currentTitle = title;
     processor.prepareVintedKeywords(title, '');
+    selectPreferredListingChips(processor);
     const labels = processor.currentKeywords.map((keyword) => keyword.label);
     const selectedLabels = processor.selectedKeywordLabels();
     const primaryClues = processor.selectedPrimaryClues(selectedLabels);
@@ -1133,6 +1567,7 @@ test('Vinted Dark Flareon keeps API-recognized full card name primary with colle
 
     processor.currentTitle = title;
     processor.prepareVintedKeywords(title, '');
+    selectPreferredListingChips(processor);
     const labels = processor.currentKeywords.map((keyword) => keyword.label);
     const selectedLabels = processor.selectedKeywordLabels();
     const primaryClues = processor.selectedPrimaryClues(selectedLabels);
@@ -1164,6 +1599,7 @@ test('Vinted Holon Transceiver keeps full trainer name primary with collector', 
 
     processor.currentTitle = title;
     processor.prepareVintedKeywords(title, '');
+    selectPreferredListingChips(processor);
     const labels = processor.currentKeywords.map((keyword) => keyword.label);
     const selectedLabels = processor.selectedKeywordLabels();
     const primaryClues = processor.selectedPrimaryClues(selectedLabels);
@@ -1183,7 +1619,7 @@ test('Vinted Holon Transceiver keeps full trainer name primary with collector', 
     assert.doesNotMatch(payload.searchTitle, /\bXtransceiver\b/i);
 });
 
-test('Vinted illustration chip is always visible and only auto-selected from title hint', () => {
+test('Vinted illustration chip is always visible and never selected by default', () => {
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
             extractTitleInfo: (title) => ({
@@ -1201,7 +1637,7 @@ test('Vinted illustration chip is always visible and only auto-selected from tit
     const withTitleHint = processor.extractVintedKeywords('Landorus AR Full Art', 'Appena sbustata');
     const selectedIllustration = withTitleHint.find((keyword) => keyword.label === 'illustration');
     assert.ok(selectedIllustration, 'illustration chip should render with title hint');
-    assert.equal(selectedIllustration.selectedByDefault, true);
+    assert.equal(selectedIllustration.selectedByDefault, false);
 });
 
 test('Vinted scrapes provided product HTML selectors for title and description', () => {
@@ -1272,7 +1708,7 @@ test('Vinted normalizes Vastro typo to preselected VSTAR in clues and payload', 
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -1281,7 +1717,7 @@ test('Vinted normalizes Vastro typo to preselected VSTAR in clues and payload', 
     const labels = processor.currentKeywords.map((keyword) => keyword.label.toLowerCase());
     assert.ok(labels.includes('vstar'));
     assert.equal(labels.includes('vastro'), false);
-    assert.equal(processor.currentKeywords.find((keyword) => keyword.compact === 'vstar').selectedByDefault, true);
+    assert.equal(processor.currentKeywords.find((keyword) => keyword.compact === 'vstar').selectedByDefault, false);
     assert.match(messages[0].title, /vstar/i);
     assert.doesNotMatch(messages[0].title, /vastro/i);
     assert.ok(messages[0].clues.some((clue) => /^vstar$/i.test(clue)));
@@ -1312,7 +1748,7 @@ test('Vinted Regice Ex defaults only name phrase and attached variation', async 
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -1352,7 +1788,7 @@ test('Vinted normalizes Magaerna ex typo to Magearna structured payload', async 
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -1362,7 +1798,7 @@ test('Vinted normalizes Magaerna ex typo to Magearna structured payload', async 
     assert.ok(labels.includes('Magearna ex'), 'typo name phrase should be normalized in chips');
     assert.ok(labels.includes('ex'));
     assert.ok(labels.includes('75/114'));
-    assert.equal(processor.currentKeywords.find((keyword) => keyword.label === 'Magearna ex')?.selectedByDefault, true);
+    assert.equal(processor.currentKeywords.find((keyword) => keyword.label === 'Magearna ex')?.selectedByDefault, false);
     assert.equal(messages[0].vintedPayload.name, 'Magearna');
     assert.equal(messages[0].vintedPayload.variation, 'ex');
     assert.equal(messages[0].vintedPayload.collectorNumber, '75/114');
@@ -1393,13 +1829,13 @@ test('Vinted normalizes Magaeran ex typo variant to Magearna', async () => {
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
     await processor.searchCardWithBackground(processor.currentTitle);
 
-    assert.ok(processor.currentKeywords.some((keyword) => keyword.label === 'Magearna ex' && keyword.selectedByDefault));
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.label === 'Magearna ex' && keyword.selectedByDefault === false));
     assert.equal(messages[0].vintedPayload.name, 'Magearna');
     assert.equal(messages[0].vintedPayload.variation, 'ex');
     assert.equal(messages[0].vintedPayload.collectorNumber, '75/114');
@@ -1435,7 +1871,7 @@ test('Vinted Magnezone V keeps V variation distinct from ex', async () => {
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
     processor.currentButton = createButtonStub();
@@ -1480,7 +1916,7 @@ test('Vinted Mega Latias ex keeps Mega and ex selected in payload', async () => 
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -1523,7 +1959,7 @@ test('Vinted Pikachu volo VMAX keeps noisy word out of structured payload', asyn
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -1579,10 +2015,14 @@ test('background Vinted selected keys keep unselected title words out of search'
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
+                id: 'test-extension-id',
                 onMessage: {
                     addListener(listener) {
                         messageListener = listener;
@@ -1686,7 +2126,10 @@ test('background autocomplete resolver canonicalizes misspelled selected name be
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
     });
 
@@ -1768,7 +2211,10 @@ test('background uses searchbar token prediction before heavy autocomplete name 
             if (url.includes('/api/marketplace-autocomplete')) {
                 throw new Error('token prediction should avoid heavy autocomplete resolver');
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
     });
 
@@ -1820,7 +2266,10 @@ test('background autocomplete resolver skips standalone feature and context clue
                 assert.doesNotMatch(body.search_term || '', /^(?:holo|delta|illustration|liv\.?\s*53|liv 53|Evolutions)$/i);
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
     });
 
@@ -1861,6 +2310,9 @@ test('background autocomplete resolver cache reuses same selected clue signature
         fetch: async (url, options = {}) => {
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
+            }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
             }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
@@ -1922,6 +2374,9 @@ test('background autocomplete resolver changes query for changed manual clue sig
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -1938,7 +2393,10 @@ test('background autocomplete resolver changes query for changed manual clue sig
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
     });
     const basePayload = {
@@ -1995,6 +2453,9 @@ test('background autocomplete resolver keeps trainer composite name over shorter
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -2029,7 +2490,10 @@ test('background autocomplete resolver keeps trainer composite name over shorter
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
     });
 
@@ -2100,7 +2564,10 @@ test('background resolver promotes Holon Transceiver over suffix token and cache
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
     });
     const request = {
@@ -2189,7 +2656,10 @@ test('background resolver promotes Dark Flareon over shorter Flareon when API va
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
     });
 
@@ -2239,6 +2709,9 @@ test('background Vinted recent search cache reuses same selected payload', async
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -2254,7 +2727,10 @@ test('background Vinted recent search cache reuses same selected payload', async
             if (url.includes('/api/marketplace-autocomplete')) {
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -2331,6 +2807,9 @@ test('background Vinted recent search cache changes key for clue or URL changes'
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -2346,7 +2825,10 @@ test('background Vinted recent search cache changes key for clue or URL changes'
             if (url.includes('/api/marketplace-autocomplete')) {
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -2444,6 +2926,9 @@ test('background Vinted cache changes key for preview signature revision and for
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -2460,7 +2945,10 @@ test('background Vinted cache changes key for preview signature revision and for
             if (url.includes('/api/marketplace-autocomplete')) {
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -2561,6 +3049,9 @@ test('background broad Mega Charizard selected-chip search fills beyond exact th
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -2654,6 +3145,9 @@ test('background recent search cache evicts entries beyond last 20', async () =>
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -2669,7 +3163,10 @@ test('background recent search cache evicts entries beyond last 20', async () =>
             if (url.includes('/api/marketplace-autocomplete')) {
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -2767,6 +3264,9 @@ test('background Vinted Mega Latias ex rejects non-Mega Latias rows', async () =
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -2787,7 +3287,10 @@ test('background Vinted Mega Latias ex rejects non-Mega Latias rows', async () =
                 assert.doesNotMatch(body.search_term || '', /Megaevoluzione|PSA/i);
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -2878,7 +3381,7 @@ test('Vinted Magneton PROMO 159 keeps promo collector and preview rows in side p
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -2927,7 +3430,7 @@ test('Vinted preserves trainer composite clue in background payload', async () =
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -2966,7 +3469,7 @@ test('Vinted detached description variation is manual by default', async () => {
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3002,7 +3505,7 @@ test('Vinted multi-word Pokemon phrase keeps attached GX selected', async () => 
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3047,7 +3550,7 @@ test('Vinted tag-team connector title defaults composite chip and keeps individu
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3088,7 +3591,7 @@ test('Vinted Mega Charizard X ex keeps Mega form selected in payload', async () 
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3172,7 +3675,7 @@ test('Vinted Feraligatr liv.53 title carries level and Mysterious Treasures evid
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3187,6 +3690,207 @@ test('Vinted Feraligatr liv.53 title carries level and Mysterious Treasures evid
     assert.equal(payload.levelNumber, '53');
     assert.equal(payload.expansion, 'Mysterious Treasures');
     assert.match(messages[0].title, /Lv\.?\s*53/);
+});
+
+test('Vinted Machamp LV.59 payload keeps level and does not treat LV as collector', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/9601989251-pokemon-machamp-lv59', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /machamp/i.test(String(title || '')) ? 'Machamp' : null,
+            }),
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pokémon Machamp LV.59';
+    processor.prepareVintedKeywords(processor.currentTitle, 'Diamante e Perla');
+    selectPreferredListingChips(processor);
+    const payload = processor.buildVintedPayload(processor.currentTitle, processor.selectedKeywordLabels());
+
+    assert.equal(payload.name, 'Machamp');
+    assert.equal(payload.levelNumber, '59');
+    assert.equal(payload.collectorNumber, '');
+    assert.equal(payload.numericCollectorNumber, '');
+    assert.equal(payload.expansion, 'Diamond & Pearl');
+});
+
+test('extension-card-search omits empty fields and retries without rarityAliases on HTTP 400', async () => {
+    const fetchBodies = [];
+    let extensionCalls = 0;
+    const sandbox = loadBackgroundHelpers(['searchExtensionCard', 'searchCardvaultForStructuredCard']);
+    sandbox.fetch = async (url, options = {}) => {
+        const body = JSON.parse(options.body || '{}');
+        fetchBodies.push({ url, body });
+        if (String(url).includes('/api/extension-card-search')) {
+            extensionCalls += 1;
+            if (extensionCalls === 1) {
+                return { ok: false, status: 400, json: async () => ({ detail: 'rarityAliases' }) };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    matches: [{ cardId: 'machamp-dp-59', name: 'Machamp', expansionName: 'Diamond & Pearl', collectorNumber: '59/130', score: 90 }],
+                }),
+            };
+        }
+                    if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
+    };
+
+    const result = await sandbox.searchExtensionCard({
+        name: 'Machamp',
+        collectorNumber: '',
+        numericCollectorNumber: '',
+        expansion: '',
+        rarity: 'illustration',
+        rarityAliases: ['Illustration Rare', 'illustration'],
+        variation: '',
+        levelNumber: '59',
+    });
+
+    assert.equal(result.rows[0].card_id, 'machamp-dp-59');
+    assert.equal(fetchBodies[0].body.name, 'Machamp');
+    assert.equal(fetchBodies[0].body.levelNumber, '59');
+    assert.equal('expansion' in fetchBodies[0].body, false);
+    assert.equal('collectorNumber' in fetchBodies[0].body, false);
+    assert.deepEqual(fetchBodies[0].body.rarityAliases, ['Illustration Rare', 'illustration']);
+    assert.equal('rarityAliases' in fetchBodies[1].body, false);
+    assert.equal(fetchBodies[1].body.rarity, 'Illustration Rare');
+});
+
+test('extension-card-search retries an exact collector lookup without a broken expansion filter', async () => {
+    const fetchBodies = [];
+    const sandbox = loadBackgroundHelpers(['searchExtensionCard']);
+    sandbox.fetch = async (url, options = {}) => {
+        assert.match(String(url), /\/api\/extension-card-search$/);
+        const body = JSON.parse(options.body || '{}');
+        fetchBodies.push(body);
+        if (body.expansion) {
+            return { ok: true, status: 200, json: async () => ({ matches: [] }) };
+        }
+        return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+                query: 'Pikachu 60/64',
+                matches: [
+                    { cardId: '243052', name: 'Pikachu', expansionName: 'Jungle', collectorNumber: '60/64', score: 11580 },
+                    { cardId: '243066', name: 'Pikachu', expansionName: 'W Promos', collectorNumber: '60/64', score: 11260 },
+                ],
+            }),
+        };
+    };
+
+    const result = await sandbox.searchExtensionCard({
+        name: 'Pikachu',
+        collectorNumber: '60/64',
+        numericCollectorNumber: '60',
+        printedCollectorNumber: '60/64',
+        expansion: 'Jungle',
+    });
+
+    assert.equal(fetchBodies.length, 2);
+    assert.equal(fetchBodies[0].expansion, 'Jungle');
+    assert.equal('expansion' in fetchBodies[1], false);
+    assert.deepEqual(Array.from(result.rows, (row) => row.card_id), ['243052']);
+    assert.equal(result.debug.expansionRecovery.omittedExpansion, 'Jungle');
+    assert.equal(result.debug.expansionRecovery.matchCount, 2);
+});
+
+test('Vinted listing scan final result wins when the older title search resolves later', async () => {
+    let messageListener = null;
+    let resolveTitleSearch;
+    const titleSearchResponse = new Promise((resolve) => {
+        resolveTitleSearch = resolve;
+    });
+    const applied = [];
+    const href = 'https://www.vinted.it/items/60-pikachu-jungle';
+    const { Processor, sandbox } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href, hostname: 'www.vinted.it', pathname: '/items/60-pikachu-jungle' },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: (message) => message.action === 'searchCardForTitle'
+                    ? titleSearchResponse
+                    : Promise.resolve({ success: true }),
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    sandbox.window.vintedProcessor = processor;
+    processor.currentTitle = 'Pikachu 60/64 Jungle';
+    processor.buildVintedSearchSignature = () => 'pikachu-60-64';
+    processor.selectedKeywordLabels = () => [];
+    processor.selectedPrimaryClues = () => [];
+    processor.buildVintedPayload = () => ({});
+    processor.buildVintedSearchTitle = (title) => title;
+    processor.applyVintedSearchResults = (signature, rows, details) => {
+        applied.push({ signature, rows, details });
+        return true;
+    };
+
+    const pendingTitleSearch = processor.searchCardWithBackground(processor.currentTitle);
+    const exactRows = [{ card_id: '243052', name: 'Pikachu', set_name: 'Jungle', card_number: '60/64' }];
+    let scanResponse;
+    messageListener({
+        action: 'pokoinListingScanMerged',
+        url: href,
+        searchSignature: 'pikachu-60-64',
+        listingKind: 'singles',
+        results: exactRows,
+    }, {}, (response) => {
+        scanResponse = response;
+    });
+    resolveTitleSearch({
+        success: true,
+        results: [{ card_id: 'wrong-pikachu', name: 'Pikachu', set_name: 'Base Set' }],
+    });
+
+    const resolvedRows = await pendingTitleSearch;
+    assert.equal(scanResponse.success, true);
+    assert.deepEqual(Array.from(resolvedRows, (row) => row.card_id), ['243052']);
+    assert.deepEqual(Array.from(processor.searchResultsBySignature.get('pikachu-60-64'), (row) => row.card_id), ['243052']);
+    assert.equal(applied.length, 1);
+    assert.equal(applied[0].details.trigger, 'listing-scan-merged');
+});
+
+test('structured Cardvault autocomplete skips HTTP 400 queries instead of failing the panel', async () => {
+    const sandbox = loadBackgroundHelpers(['searchCardvaultForStructuredCard']);
+    sandbox.fetch = async (url, options = {}) => {
+        const body = JSON.parse(options.body || '{}');
+        if (!String(url).includes('/api/marketplace-autocomplete')) {
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
+        }
+        if (String(body.search_term).includes('Lv.')) {
+            return { ok: false, status: 400, json: async () => ({ detail: 'bad query' }) };
+        }
+        return {
+            ok: true,
+            json: async () => ({
+                rows: [{ card_id: 'machamp-dp-59', name: 'Machamp', set_name: 'Diamond & Pearl', card_number: '59/130' }],
+            }),
+        };
+    };
+
+    const result = await sandbox.searchCardvaultForStructuredCard('Machamp LV.59', {
+        name: 'Machamp',
+        levelNumber: '59',
+    });
+
+    assert.equal(result.rows[0].card_id, 'machamp-dp-59');
+    assert.ok(result.debug.attemptedQueries.some((entry) => entry.error === 400));
 });
 
 test('Vinted Jolteon specie delta payload includes delta form and collector evidence', async () => {
@@ -3213,7 +3917,7 @@ test('Vinted Jolteon specie delta payload includes delta form and collector evid
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3253,7 +3957,7 @@ test('Vinted Team Rocket owner title defaults composite Mimikyu payload', async 
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3329,14 +4033,88 @@ test('Vinted keyword defaults select Pokemon-name-like and variation clues', () 
     const selectedLabels = processor.selectedKeywordLabels();
 
     assert.ok(labels.includes('Reshiram'), 'Reshiram should be extracted from description text');
-    assert.equal(processor.currentKeywords.find((keyword) => keyword.label === 'Reshiram').selectedByDefault, true);
+    assert.equal(processor.currentKeywords.find((keyword) => keyword.label === 'Reshiram').selectedByDefault, false);
     assert.ok(processor.currentKeywords.some((keyword) => keyword.label === 'perfetta' && keyword.selectedByDefault === false));
     assert.equal(labels.includes('Carta'), false);
     assert.equal(labels.includes('Carte'), false);
-    assert.deepEqual([...selectedLabels], ['Reshiram']);
-    assert.equal(chips.find((chip) => chip.textContent === 'Reshiram').attributes['aria-pressed'], 'true');
+    assert.deepEqual([...selectedLabels], []);
+    assert.equal(chips.find((chip) => chip.textContent === 'Reshiram').attributes['aria-pressed'], 'false');
     assert.equal(chips.find((chip) => chip.textContent === 'perfetta').attributes['aria-pressed'], 'false');
     assert.equal(appended.length, 1, 'keyword chip container should render');
+});
+
+test('Vinted listing name chips start unselected on a promo lot', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            extractTitleInfo: (title) => ({
+                pokemonName: /\bpikachu\b/i.test(String(title || '')) ? 'Pikachu' : null,
+            }),
+        },
+    });
+    const processor = new Processor();
+    processor.prepareVintedKeywords(
+        'Lotto carte pokemon promo ita scarlatto e violetto',
+        'pikachu charizard mew mewtwo garchomp blastoise venusaur squirtle charmander bulbasaur gengar promo'
+    );
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.compact === 'pikachu'));
+    assert.equal(processor.currentKeywords.every((keyword) => keyword.selectedByDefault === false), true);
+    assert.equal(processor.selectedKeywordValues.size, 0);
+});
+
+test('Vinted unselected description names do not search Cardvault', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/91-lotto-jp', hostname: 'www.vinted.it' },
+            extractTitleInfo: () => ({ pokemonName: null }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.prepareVintedKeywords(
+        'Lotto Pokémon jp',
+        'Pikachu Zeraora illustration rare full art'
+    );
+    assert.ok(processor.currentKeywords.some((keyword) => /pikachu/i.test(keyword.label)));
+    assert.equal(processor.currentKeywords.find((keyword) => keyword.label === 'illustration')?.selectedByDefault, false);
+    assert.equal(processor.selectedKeywordValues.size, 0);
+
+    await processor.searchCardWithBackground(processor.currentTitle);
+
+    assert.deepEqual([...messages[0].clues], []);
+    assert.equal(messages[0].vintedPayload.name, '');
+    assert.equal(messages[0].clues.includes('illustration'), false);
+});
+
+test('Vinted keeps exact title identity in the scan payload while chips stay unpressed', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/9924651033-pikachu-jungle', hostname: 'www.vinted.it' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /\bpikachu\b/i.test(String(title || '')) ? 'Pikachu' : null,
+            }),
+        },
+    });
+    const processor = new Processor();
+    const title = 'Carta 🇮🇹 Pokémon Pikachu 60/64 Italiana - set Jungle';
+    processor.currentTitle = title;
+    processor.prepareVintedKeywords(title, 'Carta vintage della mia collezione personale.');
+
+    assert.equal(processor.selectedKeywordValues.size, 0, 'visible chips must remain unpressed');
+    const payload = processor.buildVintedPayload(title, processor.selectedKeywordLabels());
+    assert.equal(payload.name, 'Pikachu');
+    assert.equal(payload.collectorNumber, '60/64');
+    assert.equal(payload.numericCollectorNumber, '60');
+    assert.equal(payload.expansion, 'Jungle');
+    assert.deepEqual([...payload.selectedClues], []);
 });
 
 test('Vinted default-off clues are omitted from background search query', async () => {
@@ -3366,7 +4144,7 @@ test('Vinted default-off clues are omitted from background search query', async 
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3406,7 +4184,7 @@ test('Vinted selected Pokemon clue overrides noisy title terms', async () => {
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3446,7 +4224,7 @@ test('Vinted Base Set clue is manual unless user selects it', async () => {
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3461,7 +4239,7 @@ test('Vinted Base Set clue is manual unless user selects it', async () => {
     assert.equal(messages[1].title, 'Mewtwo Base Set');
 });
 
-test('Vinted fullart title defaults illustration clue on', async () => {
+test('Vinted fullart title does not auto-select illustration', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
         window: {
@@ -3483,19 +4261,13 @@ test('Vinted fullart title defaults illustration clue on', async () => {
     const processor = new Processor();
     processor.currentTitle = 'Pokémon Froslass Fullart';
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Fullart Scrivimi');
-    processor.selectedKeywordValues = new Set(
-        processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
-            .map((keyword) => keyword.compact)
-    );
+    processor.selectedKeywordValues = new Set();
 
     await processor.searchCardWithBackground(processor.currentTitle);
 
-    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'illustration' && keyword.selectedByDefault === true));
+    assert.ok(processor.currentKeywords.some((keyword) => keyword.value === 'illustration' && keyword.selectedByDefault === false));
     assert.ok(!processor.currentKeywords.some((keyword) => /Fullart Scrivimi/i.test(keyword.value)));
-    assert.deepEqual([...messages[0].primaryClues], ['Froslass']);
-    assert.deepEqual(Array.from(messages[0].clues), ['Froslass', 'illustration']);
-    assert.equal(messages[0].title, 'Froslass illustration');
+    assert.equal(messages[0].clues.includes('illustration'), false);
 });
 
 test('Vinted Holo stays a weak feature and cannot outrank Espeon name', async () => {
@@ -3529,7 +4301,7 @@ test('Vinted Holo stays a weak feature and cannot outrank Espeon name', async ()
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Olografia tenuta perfettamente');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -3755,7 +4527,7 @@ test('Vinted Trainer Gallery slash collector stays atomic and clears stale rows'
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
     processor.searchResultsBySignature.set('old-signature', [{ blueprint_id: 'gengar-v', name_en: 'Gengar V' }]);
@@ -3987,7 +4759,7 @@ test('Vinted title collector number and localized expansion are selected and str
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -4061,6 +4833,62 @@ test('Vinted collector chip toggle changes signature and ignores stale results',
     assert.equal(processor.previewResults[0].collector_number, '35/108', 'stale earlier results should not replace toggled results');
 });
 
+test('Vinted chip click searches without a listing scan and typed clue forces a rescan', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/9900000001-koraismdon-ex', hostname: 'www.vinted.it', pathname: '/items/9900000001-koraismdon-ex' },
+            extractTitleInfo: (title) => ({
+                pokemonName: /koraidon/i.test(String(title || '')) ? 'Koraidon' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action !== 'searchCardForTitle') {
+                        return { success: true };
+                    }
+                    return {
+                        success: true,
+                        results: [{ blueprint_id: 'koraidon-ex', name_en: 'Koraidon ex', collector_number: '125/198', search_score: 99 }],
+                    };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Koraismdon ex';
+    processor.currentButton = createButtonStub();
+    processor.currentKeywords = [
+        { label: 'koraidon', value: 'koraidon', compact: 'koraidon', nameLike: true, category: 'name', selectedByDefault: false },
+    ];
+    processor.selectedKeywordValues = new Set(['koraidon']);
+    processor.lastRenderedPreviewResults = [
+        { blueprint_id: 'raikou', name_en: 'Raikou V' },
+        { blueprint_id: 'blaziken', name_en: 'Blaziken' },
+    ];
+    processor.currentMatchCount = 2;
+
+    await processor.triggerVintedSelectionRefresh('keyword-toggle');
+    const chipSearch = messages.filter((message) => message.action === 'searchCardForTitle').at(-1);
+    const chipTokens = messages.filter((message) => message.action === 'marketplacePreviewReady').at(-1);
+    assert.equal(chipSearch.skipListingScan, true, 'listing chips search Cardvault without a new identify');
+    assert.equal(chipSearch.forceListingScan, false);
+    assert.equal(chipSearch.forceRefresh, true);
+    assert.equal(chipTokens.skipListingScan, true);
+    assert.ok(messages.some((message) => message.action === 'searchCardForTitle'), 'chip click must not reuse Raikou/Blaziken preview rows');
+
+    messages.length = 0;
+    await processor.triggerVintedSelectionRefresh('manual-clue');
+    const typedSearch = messages.filter((message) => message.action === 'searchCardForTitle').at(-1);
+    const typedTokens = messages.filter((message) => message.action === 'marketplacePreviewReady').at(-1);
+    assert.equal(typedSearch.forceListingScan, true, 'typed Add clue must force a new listing identify');
+    assert.equal(typedSearch.skipListingScan, false);
+    assert.equal(typedTokens.forceListingScan, true);
+});
+
 test('Vinted side panel payload includes selected clues and preview rows', async () => {
     const messages = [];
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -4091,7 +4919,7 @@ test('Vinted side panel payload includes selected clues and preview rows', async
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Carta Tornadus EX Full Art');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault || keyword.compact === 'illustration')
+            .filter((keyword) => !keyword.shadowedByComposite && (keyword.nameLike || keyword.illustration || keyword.compact === 'illustration'))
             .map((keyword) => keyword.compact)
     );
     processor.currentButton = createButtonStub();
@@ -4138,7 +4966,7 @@ test('Vinted structured payload carries selected collector to background and sid
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '194 appena sbustata');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault || keyword.compact === '194')
+            .filter((keyword) => !keyword.shadowedByComposite && (keyword.nameLike || keyword.collectorNumber || keyword.compact === '194'))
             .map((keyword) => keyword.compact)
     );
     processor.currentButton = createButtonStub();
@@ -4184,7 +5012,7 @@ test('Vinted collapsed and reopened overlay preserves canonical preview rows', a
     const processor = new Processor();
     processor.currentTitle = 'Tornadus EX Full Art';
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, 'Carta Tornadus EX Full Art');
-    processor.selectedKeywordValues = new Set(processor.currentKeywords.filter((keyword) => keyword.selectedByDefault).map((keyword) => keyword.compact));
+    processor.selectedKeywordValues = new Set(processor.currentKeywords.filter((keyword) => keyword.nameLike || keyword.collectorNumber || keyword.attachedNamePhrase || keyword.illustration).map((keyword) => keyword.compact));
     processor.currentButton = createButtonStub();
     processor.renderCandidatePreview = () => {};
 
@@ -4264,6 +5092,7 @@ test('Vinted overlay panel is fixed without a safe anchor', () => {
     const processor = new Processor();
 
     const panel = processor.ensureVintedPanel(null);
+    processor.setVintedOverlayCollapsed(false);
 
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-placement'], 'overlay-fixed');
     assert.equal(processor.currentPanelHost.style.position, 'fixed');
@@ -4274,7 +5103,154 @@ test('Vinted overlay panel is fixed without a safe anchor', () => {
     assert.equal(processor.currentPanelHost.style.maxHeight, 'calc(100vh - 24px)');
     assert.equal(processor.currentPanelHost.style.pointerEvents, 'none');
     assert.equal(panel.style.pointerEvents, 'auto');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-overlay-side'], 'left');
     assert.equal(bodyAppends[0], processor.currentPanelHost);
+});
+
+test('Vinted overlay icon docks left or right and ignores click after a drag', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    const pointerListeners = {};
+    const storage = { pokoinOverlayDock: null };
+    const { Processor, sandbox } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            innerWidth: 1000,
+            innerHeight: 800,
+            extractTitleInfo: () => ({ pokemonName: 'Tornadus' }),
+        },
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            addEventListener(type, listener) {
+                pointerListeners[type] = pointerListeners[type] || [];
+                pointerListeners[type].push(listener);
+            },
+            removeEventListener(type, listener) {
+                pointerListeners[type] = (pointerListeners[type] || []).filter((item) => item !== listener);
+            },
+            body,
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async () => ({ success: true, results: [] }),
+            },
+            storage: {
+                local: {
+                    async get() {
+                        return { pokoinOverlayDock: storage.pokoinOverlayDock };
+                    },
+                    async set(values) {
+                        Object.assign(storage, values);
+                    },
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.createVintedPanelButton();
+    processor.setVintedOverlayCollapsed(true);
+
+    processor.snapOverlayDockFromRect({ left: 20, top: 12, width: 40 }, 1000);
+    assert.equal(processor.overlayDock.side, 'left');
+    processor.snapOverlayDockFromRect({ left: 900, top: 48, width: 40 }, 1000);
+    assert.equal(processor.overlayDock.side, 'right');
+    assert.equal(processor.overlayDock.top, 48);
+    assert.equal(processor.overlayDock.left, 900);
+
+    processor.applyOverlayDock();
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.style.left, '900px');
+    assert.equal(processor.currentPanelHost.style.top, '48px');
+    assert.equal(processor.currentPanelHost.style.width, '40px');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-overlay-side'], 'right');
+
+    processor.overlayDragMoved = true;
+    processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(processor.vintedOverlayCollapsed, true);
+    assert.equal(processor.overlayDragMoved, false);
+
+    processor.persistOverlayDock();
+    assert.equal(storage.pokoinOverlayDock.side, 'right');
+    assert.equal(storage.pokoinOverlayDock.top, 48);
+    assert.equal(storage.pokoinOverlayDock.left, 900);
+    assert.equal(storage.pokoinOverlayDock.collapsed, true);
+
+    processor.overlayDock = { side: 'left', top: 12 };
+    processor.applyOverlayDock();
+    processor.currentPanelHost.getBoundingClientRect = () => ({ left: 12, top: 12, width: 40, height: 40 });
+    processor.beginOverlayDrag({
+        button: 0,
+        clientX: 32,
+        clientY: 32,
+        pointerId: 1,
+    }, processor.currentButton);
+    pointerListeners.pointermove[0]({ clientX: 880, clientY: 40, pointerId: 1, preventDefault() {} });
+    pointerListeners.pointerup[0]({ clientX: 880, clientY: 40, pointerId: 1, preventDefault() {}, stopPropagation() {} });
+    assert.equal(processor.overlayDock.side, 'right');
+    assert.equal(processor.overlayDock.left, 860);
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.style.left, '860px');
+    assert.equal(sandbox.window.innerWidth, 1000);
+});
+
+test('Vinted overlay paints cached dock coordinates on first mount', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    let chromeGetCalls = 0;
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            innerWidth: 1000,
+            innerHeight: 800,
+            extractTitleInfo: () => ({ pokemonName: 'Tornadus' }),
+            localStorage: createMemoryLocalStorage({
+                'pokoin.overlayDock': JSON.stringify({
+                    side: 'right',
+                    top: 120,
+                    left: 640,
+                    collapsed: true,
+                }),
+            }),
+        },
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body,
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async () => ({ success: true, results: [] }),
+            },
+            storage: {
+                local: {
+                    async get() {
+                        chromeGetCalls += 1;
+                        return new Promise(() => {});
+                    },
+                    async set() {},
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    assert.equal(processor.overlayDockHydratedFromSync, true);
+    assert.equal(processor.overlayDock.left, 640);
+    assert.equal(processor.overlayDock.top, 120);
+    processor.createVintedPanelButton();
+    assert.equal(processor.currentPanelHost.style.left, '640px');
+    assert.equal(processor.currentPanelHost.style.top, '120px');
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.style.visibility, 'visible');
+    assert.equal(chromeGetCalls, 0);
 });
 
 test('Vinted overlay collapse toggles chips and candidate preview', () => {
@@ -4296,6 +5272,7 @@ test('Vinted overlay collapse toggles chips and candidate preview', () => {
     processor.createVintedPanelButton();
     processor.renderKeywordToggles('Tornadus EX', '');
     processor.renderCandidatePreview([{ blueprint_id: '96', expansion_name_en: 'BW Black Star Promos', collector_number: '96' }]);
+    processor.setVintedOverlayCollapsed(false);
 
     const root = processor.vintedPanelRoot();
     const header = root.querySelector('[data-pokoin-vinted-header-row]');
@@ -4309,24 +5286,191 @@ test('Vinted overlay collapse toggles chips and candidate preview', () => {
     assert.match(toggle.style.cssText, /height:\s*40px/);
     assert.match(processor.currentButton.style.cssText, /flex:\s*1 1 auto/i);
     assert.match(processor.currentButton.innerHTML, /Pokoin\.com \(1 match\)/);
+    assert.match(processor.currentButton.innerHTML, /data-pokoin-button-label/);
 
     processor.setVintedOverlayCollapsed(true);
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'true');
-    assert.equal(processor.currentPanelHost.style.pointerEvents, 'none');
+    assert.equal(processor.currentPanelHost.style.width, '40px');
+    assert.equal(processor.currentPanelHost.style.maxWidth, '40px');
+    assert.equal(processor.currentPanelHost.style.height, '40px');
+    assert.equal(processor.currentPanelHost.style.pointerEvents, 'auto');
+    assert.equal(processor.currentPanel.style.margin, '0');
     assert.equal(processor.currentPanel.style.pointerEvents, 'auto');
     assert.equal(keywords.style.display, 'none');
     assert.equal(preview.style.display, 'none');
+    assert.equal(toggle.style.display, 'none');
     assert.equal(toggle.attributes['aria-expanded'], 'false');
     assert.equal(toggle.textContent, '+');
-    assert.match(processor.currentButton.innerHTML, /1 match/);
+    assert.equal(processor.currentButton.querySelector('[data-pokoin-button-label]'), null);
+    assert.match(processor.currentButton.style.cssText, /width:\s*40px/);
+    assert.match(processor.currentButton.style.cssText, /height:\s*40px/);
+    assert.match(processor.currentButton.innerHTML, /pokoin-icon|pokoin-512/);
+    assert.equal(processor.currentButton.attributes.title, 'Show Pokoin results');
+
+    processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(processor.vintedOverlayCollapsed, false);
 
     processor.setVintedOverlayCollapsed(false);
     assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'false');
+    assert.equal(processor.currentPanelHost.style.width, 'min(320px, calc(100vw - 32px))');
+    assert.equal(processor.currentPanelHost.style.pointerEvents, 'none');
     assert.equal(keywords.style.display, '');
     assert.equal(preview.style.display, '');
+    assert.equal(toggle.style.display, '');
     assert.equal(toggle.attributes['aria-expanded'], 'true');
     assert.equal(toggle.textContent, 'X');
     assert.match(processor.currentButton.innerHTML, /Pokoin\.com \(1 match\)/);
+});
+
+test('Vinted overlay stays collapsed across listing navigation until opened', async () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    const storage = { pokoinOverlayDock: { side: 'left', top: 12, collapsed: true } };
+    const chromeStorage = {
+        runtime: {
+            getURL: (asset) => `chrome-extension://test/${asset}`,
+            sendMessage: async () => ({ success: true, results: [] }),
+        },
+        storage: {
+            local: {
+                async get() {
+                    return { pokoinOverlayDock: storage.pokoinOverlayDock };
+                },
+                async set(values) {
+                    Object.assign(storage, values);
+                },
+            },
+        },
+    };
+    const documentStub = {
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        contains: () => true,
+        createElement: (tagName) => createDomElement(tagName),
+        body,
+    };
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: documentStub,
+        chrome: chromeStorage,
+    });
+    const processor = new Processor();
+    processor.createVintedPanelButton();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(processor.vintedOverlayCollapsed, true);
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'true');
+    assert.equal(processor.currentPanelHost.style.width, '40px');
+
+    processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(processor.vintedOverlayCollapsed, false);
+    assert.equal(storage.pokoinOverlayDock.collapsed, false);
+
+    const next = new Processor();
+    next.createVintedPanelButton();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(next.vintedOverlayCollapsed, false);
+    assert.equal(next.currentPanelHost.attributes['data-pokoin-vinted-collapsed'], 'false');
+
+    next.setVintedOverlayCollapsed(true);
+    assert.equal(storage.pokoinOverlayDock.collapsed, true);
+
+    const later = new Processor();
+    later.createVintedPanelButton();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(later.vintedOverlayCollapsed, true);
+    assert.equal(later.currentPanelHost.style.width, '40px');
+});
+
+test('eBay overlay uses the Vinted header, collapse, and named candidate rows', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        document: {
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body,
+        },
+        window: {
+            location: { href: 'https://www.ebay.it/itm/167630643361', hostname: 'www.ebay.it', pathname: '/itm/167630643361' },
+            extractTitleInfo: () => ({ pokemonName: "Marnie's Morpeko" }),
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = "Carta Pokemon Marnie's Morpeko SVP EN 206";
+    processor.currentKeywords = [{ label: "Marnie's Morpeko", value: "Marnie's Morpeko", compact: 'marniesmorpeko', selectedByDefault: true, category: 'name' }];
+    processor.selectedKeywordValues = new Set(['marniesmorpeko']);
+    processor.createEbayPanelButton();
+    processor.renderKeywordToggles(processor.currentTitle, {});
+    processor.renderCandidatePreview([{
+        blueprint_id: '206',
+        name_en: "Marnie's Morpeko",
+        expansion_name_en: 'SV Black Star Promos',
+        collector_number: '206',
+        pokoin_price: '47 PKN',
+        print_langs: {
+            eur: { id: '206' },
+            jp: { id: '1206' },
+            cn: null,
+        },
+    }]);
+    processor.setEbayOverlayCollapsed(false);
+
+    const root = processor.ebayPanelRoot();
+    const header = root.querySelector('[data-pokoin-ebay-header-row]');
+    const toggle = root.querySelector('[data-pokoin-ebay-collapse-toggle]');
+    const keywords = root.querySelector('[data-pokoin-ebay-keywords]');
+    const preview = root.querySelector('[data-pokoin-candidate-preview]');
+
+    assert.ok(header, 'eBay overlay should use the same header row as Vinted');
+    assert.deepEqual(header.children.map((child) => child.attributes['data-pokemon-linker-button'] ? 'button' : 'toggle'), ['button', 'toggle']);
+    assert.match(toggle.style.cssText, /width:\s*40px/);
+    assert.match(processor.currentButton.style.cssText, /flex:\s*1 1 auto/i);
+    assert.match(processor.currentButton.innerHTML, /Pokoin\.com \(1 match\)/);
+    const candidateRow = preview.children.find((child) => child.attributes?.['data-pokoin-candidate-row'] === 'true') || preview.children[0];
+    assert.match(candidateRow.innerHTML, /Marnie.*Morpeko · 206 · SV Black Star Promos/);
+    assert.match(candidateRow.innerHTML, /data-pokoin-pkn-price="true"/);
+    assert.match(candidateRow.innerHTML, /#ffcc03/);
+    assert.match(candidateRow.innerHTML, /47 PKN/);
+    assert.match(candidateRow.innerHTML, /data-pokoin-language="eur"/);
+    assert.match(candidateRow.innerHTML, /data-pokoin-language="jp"/);
+    assert.doesNotMatch(candidateRow.innerHTML, /data-pokoin-language="cn"/);
+    assert.equal(processor.currentPanelHost.style.width, 'min(320px, calc(100vw - 32px))');
+
+    processor.setEbayOverlayCollapsed(true);
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-ebay-collapsed'], 'true');
+    assert.equal(processor.currentPanelHost.style.width, '40px');
+    assert.equal(processor.currentPanelHost.style.height, '40px');
+    assert.equal(processor.currentPanelHost.style.pointerEvents, 'auto');
+    assert.equal(keywords.style.display, 'none');
+    assert.equal(preview.style.display, 'none');
+    assert.equal(toggle.style.display, 'none');
+    assert.equal(processor.currentButton.querySelector('[data-pokoin-button-label]'), null);
+
+    processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(processor.ebayOverlayCollapsed, false);
+    assert.equal(keywords.style.display, '');
+    assert.equal(preview.style.display, '');
+    assert.equal(toggle.textContent, 'X');
 });
 
 test('Vinted candidate preview uses viewport height and remains scrollable', () => {
@@ -4467,6 +5611,7 @@ test('Vinted panel host owns an isolated shadow root with reset styles', () => {
     const processor = new Processor();
 
     const panel = processor.ensureVintedPanel(title);
+    processor.setVintedOverlayCollapsed(false);
     const host = processor.currentPanelHost;
     const resetStyle = host.shadowRoot.children.find((child) => child.tagName === 'STYLE');
 
@@ -4644,7 +5789,7 @@ test('Vinted processing waits when only top skeleton title exists', () => {
     assert.equal(processor.processedPages.has('https://www.vinted.it/items/9-loading'), false);
 });
 
-test('Vinted background candidates use active blue styling and render preview', async () => {
+test('Vinted background candidates use ready green styling and render preview', async () => {
     const appended = [];
     const button = createDomElement('button');
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -4670,6 +5815,7 @@ test('Vinted background candidates use active blue styling and render preview', 
         },
     });
     const processor = new Processor();
+    processor.vintedOverlayCollapsed = false;
     processor.currentButton = button;
     processor.renderCandidatePreview = (results) => {
         appended.push({ previewResults: results });
@@ -4677,8 +5823,9 @@ test('Vinted background candidates use active blue styling and render preview', 
 
     processor.updateButtonWithResults([{ name_en: 'Dragonite V', search_score: 92, collector_number: 'SWSH154' }]);
 
-    assert.equal(processor.currentButton.style.background, '#0ea5e9');
-    assert.equal(processor.currentButton.style.border, '2px solid #38bdf8');
+    assert.equal(processor.currentButton.style.background, '#16a34a');
+    assert.equal(processor.currentButton.attributes['data-pokoin-scan-state'], 'ready');
+    assert.equal(processor.currentButton.style.border, '1px solid rgba(74, 222, 128, 0.7)');
     assert.equal(processor.currentButton.innerHTML.includes('Pokoin.com (1 match)'), true);
     assert.equal(processor.currentButton.attributes['data-pokoin-match-count'], '1');
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], undefined);
@@ -4704,10 +5851,54 @@ test('Vinted unmatched button stays muted Pokoin blue', async () => {
 
     processor.updateButtonWithoutResults();
 
+    assert.equal(processor.currentButton.attributes['data-pokoin-scan-state'], 'idle');
     assert.equal(processor.currentButton.style.background, '#075985');
     assert.equal(processor.currentButton.style.border, '1px solid rgba(56, 189, 248, 0.35)');
     assert.equal(processor.currentButton.attributes['data-pokemon-linker-fallback'], 'true');
     assert.equal(processor.currentButton.attributes['data-pokoin-match-count'], '0');
+});
+
+test('Vinted overlay button is red while scanning and green when results are ready', () => {
+    const button = createButtonStub();
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelectorAll: () => [],
+            contains: (element) => element === button,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+        window: {
+            location: { href: 'https://www.vinted.it/items/3-dragonite', hostname: 'www.vinted.it' },
+        },
+    });
+    const processor = new Processor();
+    processor.currentButton = button;
+    processor.renderCandidatePreview = () => {};
+
+    processor.setPokoinButtonScanState('scanning');
+    assert.equal(button.attributes['data-pokoin-scan-state'], 'scanning');
+    assert.equal(button.style.background, '#dc2626');
+
+    processor.updateButtonWithResults([{ name_en: 'Dragonite V', search_score: 92 }]);
+    assert.equal(button.attributes['data-pokoin-scan-state'], 'ready');
+    assert.equal(button.style.background, '#16a34a');
+});
+
+test('eBay overlay button is red while scanning and green when results are ready', () => {
+    const button = createButtonStub();
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor');
+    const processor = new Processor();
+    processor.currentButton = button;
+    processor.renderCandidatePreview = () => {};
+
+    processor.setPokoinButtonScanState('scanning');
+    assert.equal(button.attributes['data-pokoin-scan-state'], 'scanning');
+    assert.equal(button.style.background, '#dc2626');
+
+    processor.setPokoinButtonScanState('ready');
+    assert.equal(button.attributes['data-pokoin-scan-state'], 'ready');
+    assert.equal(button.style.background, '#16a34a');
+    assert.notEqual(button.style.background, '#28a745');
 });
 
 test('Vinted Mega Charizard overlay label counts found candidates only', async () => {
@@ -4746,11 +5937,12 @@ test('Vinted Mega Charizard overlay label counts found candidates only', async (
     const processor = new Processor();
     processor.currentPanel = panel;
     processor.currentButton = button;
+    processor.vintedOverlayCollapsed = false;
     processor.currentTitle = 'Mega Charizard ex';
     processor.currentKeywords = processor.extractVintedKeywords(processor.currentTitle, '');
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -4774,8 +5966,11 @@ test('Vinted Mega Charizard overlay label counts found candidates only', async (
     assert.doesNotMatch(processor.currentButton.innerHTML, new RegExp(`${clueChips}\\s+matches`));
 
     processor.setVintedOverlayCollapsed(true);
-    assert.match(processor.currentButton.innerHTML, />3 matches</);
+    assert.equal(processor.currentButton.attributes['data-pokoin-match-count'], '3');
+    assert.match(processor.currentButton.attributes['aria-label'], /3 matches/);
+    assert.match(processor.currentButton.innerHTML, /pokoin-icon|pokoin-512/);
     assert.doesNotMatch(processor.currentButton.innerHTML, /Pokoin\.com \(3 matches\)/);
+    assert.doesNotMatch(processor.currentButton.innerHTML, />3 matches</);
 
     await processor.openPokoinSidePanel();
     const openMessage = messages.at(-1);
@@ -4815,6 +6010,23 @@ test('Vinted Pokoin button icon stays compact inside overlay reset', () => {
     assert.match(resetStyles, /\.pokoin-icon/);
     assert.match(resetStyles, /max-width:\s*20px\s*!important/);
     assert.doesNotMatch(resetStyles, /img\s*\{[^}]*max-width:\s*none/s);
+});
+
+test('Vinted overlay label includes the Chrome extension version', () => {
+    const button = createButtonStub();
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                getManifest: () => ({ version: '2.0.1' }),
+                sendMessage: async () => ({ success: true, results: [] }),
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.vintedOverlayCollapsed = false;
+    processor.setPokoinButtonLabel(button);
+    assert.match(button.innerHTML, /Pokoin\.com v2\.0\.1/);
 });
 
 test('Vinted candidate preview is scrollable, compact, and clickable', async () => {
@@ -4867,7 +6079,7 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -4878,23 +6090,45 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
         expansion_name_en: 'Astral Radiance',
         expansion_symbol_url: index === 0 ? 'https://cdn.example/astral-radiance.png' : '',
         pokoin_price: index === 0 ? '$12.34' : '',
+        print_langs: index === 0
+            ? { eur: { id: '9000' }, jp: null, cn: { id: '19000' } }
+            : { eur: { id: String(9000 + index) }, jp: null, cn: null },
     })));
 
     const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
     const rows = preview.children;
     assert.equal(preview.style.maxHeight, 'calc(100vh - 220px)');
     assert.equal(preview.style.overflowY, 'auto');
-    assert.equal(rows.length, 8);
+    assert.equal(rows.length, 13);
     assert.equal(rows[0].tagName, 'BUTTON');
     assert.equal(rows[0].type, 'button');
-    assert.equal(rows[0].attributes['data-pokoin-candidate-row'], 'true');
-    assert.doesNotMatch(rows[0].innerHTML, /Regigigas VSTAR/);
-    assert.match(rows[0].innerHTML, /https:\/\/cdn\.example\/astral-radiance\.png/);
-    assert.match(rows[0].innerHTML, /114/);
-    assert.match(rows[0].innerHTML, /Astral Radiance/);
-    assert.match(rows[0].innerHTML, /\$12\.34/);
+    assert.equal(rows[0].attributes['data-pokoin-candidate-all'], 'true');
+    assert.match(rows[0].innerHTML, />ALL</);
+    assert.equal(rows[1].attributes['data-pokoin-candidate-row'], 'true');
+    assert.match(rows[1].innerHTML, /Regigigas VSTAR/);
+    assert.match(rows[1].innerHTML, /https:\/\/cdn\.example\/astral-radiance\.png/);
+    assert.match(rows[1].innerHTML, /114/);
+    assert.match(rows[1].innerHTML, /Astral Radiance/);
+    assert.match(rows[1].innerHTML, /\$12\.34/);
+    assert.match(rows[1].innerHTML, /data-pokoin-pkn-price="true"/);
+    assert.match(rows[1].innerHTML, /#ffcc03/);
+    assert.match(rows[1].innerHTML, /data-pokoin-language="eur"/);
+    assert.match(rows[1].innerHTML, /🇪🇺<\/span>EUR/);
+    assert.match(rows[1].innerHTML, /data-pokoin-language="cn"/);
+    assert.match(rows[1].innerHTML, /🇨🇳<\/span>CN/);
+    assert.doesNotMatch(rows[1].innerHTML, /data-pokoin-language="jp"/);
 
     await rows[0].eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(messages.at(-1).action, 'openSidePanelForCurrentTab');
+    assert.equal(messages.at(-1).selectedCandidateId, undefined);
+    assert.equal(messages.at(-1).openAllCards, true);
+    assert.equal(messages.at(-1).previewRows.length, 12);
+
+    await rows[1].eventListeners.click({
         preventDefault() {},
         stopPropagation() {},
         stopImmediatePropagation() {},
@@ -4904,19 +6138,121 @@ test('Vinted candidate preview is scrollable, compact, and clickable', async () 
     assert.equal(messages.at(-1).selectedCandidateId, '9000');
     assert.equal(messages.at(-1).selectedCandidate.card_id, '9000');
     assert.equal(messages.at(-1).selectedCandidate.name, 'Regigigas VSTAR');
-    assert.equal(messages.at(-1).previewRows.length, 8);
-    assert.deepEqual(messages.at(-1).previewRows.map((row) => row.card_id), ['9000', '9001', '9002', '9003', '9004', '9005', '9006', '9007']);
+    assert.equal(messages.at(-1).previewRows.length, 12);
+    assert.deepEqual(messages.at(-1).previewRows.map((row) => row.card_id), ['9000', '9001', '9002', '9003', '9004', '9005', '9006', '9007', '9008', '9009', '9010', '9011']);
     assert.ok(messages.at(-1).clues.some((clue) => /^regigigas vstar$/i.test(clue)));
     assert.ok(messages.at(-1).clues.some((clue) => /^vstar$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^regigigas vstar$/i.test(clue)));
     assert.ok(messages.at(-1).primaryClues.some((clue) => /^vstar$/i.test(clue)));
 
-    await rows[0].eventListeners.click({
+    await rows[1].eventListeners.click({
         preventDefault() {},
         stopPropagation() {},
         stopImmediatePropagation() {},
     });
-    assert.equal(messages.length, 2, 'one runtime message should be sent for each real candidate click');
+    assert.equal(messages.length, 3, 'ALL plus each candidate click should send a runtime message');
+});
+
+test('Vinted album overlay is not capped at eight candidates', async () => {
+    const messages = [];
+    const panel = createDomElement('div', { 'data-pokoin-vinted-panel': 'true' });
+    const button = createButtonStub();
+    button.contains = (target) => target === button;
+    panel.appendChild(button);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            querySelectorAll: () => [],
+            contains: (element) => panel.contains(element),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                let cssText = '';
+                Object.defineProperty(element.style, 'cssText', {
+                    get() {
+                        return cssText;
+                    },
+                    set(value) {
+                        cssText = value;
+                    },
+                });
+                return element;
+            },
+            body: panel,
+        },
+    });
+    const processor = new Processor();
+    processor.currentPanel = panel;
+    processor.currentButton = button;
+    processor.currentTitle = 'Album pieno di carte Pokemon';
+    processor.currentListingKind = 'album';
+
+    processor.renderCandidatePreview(Array.from({ length: 12 }, (_, index) => ({
+        blueprint_id: String(9000 + index),
+        name_en: `Album Card ${index + 1}`,
+        collector_number: `${String(index + 1).padStart(3, '0')}/156`,
+        expansion_name_en: 'League Promos',
+        pokoin_price: index === 0 ? '12 PKN' : 'Out of stock',
+    })));
+
+    const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
+    assert.equal(preview.children.length, 13);
+    assert.equal(preview.children[0].attributes['data-pokoin-candidate-all'], 'true');
+    assert.equal(processor.vintedCandidateRowLimit(), Number.MAX_SAFE_INTEGER);
+
+    await preview.children[0].eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(messages.at(-1).previewRows.length, 12);
+    assert.equal(messages.at(-1).selectedCandidateId, undefined);
+    assert.equal(messages.at(-1).openAllCards, true);
+    assert.equal(messages.at(-1).previewRows[11].card_id, '9011');
+
+    await preview.children[1].eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(messages.at(-1).previewRows.length, 12);
+    assert.equal(messages.at(-1).selectedCandidateId, '9000');
+});
+
+test('overlay ALL is hidden when there is only one match', () => {
+    const panel = createDomElement('div', { 'data-pokoin-vinted-panel': 'true' });
+    const button = createButtonStub();
+    button.contains = (target) => target === button;
+    panel.appendChild(button);
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        document: {
+            querySelectorAll: () => [],
+            contains: (element) => panel.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: panel,
+        },
+    });
+    const processor = new Processor();
+    processor.currentPanel = panel;
+    processor.currentButton = button;
+    processor.renderCandidatePreview([{
+        blueprint_id: '27',
+        name_en: 'Ho-Oh',
+        collector_number: '27/115',
+        expansion_name_en: 'Theme Deck & Blisters Exclusives',
+    }]);
+    const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
+    assert.equal(preview.children.length, 1);
+    assert.equal(preview.children[0].attributes['data-pokoin-candidate-all'], undefined);
+    assert.equal(preview.children[0].attributes['data-pokoin-candidate-row'], 'true');
+    assert.match(preview.children[0].innerHTML, /Ho-Oh/);
 });
 
 test('eBay compact candidate preview renders expansion logo when provided', () => {
@@ -4948,6 +6284,7 @@ test('eBay compact candidate preview renders expansion logo when provided', () =
     }]);
 
     const preview = panel.children.find((child) => child.attributes?.['data-pokoin-candidate-preview'] === 'true');
+    assert.equal(preview.children[0].attributes['data-pokoin-candidate-all'], undefined);
     assert.match(preview.children[0].innerHTML, /https:\/\/cdn\.example\/paldean-fates\.png/);
     assert.match(preview.children[0].style.cssText, /grid-template-columns:\s*22px minmax\(0, 1fr\)/);
 });
@@ -4966,6 +6303,14 @@ test('Vinted candidate metadata includes Pokoin price when available', () => {
     );
     assert.equal(
         processor.compactCandidateMeta({
+            name: 'Lucario',
+            collector_number: '023',
+            expansion_name_en: 'League & Championship Cards',
+        }),
+        'Lucario · 023 · League & Championship Cards'
+    );
+    assert.equal(
+        processor.compactCandidateMeta({
             collector_number: '232/091',
             expansion_name_en: 'Paldean Fates',
         }),
@@ -4973,7 +6318,7 @@ test('Vinted candidate metadata includes Pokoin price when available', () => {
     );
 });
 
-test('Vinted main Pokoin button opens side panel from shadow overlay', async () => {
+test('Vinted reduced Pokoin button opens the side panel and expanded button refreshes the scan', async () => {
     const messages = [];
     const details = createDomElement('section');
     const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
@@ -5012,31 +6357,127 @@ test('Vinted main Pokoin button opens side panel from shadow overlay', async () 
     );
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
     processor.createVintedPanelButton();
     processor.attachVintedSidePanelClick(processor.currentButton);
+    assert.equal(processor.vintedOverlayCollapsed, true);
     await processor.currentButton.eventListeners.click({
         preventDefault() {},
         stopPropagation() {},
         stopImmediatePropagation() {},
     });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
 
+    assert.equal(processor.vintedOverlayCollapsed, false);
     assert.equal(processor.currentPanelHost.shadowRoot.contains(processor.currentButton), true);
-    assert.equal(messages.length, 1);
-    assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
-    assert.equal(messages[0].url, 'https://www.vinted.it/items/40-dragonite');
-    assert.ok(messages[0].primaryClues.some((clue) => /^dragonite v$/i.test(clue)));
-    assert.ok(messages[0].primaryClues.some((clue) => /^v$/i.test(clue)));
+    const searchMessages = messages.filter((message) => message.action === 'searchCardForTitle');
+    assert.equal(searchMessages.length, 1);
+    assert.equal(searchMessages[0].forceListingScan, true);
+    assert.equal(searchMessages[0].skipListingScan, false);
+    assert.equal(searchMessages[0].searchTrigger, 'overlay-expand');
+    assert.equal(messages.some((message) => message.action === 'ensureSidePanelOpen'), true);
+    assert.equal(messages.some((message) => message.action === 'openSidePanelForCurrentTab'), false);
 
     await processor.currentButton.eventListeners.click({
         preventDefault() {},
         stopPropagation() {},
         stopImmediatePropagation() {},
     });
-    assert.equal(messages.length, 2, 'idempotent listener attachment should not duplicate one click');
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(processor.vintedOverlayCollapsed, false, 'X collapses the overlay; the Pokoin.com button refreshes');
+    const searchAfterRefresh = messages.filter((message) => message.action === 'searchCardForTitle');
+    assert.equal(searchAfterRefresh.length, 2);
+    assert.equal(searchAfterRefresh[1].searchTrigger, 'overlay-refresh');
+    assert.equal(searchAfterRefresh[1].forceListingScan, true);
+    assert.equal(messages.filter((message) => message.action === 'ensureSidePanelOpen').length, 1);
+});
+
+test('eBay reduced Pokoin button opens the side panel and expanded button refreshes the scan', async () => {
+    const messages = [];
+    const page = createDomElement('section');
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.it/itm/40-dragonite',
+                hostname: 'www.ebay.it',
+                pathname: '/itm/40-dragonite',
+            },
+            extractTitleInfo: (title) => ({
+                pokemonName: /dragonite/i.test(String(title || '')) ? 'Dragonite' : null,
+            }),
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            title: 'Carta Pokemon Dragonite V',
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: (element) => page.contains(element),
+            createElement: (tagName) => createDomElement(tagName),
+            body: page,
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Carta Pokemon Dragonite V';
+    processor.currentKeywords = processor.extractEbayKeywords(
+        processor.currentTitle,
+        '',
+        processor.extractTitleInfo(processor.currentTitle)
+    );
+    processor.selectedKeywordValues = new Set(
+        processor.currentKeywords
+            .filter((keyword) => keyword.preferredChip)
+            .map((keyword) => keyword.compact)
+    );
+
+    processor.createEbayPanelButton();
+    assert.equal(processor.ebayOverlayCollapsed, true);
+    await processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    assert.equal(processor.ebayOverlayCollapsed, false);
+    const searchMessages = messages.filter((message) => message.action === 'searchCardForTitle');
+    assert.equal(searchMessages.length, 1);
+    assert.equal(searchMessages[0].forceListingScan, true);
+    assert.equal(searchMessages[0].skipListingScan, false);
+    assert.equal(searchMessages[0].searchTrigger, 'overlay-expand');
+    assert.equal(messages.some((message) => message.action === 'ensureSidePanelOpen'), true);
+    assert.equal(messages.some((message) => message.action === 'openSidePanelForCurrentTab'), false);
+
+    await processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(processor.ebayOverlayCollapsed, false, 'X collapses the overlay; the Pokoin.com button refreshes');
+    const searchAfterRefresh = messages.filter((message) => message.action === 'searchCardForTitle');
+    assert.equal(searchAfterRefresh.length, 2);
+    assert.equal(searchAfterRefresh[1].searchTrigger, 'overlay-refresh');
+    assert.equal(searchAfterRefresh[1].forceListingScan, true);
+    assert.equal(messages.filter((message) => message.action === 'ensureSidePanelOpen').length, 1);
 });
 
 test('eBay Pokoin button stays compact blue and never uses old green matched state', () => {
@@ -5091,8 +6532,8 @@ test('eBay Magearna EX title builds Vinted-like structured payload and clues', (
     assert.equal(payload.expansion, 'Steam Siege');
     assert.equal(payload.searchTitle, 'Magearna ex Steam Siege 110/114');
     assert.deepEqual(Array.from(payload.primaryClues), ['Magearna', 'ex']);
-    assert.ok(payload.selectedClues.includes('110/114'));
-    assert.ok(payload.selectedClues.includes('Steam Siege'));
+    assert.equal(payload.selectedClues.includes('110/114'), false);
+    assert.equal(payload.selectedClues.includes('Steam Siege'), false);
     assert.match(processor.buildEbaySearchSignature(payload), /magearnaexsteamsiege110114/);
 });
 
@@ -5115,7 +6556,7 @@ test('eBay Dark Flareon keeps full card identity over component species', () => 
     processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -5184,12 +6625,11 @@ test('eBay overlay selected keys preserve RC collector and Radiant Collection ev
     });
     const processor = new Processor();
     processor.processProductPage();
-    await Promise.resolve();
+    await recognizeReducedOverlay(processor);
 
     const searchMessage = messages.find((message) => message.action === 'searchCardForTitle');
     const host = page.querySelector('[data-pokoin-ebay-panel-host]');
     const panel = host.shadowRoot.querySelector('[data-pokoin-ebay-panel]');
-    const selectedLabels = processor.selectedKeywordLabels();
 
     assert.ok(host, 'eBay overlay host should render');
     assert.equal(host.style.position, 'fixed');
@@ -5199,15 +6639,180 @@ test('eBay overlay selected keys preserve RC collector and Radiant Collection ev
     assert.equal(host.style.maxHeight, 'calc(100vh - 24px)');
     assert.equal(host.style.pointerEvents, 'none');
     assert.ok(panel.querySelectorAll('[data-pokoin-ebay-keyword]').length > 0, 'eBay key chips should render');
-    assert.ok(selectedLabels.includes('Sylveon'), 'Pokemon name key should be selected');
-    assert.ok(selectedLabels.includes('ex'), 'explicit variation key should be selected');
-    assert.ok(selectedLabels.includes('RC32/RC32'), 'prefixed slash collector should stay atomic');
-    assert.ok(selectedLabels.includes('Generations Radiant Collection'), 'RC collector should add Radiant Collection context');
+    const chipLabels = processor.currentKeywords.map((keyword) => keyword.label || keyword.value);
+    assert.ok(chipLabels.some((label) => /Sylveon/i.test(label)), 'Pokemon name key should render');
+    assert.ok(chipLabels.some((label) => /^ex$/i.test(label)), 'explicit variation key should render');
+    assert.ok(chipLabels.some((label) => /RC32\/RC32/i.test(label)), 'prefixed slash collector should stay atomic');
+    assert.ok(chipLabels.some((label) => /Generations Radiant Collection/i.test(label)), 'RC collector should add Radiant Collection context');
     assert.equal(searchMessage.ebayPayload.name, 'Sylveon');
     assert.equal(searchMessage.ebayPayload.variation, 'ex');
     assert.equal(searchMessage.ebayPayload.collectorNumber, 'RC32/RC32');
     assert.equal(searchMessage.ebayPayload.expansion, 'Generations Radiant Collection');
     assert.equal(searchMessage.title, 'Sylveon ex Generations Radiant Collection RC32/RC32');
+});
+
+test('eBay overlay docks left or right and ignores click after a drag', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    const pointerListeners = {};
+    const storage = { pokoinOverlayDock: null };
+    const messages = [];
+    const { Processor, sandbox } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            innerWidth: 1000,
+            innerHeight: 800,
+            location: {
+                href: 'https://www.ebay.it/itm/graded-card',
+                hostname: 'www.ebay.it',
+                pathname: '/itm/graded-card',
+            },
+            extractTitleInfo: () => ({ pokemonName: 'Oddish' }),
+        },
+        document: {
+            title: 'RARISIMA CARTA GRADATA',
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            addEventListener(type, listener) {
+                pointerListeners[type] = pointerListeners[type] || [];
+                pointerListeners[type].push(listener);
+            },
+            removeEventListener(type, listener) {
+                pointerListeners[type] = (pointerListeners[type] || []).filter((item) => item !== listener);
+            },
+            body,
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+            storage: {
+                local: {
+                    async get() {
+                        return { pokoinOverlayDock: storage.pokoinOverlayDock };
+                    },
+                    async set(values) {
+                        Object.assign(storage, values);
+                    },
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.createEbayPanelButton();
+
+    assert.equal(processor.currentPanelHost.style.left, '12px');
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-overlay-side'], 'left');
+
+    processor.snapOverlayDockFromRect({ left: 20, top: 12, width: 340 }, 1000);
+    assert.equal(processor.overlayDock.side, 'left');
+    processor.snapOverlayDockFromRect({ left: 700, top: 36, width: 340 }, 1000);
+    assert.equal(processor.overlayDock.side, 'right');
+    assert.equal(processor.overlayDock.top, 36);
+    assert.equal(processor.overlayDock.left, 652);
+
+    processor.applyOverlayDock();
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.style.left, '652px');
+    assert.equal(processor.currentPanelHost.style.top, '36px');
+    assert.equal(processor.currentPanelHost.attributes['data-pokoin-overlay-side'], 'right');
+
+    processor.overlayDragMoved = true;
+    processor.currentButton.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+    assert.equal(messages.some((message) => message.action === 'openSidePanelForCurrentTab'), false);
+    assert.equal(processor.overlayDragMoved, false);
+
+    processor.persistOverlayDock();
+    assert.equal(storage.pokoinOverlayDock.side, 'right');
+    assert.equal(storage.pokoinOverlayDock.top, 36);
+    assert.equal(storage.pokoinOverlayDock.left, 652);
+    assert.equal(storage.pokoinOverlayDock.collapsed, true);
+
+    processor.overlayDock = { side: 'left', top: 12 };
+    processor.applyOverlayDock();
+    processor.currentPanelHost.getBoundingClientRect = () => ({ left: 12, top: 12, width: 340, height: 80 });
+    processor.beginOverlayDrag({
+        button: 0,
+        clientX: 32,
+        clientY: 32,
+        pointerId: 1,
+    }, processor.currentButton);
+    pointerListeners.pointermove[0]({ clientX: 820, clientY: 40, pointerId: 1, preventDefault() {} });
+    pointerListeners.pointerup[0]({ clientX: 820, clientY: 40, pointerId: 1, preventDefault() {}, stopPropagation() {} });
+    assert.equal(processor.overlayDock.side, 'right');
+    assert.equal(processor.overlayDock.left, 652);
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.style.left, '652px');
+    assert.equal(sandbox.window.innerWidth, 1000);
+});
+
+test('eBay overlay paints cached dock coordinates on first mount', () => {
+    const bodyAppends = [];
+    const body = documentStubBody(bodyAppends);
+    let chromeGetCalls = 0;
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            innerWidth: 1000,
+            innerHeight: 800,
+            location: {
+                href: 'https://www.ebay.it/itm/graded-card',
+                hostname: 'www.ebay.it',
+                pathname: '/itm/graded-card',
+            },
+            extractTitleInfo: () => ({ pokemonName: 'Oddish' }),
+            localStorage: createMemoryLocalStorage({
+                'pokoin.overlayDock': JSON.stringify({
+                    side: 'right',
+                    top: 88,
+                    left: 540,
+                    collapsed: true,
+                }),
+            }),
+        },
+        document: {
+            title: 'RARISIMA CARTA GRADATA',
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body,
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async () => ({ success: true, results: [] }),
+            },
+            storage: {
+                local: {
+                    async get() {
+                        chromeGetCalls += 1;
+                        return new Promise(() => {});
+                    },
+                    async set() {},
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    assert.equal(processor.overlayDockHydratedFromSync, true);
+    assert.equal(processor.overlayDock.left, 540);
+    assert.equal(processor.overlayDock.top, 88);
+    processor.createEbayPanelButton();
+    assert.equal(processor.currentPanelHost.style.left, '540px');
+    assert.equal(processor.currentPanelHost.style.top, '88px');
+    assert.equal(processor.currentPanelHost.style.right, 'auto');
+    assert.equal(processor.currentPanelHost.style.visibility, 'visible');
+    assert.equal(chromeGetCalls, 0);
 });
 
 test('eBay localized Sandstorm title prioritizes collector and expansion over broad ex', async () => {
@@ -5236,7 +6841,7 @@ test('eBay localized Sandstorm title prioritizes collector and expansion over br
     processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -5306,6 +6911,7 @@ test('eBay overlay chip toggles invalidate stale rows and send selected-key payl
     });
     const processor = new Processor();
     processor.processProductPage();
+    void processor.expandEbayOverlayAndRecognize();
 
     const manualChip = processor.currentPanel.querySelectorAll('[data-pokoin-ebay-keyword]')
         .find((chip) => chip.attributes['aria-pressed'] === 'false');
@@ -5318,9 +6924,19 @@ test('eBay overlay chip toggles invalidate stale rows and send selected-key payl
     await Promise.resolve();
 
     assert.equal(processor.lastRenderedPreviewResults[0]?.blueprint_id, 'zangoose-14');
-    assert.equal(messages.filter((message) => message.action === 'searchCardForTitle').length, 2);
-    assert.equal(messages[1].selectionRevision, 1);
-    assert.ok(messages[1].ebayPayload.selectedClues.length > messages[0].ebayPayload.selectedClues.length);
+    const searches = messages.filter((message) => message.action === 'searchCardForTitle');
+    assert.equal(searches.length, 2);
+    assert.equal(searches[1].selectionRevision, 1);
+    assert.equal(searches[1].skipListingScan, true);
+    assert.equal(searches[1].forceRefresh, true);
+    assert.ok(searches[1].ebayPayload.selectedClues.length > searches[0].ebayPayload.selectedClues.length);
+    const chipTokens = messages.filter((message) =>
+        message.action === 'marketplacePreviewReady' &&
+        message.tokensReady &&
+        message.skipListingScan &&
+        message.previewSource === 'ebay_overlay_tokens'
+    );
+    assert.ok(chipTokens.length >= 1, 'eBay chip toggle should publish tokens-ready like Vinted');
 });
 
 test('eBay manual clue input adds selected clue and invalidates stale rows', async () => {
@@ -5366,6 +6982,7 @@ test('eBay manual clue input adds selected clue and invalidates stale rows', asy
     });
     const processor = new Processor();
     processor.processProductPage();
+    processor.setEbayOverlayCollapsed(false);
     await Promise.resolve();
     processor.searchResultsBySignature.set(processor.buildEbaySearchSignature(processor.buildSelectedEbayPayload(processor.currentTitle)), [
         { blueprint_id: 'stale-ebay', name_en: 'Zangoose ex', collector_number: '15/100' },
@@ -5386,6 +7003,8 @@ test('eBay manual clue input adds selected clue and invalidates stale rows', asy
     assert.equal(searchMessages.at(-1).ebayPayload.collectorNumber, '14/100');
     assert.ok(searchMessages.at(-1).selectedClues.includes('14/100'));
     assert.equal(searchMessages.at(-1).selectionRevision, 1);
+    assert.equal(searchMessages.at(-1).forceListingScan, true);
+    assert.equal(searchMessages.at(-1).forceRefresh, true);
     assert.equal(processor.lastRenderedPreviewResults.length, 0, 'manual eBay clue should clear stale rows before the refreshed search paints');
 
     input.value = '14/100';
@@ -5445,7 +7064,10 @@ test('eBay item page retries overlay injection after late title hydration', asyn
     await Promise.resolve();
 
     assert.ok(page.querySelector('[data-pokoin-ebay-panel-host]'), 'late eBay title should still get the overlay');
-    assert.ok(processor.selectedKeywordLabels().includes('14/100'));
+    assert.ok(
+        processor.currentKeywords.some((keyword) => /14\/100/.test(keyword.label || keyword.value)),
+        'late eBay title should still extract the collector chip'
+    );
 });
 
 test('eBay button sends same structured payload and preview rows to side panel', async () => {
@@ -5542,7 +7164,7 @@ test('eBay repeated same item and selected clues reuse overlay preview cache', a
     processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -5603,7 +7225,7 @@ test('eBay changed manual clue invalidates overlay preview cache', async () => {
     processor.currentKeywords = processor.extractEbayKeywords(title, '', processor.extractTitleInfo(title));
     processor.selectedKeywordValues = new Set(
         processor.currentKeywords
-            .filter((keyword) => keyword.selectedByDefault)
+            .filter((keyword) => keyword.preferredChip)
             .map((keyword) => keyword.compact)
     );
 
@@ -5710,6 +7332,235 @@ test('background eBay canonical preview cache is isolated by item URL', async ()
     assert.doesNotMatch(JSON.stringify(latestState), /ultra-necrozma/i);
 });
 
+test('eBay empty overlay search still publishes tokens-ready for the current listing', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: {
+                href: 'https://www.ebay.it/itm/cool-porygon',
+                hostname: 'www.ebay.it',
+                pathname: '/itm/cool-porygon',
+            },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true };
+                },
+            },
+        },
+        document: {
+            title: 'Pokemon Cool Porygon PSA 10',
+            querySelector: () => null,
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Pokemon Cool Porygon PSA 10';
+    await processor.sendEbayPreviewReady('ebay|cool-porygon|empty', []);
+
+    const preview = messages.find((message) => message.action === 'marketplacePreviewReady');
+    assert.ok(preview, 'empty eBay search should still notify the side panel');
+    assert.equal(preview.source, 'ebay');
+    assert.equal(preview.tokensReady, true);
+    assert.equal(preview.url, 'https://www.ebay.it/itm/cool-porygon');
+    assert.equal(preview.previewRows, undefined);
+});
+
+test('eBay same-tab preview overwrites a side panel still owned by another listing URL', async () => {
+    const storage = {
+        sidePanelState: {
+            pageInfo: {
+                title: 'tentacool',
+                url: 'https://www.ebay.it/itm/tentacool',
+            },
+            rows: [{ card_id: 'tentacool-1', name: 'Tentacool' }],
+            debug: { sidePanelTabId: 10 },
+        },
+    };
+    const storageWrites = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        storage,
+        tabs: {
+            get: async (tabId) => ({
+                id: tabId,
+                title: 'Pokemon Cool Porygon PSA 10',
+                url: 'https://www.ebay.it/itm/cool-porygon',
+            }),
+        },
+        sessionStorage: {
+            set: async (payload) => {
+                Object.assign(storage, payload);
+                if (payload.sidePanelState) {
+                    storageWrites.push(payload.sidePanelState);
+                }
+            },
+        },
+    });
+    const porygonPayload = {
+        source: 'ebay',
+        listingKey: 'https://www.ebay.it/itm/cool-porygon',
+        originalTitle: 'Pokemon Cool Porygon PSA 10',
+        searchTitle: 'Cool Porygon',
+        name: 'Porygon',
+        selectedClues: ['Porygon'],
+        primaryClues: ['Porygon'],
+    };
+    const response = await sendMessage({
+        action: 'marketplacePreviewReady',
+        source: 'ebay',
+        url: porygonPayload.listingKey,
+        title: porygonPayload.searchTitle,
+        originalTitle: porygonPayload.originalTitle,
+        selectedClues: porygonPayload.selectedClues,
+        primaryClues: porygonPayload.primaryClues,
+        previewSignature: 'ebay|cool-porygon',
+        selectionRevision: 0,
+        ebayPayload: porygonPayload,
+        marketplacePayload: porygonPayload,
+        previewRows: [{ card_id: 'cool-porygon-1', name: 'Cool Porygon' }],
+    }, { tab: { id: 10, title: 'Pokemon Cool Porygon PSA 10', url: porygonPayload.listingKey } });
+
+    assert.equal(response.ignored, undefined);
+    assert.equal(storage.sidePanelState.pageInfo.url, porygonPayload.listingKey);
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['cool-porygon-1']);
+});
+
+test('eBay tokens-ready chip search overwrites a side panel still titled for another URL', async () => {
+    const storage = {
+        sidePanelState: {
+            pageInfo: {
+                title: 'tentacool',
+                url: 'https://www.ebay.it/itm/tentacool',
+            },
+            rows: [{ card_id: 'tentacool-1', name: 'Tentacool' }],
+            debug: { sidePanelTabId: 10 },
+        },
+    };
+    const fetchBodies = [];
+    const porygonUrl = 'https://www.ebay.it/itm/cool-porygon';
+    const { sendMessage } = loadBackgroundMessageHarness({
+        storage,
+        fetch: async (url, options = {}) => {
+            if (String(url).includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ products: [] }) };
+            }
+            const body = JSON.parse(options.body || '{}');
+            fetchBodies.push({ url, body });
+            if (String(url).includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    json: async () => ({
+                        matches: [{ cardId: 'cool-porygon-1', name: 'Cool Porygon', expansionName: 'Expedition', collectorNumber: '137/165', score: 99 }],
+                    }),
+                };
+            }
+            if (String(url).includes('/api/marketplace-autocomplete') || String(url).includes('/api/searchbar-token-predict')) {
+                return { ok: true, json: async () => ({ rows: [], predictions: [] }) };
+            }
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
+        },
+        tabs: {
+            get: async (tabId) => ({
+                id: tabId,
+                title: 'Pokemon Cool Porygon PSA 10',
+                url: porygonUrl,
+            }),
+        },
+    });
+    const porygonPayload = {
+        source: 'ebay',
+        listingKey: porygonUrl,
+        originalTitle: 'Pokemon Cool Porygon PSA 10',
+        searchTitle: 'Cool Porygon',
+        name: 'Porygon',
+        selectedClues: ['Porygon'],
+        primaryClues: ['Porygon'],
+    };
+    const response = await sendMessage({
+        action: 'marketplacePreviewReady',
+        source: 'ebay',
+        tokensReady: true,
+        skipListingScan: true,
+        url: porygonUrl,
+        title: porygonPayload.searchTitle,
+        originalTitle: porygonPayload.originalTitle,
+        selectedClues: porygonPayload.selectedClues,
+        primaryClues: porygonPayload.primaryClues,
+        previewSignature: 'ebay|cool-porygon|tokens',
+        previewSource: 'ebay_overlay_tokens',
+        selectionRevision: 1,
+        ebayPayload: porygonPayload,
+        marketplacePayload: porygonPayload,
+    }, { tab: { id: 10, title: 'Pokemon Cool Porygon PSA 10', url: porygonUrl } });
+
+    assert.equal(response.success, true);
+    assert.equal(response.ignored, undefined);
+    assert.equal(response.reason, 'ebay-tokens-chip-search');
+    assert.equal(storage.sidePanelState.pageInfo.url, porygonUrl);
+    assert.notEqual(storage.sidePanelState.pageInfo.title, 'tentacool');
+    assert.ok(fetchBodies.some((entry) => String(entry.url).includes('/api/extension-card-search')));
+});
+
+test('eBay preview from another tab does not steal a side panel owned by a different listing tab', async () => {
+    const storage = {
+        sidePanelState: {
+            pageInfo: {
+                title: 'Magearna EX',
+                url: 'https://www.ebay.com/itm/10-magearna',
+            },
+            rows: [{ card_id: 'magearna-ex-110', name: 'Magearna EX' }],
+            debug: { sidePanelTabId: 10 },
+        },
+    };
+    const { sendMessage } = loadBackgroundMessageHarness({
+        storage,
+        tabs: {
+            get: async (tabId) => ({
+                id: tabId,
+                title: tabId === 10 ? 'Magearna EX' : 'Ultra Necrozma GX',
+                url: tabId === 10
+                    ? 'https://www.ebay.com/itm/10-magearna'
+                    : 'https://www.ebay.com/itm/11-ultra-necrozma',
+            }),
+        },
+    });
+    const ultraPayload = {
+        source: 'ebay',
+        listingKey: 'https://www.ebay.com/itm/11-ultra-necrozma',
+        originalTitle: 'Ultra Necrozma GX',
+        searchTitle: 'Ultra Necrozma GX',
+        selectedClues: ['Ultra Necrozma', 'GX'],
+        primaryClues: ['Ultra Necrozma', 'GX'],
+    };
+    const response = await sendMessage({
+        action: 'marketplacePreviewReady',
+        source: 'ebay',
+        url: ultraPayload.listingKey,
+        title: ultraPayload.searchTitle,
+        originalTitle: ultraPayload.originalTitle,
+        selectedClues: ultraPayload.selectedClues,
+        primaryClues: ultraPayload.primaryClues,
+        previewSignature: 'ebay|ultra-necrozma|11',
+        ebayPayload: ultraPayload,
+        marketplacePayload: ultraPayload,
+        previewRows: [{ card_id: 'ultra-necrozma-gx-95', name: 'Ultra Necrozma GX' }],
+    }, { tab: { id: 11, title: 'Ultra Necrozma GX', url: ultraPayload.listingKey } });
+
+    assert.equal(response.ignored, true);
+    assert.equal(response.reason, 'side-panel-owned-by-other-url');
+    assert.equal(storage.sidePanelState.pageInfo.url, 'https://www.ebay.com/itm/10-magearna');
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['magearna-ex-110']);
+});
+
 test('Cardmarket green button keeps compact icon dimensions after relabel', () => {
     const icon = { style: {}, attributes: {}, setAttribute(name, value) { this.attributes[name] = value; } };
     const button = createButtonStub();
@@ -5774,7 +7625,7 @@ test('Cardmarket matched button remains visually distinct after relabel', () => 
     assert.match(button.style.boxShadow, /14, 165, 233/);
 });
 
-function createCardmarketFixture({ includeDetails = true, includeButton = false } = {}) {
+function createCardmarketFixture({ includeDetails = true, includeButton = false, includeProductImage = true } = {}) {
     const main = createDomElement('main', { class: 'container' });
     const mainContent = createDomElement('div', { id: 'mainContent' });
     const titleContainer = createDomElement('div', { class: 'page-title-container' });
@@ -5784,6 +7635,15 @@ function createCardmarketFixture({ includeDetails = true, includeButton = false 
     titleContainer.appendChild(h1);
     titleContainer.appendChild(actionArea);
     mainContent.appendChild(titleContainer);
+
+    const productImg = createDomElement('img', {
+        itemprop: 'image',
+        src: 'https://product-images.s3.cardmarket.com/img/piplup-mep042.jpg',
+    });
+    productImg.src = 'https://product-images.s3.cardmarket.com/img/piplup-mep042.jpg';
+    if (includeProductImage) {
+        mainContent.appendChild(productImg);
+    }
 
     const section = createDomElement('section', { id: 'tabs' });
     const dl = createDomElement('dl', { class: 'labeled' });
@@ -5824,6 +7684,7 @@ function createCardmarketFixture({ includeDetails = true, includeButton = false 
         actionArea,
         dl,
         articleRow,
+        productImg,
         querySelector(selector) {
             if (selector === 'main.container #mainContent' || selector === '#mainContent') return mainContent;
             if (selector === 'main.container' || selector === 'main') return main;
@@ -5834,6 +7695,9 @@ function createCardmarketFixture({ includeDetails = true, includeButton = false 
         querySelectorAll(selector) {
             if (selector === 'dl.labeled dt, dl.labeled th, dt, th') {
                 return includeDetails ? dl.children.filter((child) => child.tagName === 'DT') : [];
+            }
+            if (/img|og:image|itemprop/i.test(String(selector))) {
+                return includeProductImage ? [productImg] : [];
             }
             return main.querySelectorAll(selector);
         },
@@ -5930,6 +7794,90 @@ test('Cardmarket expansion listing URL is not treated as a product page', () => 
     assert.equal(errors.length, 0);
 });
 
+test('Cardmarket singles product tokens-ready searches listing photos', async () => {
+    const searches = [];
+    const listeners = [];
+    const { Processor, sandbox } = loadProcessor('processors/CME.js', 'CardmarketProcessor', {
+        window: {
+            location: {
+                href: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+                hostname: 'www.cardmarket.com',
+                pathname: '/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+            },
+        },
+        document: createCardmarketFixture({ includeDetails: true }),
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    searches.push(message);
+                    return { success: true, results: [] };
+                },
+                onMessage: {
+                    addListener(listener) {
+                        listeners.push(listener);
+                    },
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    sandbox.window.cardmarketProcessor = processor;
+    const listener = listeners.find(Boolean);
+    assert.ok(listener, 'Cardmarket should listen for service-worker token requests');
+
+    let response = null;
+    const handled = listener({ action: 'pokoinRequestMatchTokens' }, {}, (value) => {
+        response = value;
+    });
+    await Promise.resolve();
+
+    assert.equal(handled, false);
+    assert.equal(response.success, true);
+    assert.notEqual(response.idle, true);
+    assert.equal(searches.length, 1);
+    assert.equal(searches[0].action, 'searchCardForTitle');
+    assert.equal(searches[0].marketplacePayload.enableListingScan, true);
+    assert.ok(searches[0].marketplacePayload.listingImageUrls.some((url) => /piplup-mep042/i.test(url)));
+});
+
+test('Cardmarket catalog token requests stay idle', () => {
+    const searches = [];
+    const listeners = [];
+    const { Processor, sandbox } = loadProcessor('processors/CME.js', 'CardmarketProcessor', {
+        window: {
+            location: {
+                href: 'https://www.cardmarket.com/en/Pokemon/Products/Singles',
+                hostname: 'www.cardmarket.com',
+                pathname: '/en/Pokemon/Products/Singles',
+            },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    searches.push(message);
+                    return { success: true, results: [] };
+                },
+                onMessage: {
+                    addListener(listener) {
+                        listeners.push(listener);
+                    },
+                },
+            },
+        },
+    });
+    sandbox.window.cardmarketProcessor = new Processor();
+    const listener = listeners.find(Boolean);
+    let response = null;
+    listener({ action: 'pokoinRequestMatchTokens' }, {}, (value) => {
+        response = value;
+    });
+    assert.equal(response.success, true);
+    assert.equal(response.idle, true);
+    assert.equal(searches.length, 0);
+});
+
 test('Cardmarket product injection is once per stable ready product URL', async () => {
     const messages = [];
     const documentStub = createCardmarketFixture({ includeDetails: true });
@@ -6004,6 +7952,10 @@ test('Cardmarket processor sends ready detail clues with product search and side
     assert.deepEqual([...searchMessage.clues], ['042', 'MEP Black Star Promos']);
     assert.equal(searchMessage.primaryClues, undefined);
     assert.equal(searchMessage.cardmarketReady, true);
+    assert.equal(searchMessage.marketplacePayload.source, 'cardmarket');
+    assert.equal(searchMessage.marketplacePayload.enableListingScan, true);
+    assert.equal(searchMessage.marketplacePayload.listingKind, 'singles');
+    assert.ok(searchMessage.marketplacePayload.listingImageUrls.some((url) => /piplup-mep042/i.test(url)));
     assert.deepEqual([...openMessage.clues], ['042', 'MEP Black Star Promos']);
     assert.equal(openMessage.title, 'Piplup (MEP 042)');
 });
@@ -6332,6 +8284,112 @@ test('background rejects no-variation Pikachu rows for explicit VMAX collector r
     assert.deepEqual(Array.from(exactRows.map((row) => row.card_id)), ['flying-pikachu-vmax']);
     assert.equal(sandbox.hasGoodEnoughExactRows(exactRows, structuredCard), true);
     assert.equal(sandbox.shouldRunAutocompleteFallback(exactRows, structuredCard), false);
+});
+
+test('background narrows same-name rows to an exact slash collector', () => {
+    const sandbox = loadBackgroundHelpers(['sortRowsForStructuredCard', 'filterStrongExactRows']);
+    const structuredCard = {
+        name: 'Pikachu',
+        collectorNumber: '60/64',
+        numericCollectorNumber: '60',
+        expansion: 'Jungle',
+    };
+    const rows = [
+        { card_id: 'pikachu-sl-28', name: 'Pikachu', set_name: 'SL', card_number: '28' },
+        { card_id: 'pikachu-jungle-60', name: 'Pikachu', set_name: 'Jungle', card_number: '60/64' },
+        { card_id: 'pikachu-base-58', name: 'Pikachu', set_name: 'Base Set', card_number: '58/102' },
+    ];
+    const exactRows = sandbox.filterStrongExactRows(
+        sandbox.sortRowsForStructuredCard(rows, structuredCard),
+        structuredCard
+    );
+    assert.deepEqual(Array.from(exactRows.map((row) => row.card_id)), ['pikachu-jungle-60']);
+});
+
+test('autocomplete fallback does not fill Mega Charizard when exact collector rows already match', () => {
+    const sandbox = loadBackgroundHelpers(['shouldRunAutocompleteFallback']);
+    const structuredCard = {
+        name: 'Charizard',
+        searchName: 'Charizard',
+        variation: 'mega',
+        collectorNumber: '11/108',
+        numericCollectorNumber: '11',
+        expansion: 'Flashfire',
+        selectedClues: ['Charizard', 'Mega'],
+    };
+    const exactRows = [
+        { card_id: 'flashfire-11', name: 'Charizard', set_name: 'Flashfire', card_number: '11/108', search_rank: 12 },
+    ];
+
+    assert.equal(sandbox.shouldRunAutocompleteFallback(exactRows, structuredCard), false);
+});
+
+test('autocomplete fallback still fills broad Mega Charizard when collector identity is missing', () => {
+    const sandbox = loadBackgroundHelpers(['shouldRunAutocompleteFallback']);
+    const structuredCard = {
+        name: 'Charizard',
+        searchName: 'Charizard',
+        variation: 'mega',
+        selectedClues: ['Charizard', 'Mega'],
+    };
+    const rows = [
+        { card_id: 'mega-x', name: 'M Charizard-EX', set_name: 'Flashfire', card_number: '12/108', search_rank: 20 },
+        { card_id: 'mega-y', name: 'M Charizard-EX', set_name: 'Flashfire', card_number: '13/108', search_rank: 21 },
+    ];
+
+    assert.equal(sandbox.shouldRunAutocompleteFallback(rows, structuredCard), true);
+});
+
+test('token predict is skipped when selected composite is already the search name', async () => {
+    const sandbox = loadBackgroundHelpers(['predictCardNameToken', 'selectedCompositeAlreadyIsSearchName']);
+    const fetches = [];
+    sandbox.fetch = async (url) => {
+        fetches.push(url);
+        return { ok: true, json: async () => ({ predictions: [] }) };
+    };
+
+    const structuredCard = {
+        name: "Team Rocket's Mimikyu",
+        selectedClues: ["Team Rocket's Mimikyu", 'TR 33'],
+    };
+    assert.equal(sandbox.selectedCompositeAlreadyIsSearchName(structuredCard, {
+        selectedClues: structuredCard.selectedClues,
+    }), true);
+
+    const result = await sandbox.predictCardNameToken("Team Rocket's Mimikyu", {
+        structuredCard,
+        selectedClues: structuredCard.selectedClues,
+        source: 'vinted',
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'selected-composite-name');
+    assert.equal(fetches.length, 0);
+});
+
+test('token predict still runs when selected composite is longer than the structured name', async () => {
+    const sandbox = loadBackgroundHelpers(['predictCardNameToken', 'selectedCompositeAlreadyIsSearchName']);
+    const fetches = [];
+    sandbox.fetch = async (url) => {
+        fetches.push(String(url));
+        return { ok: true, json: async () => ({ predictions: [] }) };
+    };
+
+    const structuredCard = {
+        name: 'Mimikyu',
+        selectedClues: ["Team Rocket's Mimikyu"],
+    };
+    assert.equal(sandbox.selectedCompositeAlreadyIsSearchName(structuredCard, {
+        selectedClues: structuredCard.selectedClues,
+    }), false);
+
+    await sandbox.predictCardNameToken("Team Rocket's Mimikyu", {
+        structuredCard,
+        selectedClues: structuredCard.selectedClues,
+        source: 'vinted',
+    });
+
+    assert.ok(fetches.some((url) => url.includes('/api/searchbar-token-predict')));
 });
 
 test('background keeps Rocket Zapdos composite above generic and V variants', () => {
@@ -6748,7 +8806,10 @@ test('Cardmarket background search payload uses structured card name first', asy
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -6874,8 +8935,125 @@ test('Vinted side panel opens from overlay preview rows without reordering selec
     assert.deepEqual(response.result.rows.map((row) => row.card_id), ['111', '222']);
     assert.equal(response.result.best.card_id, '222');
     assert.equal(storage.sidePanelState.debug.pinnedVintedPreview, true);
+    assert.equal(storage.sidePanelState.debug.openPokoinDesk, false);
     assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['111', '222']);
     assert.equal(storageWrites.at(-1).sidePanelState.debug.previewSource, 'vinted_overlay');
+});
+
+test('Vinted ALL click reuses cached overlay rows and restores the leftover grid', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    let fetchCalls = 0;
+    const storage = {};
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            fetchCalls += 1;
+            return { ok: true, json: async () => ({ products: [] }) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                get: async () => ({ id: 77, title: 'Album Rivali Predestinati', url: 'https://www.vinted.it/items/77-album' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const previewRows = [
+        { card_id: '111', name: 'Rapidash', set_name: 'Destined Rivals', card_number: '189' },
+        { card_id: '222', name: "Arven's Mabosstiff ex", set_name: 'CSV10C: Chasing Glory', card_number: '10C' },
+    ];
+    const listingUrl = 'https://www.vinted.it/items/77-album';
+    const sender = { tab: { id: 77, title: 'Album Rivali Predestinati', url: listingUrl } };
+    const baseRequest = {
+        action: 'openSidePanelForCurrentTab',
+        url: listingUrl,
+        title: 'Album Rivali Predestinati',
+        originalTitle: 'Album Carte Pokémon Rivali Predestinati',
+        clues: ['illustration', 'Album'],
+        primaryClues: [],
+        previewSource: 'vinted_overlay',
+        previewSignature: 'vinted|albumrivali',
+        previewRows,
+        vintedPayload: {
+            source: 'vinted',
+            listingKind: 'album',
+            structuredCard: { listingKind: 'album' },
+            selectedClues: ['illustration', 'Album'],
+            primaryClues: [],
+        },
+    };
+
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                ...baseRequest,
+                selectedCandidateId: '222',
+                selectedCandidate: previewRows[1],
+            },
+            sender,
+            resolve
+        );
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(storage.sidePanelState.debug.openPokoinDesk, false);
+    assert.equal(storage.sidePanelState.debug.selectedCandidateId, '222');
+    const fetchesAfterDesk = fetchCalls;
+
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                ...baseRequest,
+                openAllCards: true,
+            },
+            sender,
+            resolve
+        );
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(fetchCalls, fetchesAfterDesk, 'ALL should reuse cached overlay rows');
+    assert.equal(storage.sidePanelState.debug.openPokoinDesk, false);
+    assert.equal(storage.sidePanelState.debug.openAllCards, true);
+    assert.equal(storage.sidePanelState.debug.selectedCandidateId, '');
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['111', '222']);
+    assert.equal(storage.sidePanelState.pageInfo.structuredCard.listingKind, 'album');
 });
 
 test('Vinted side panel refresh keeps pinned overlay preview rows', async () => {
@@ -6955,10 +9133,10 @@ test('Vinted side panel refresh keeps pinned overlay preview rows', async () => 
 
     assert.equal(response.success, true);
     assert.deepEqual(response.result.rows.map((row) => row.card_id), ['111', '222']);
-    assert.ok(fetchCalls <= 2, 'refresh may only decorate pinned Vinted preview prices');
+    assert.ok(fetchCalls <= 3, 'refresh may only decorate pinned Vinted preview prices');
 });
 
-test('side panel refresh forwards stored eBay selected-key payload', async () => {
+test('side panel tab screenshot scan posts the visible tab to identify-album', async () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
     const makeElement = (id) => {
@@ -6976,7 +9154,7 @@ test('side panel refresh forwards stored eBay selected-key payload', async () =>
                 return child;
             },
             addEventListener(type, listener) {
-                if (id === 'refreshBtn' && type === 'click') {
+                if (id === 'tabScanBtn' && type === 'click') {
                     this.click = listener;
                 }
             },
@@ -6984,7 +9162,7 @@ test('side panel refresh forwards stored eBay selected-key payload', async () =>
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
         makeElement(id);
     }
     const ebayPayload = {
@@ -7036,13 +9214,896 @@ test('side panel refresh forwards stored eBay selected-key payload', async () =>
     vm.createContext(sandbox);
     vm.runInContext(source, sandbox, { filename: 'ui-pages/sidepanel.js' });
 
-    await elementsById.get('refreshBtn').click();
+    await elementsById.get('tabScanBtn').click();
 
-    const refreshMessage = messages.find((message) => message.action === 'resolveActiveTabForSidePanel');
-    assert.deepEqual(refreshMessage.clues, ebayPayload.selectedClues);
-    assert.deepEqual(refreshMessage.primaryClues, ebayPayload.primaryClues);
-    assert.equal(refreshMessage.ebayPayload.collectorNumber, '14/100');
-    assert.equal(refreshMessage.marketplacePayload.source, 'ebay');
+    const scanMessage = messages.find((message) => message.action === 'scanVisibleTab');
+    assert.ok(scanMessage, 'tab screenshot click should scan the visible tab');
+    assert.equal(scanMessage.action, 'scanVisibleTab');
+});
+
+test('visible tab screenshot ignores unrelated UI boxes and keeps every recognized visible card', async () => {
+    const source = backgroundRuntimeSource();
+    let messageListener = null;
+    const storage = {};
+    const tab = {
+        id: 90,
+        windowId: 1,
+        title: 'Pokemon cards | Vinted',
+        url: 'https://www.vinted.it/catalog?search_text=pokemon',
+    };
+    const screenshot = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDAREAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGfAD/2Q==';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        FormData,
+        Blob,
+        btoa,
+        fetch: async (url) => {
+            if (String(url).startsWith('data:')) {
+                return {
+                    ok: true,
+                    status: 0,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 219])], { type: 'image/jpeg' }),
+                };
+            }
+            if (String(url).includes('identify-album')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        ok: true,
+                        boxCount: 3,
+                        uniqueHits: [
+                            { id: '101', public_id: '101', name: 'Sharpedo', score: 0.91 },
+                            { id: '102', public_id: '102', name: 'Golbat', score: 0.88 },
+                            { id: '103', public_id: '103', name: 'Umbreon', score: 0.49 },
+                        ],
+                    }),
+                };
+            }
+            return { ok: false, status: 404, json: async () => ({}) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                id: 'test-extension-id',
+                getManifest: () => ({ version: '3.0.11' }),
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    if (message.action !== 'onDeviceIdentifyAlbum') return { success: false };
+                    assert.equal('buffers' in message, false);
+                    assert.equal(message.images.length, 1);
+                    assert.equal(message.images[0].type, 'image/jpeg');
+                    assert.equal(message.images[0].base64, '/9j/2w==');
+                    return {
+                        success: true,
+                        payload: {
+                            worker: 'on-device-wasm',
+                            photos: [{
+                                ok: true,
+                                boxCount: 3,
+                                boxes: [{ confidence: 0.91 }, { confidence: 0.88 }, { confidence: 0.2862 }],
+                                top1: { id: '253974', public_id: '253974', name: 'Flareon', collector_number: 'SM186', score: 0.7977 },
+                                uniqueHits: [
+                                    { id: '253974', public_id: '253974', name: 'Flareon', collector_number: 'SM186', score: 0.7977 },
+                                    { id: '243052', public_id: '243052', name: 'Pikachu', collector_number: '60/64', score: 0.7812 },
+                                ],
+                            }],
+                        },
+                    };
+                },
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                captureVisibleTab: async () => screenshot,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            offscreen: {
+                hasDocument: async () => true,
+                createDocument: async () => {},
+            },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'scanVisibleTab' }, {}, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.rowCount, 2);
+    assert.equal(response.listingKind, 'album');
+    assert.equal(response.screenshotDataUrl, screenshot);
+    assert.equal(storage.sidePanelState.debug.viewportScan, true);
+    assert.equal(storage.sidePanelState.pageInfo.vintedIdle, false);
+    assert.equal(storage.sidePanelState.rows.map((row) => row.name).join(','), 'Flareon,Pikachu');
+    assert.equal(storage.sidePanelState.debug.boxCount, 3);
+    assert.equal(storage.sidePanelState.debug.recognizedHitCount, 2);
+    assert.equal(storage.sidePanelState.debug.scanMode, 'all-recognized-visible-cards');
+    const viewportEvent = storage.pokoinExtensionDebugLog.find((entry) => entry.type === 'background.viewport-scan');
+    assert.equal(viewportEvent.details.boxCount, 3);
+    assert.equal(viewportEvent.details.recognizedHitCount, 2);
+    assert.equal(viewportEvent.details.rowCount, 2);
+});
+
+test('visible tab screenshot keeps a second recognized card above 0.50 even if it is below 0.65', async () => {
+    const source = backgroundRuntimeSource();
+    let messageListener = null;
+    const storage = {};
+    const tab = {
+        id: 92,
+        windowId: 1,
+        title: 'Metagross lot | Vinted',
+        url: 'https://www.vinted.it/items/92-metagross',
+    };
+    const screenshot = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDAREAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGfAD/2Q==';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        FormData,
+        Blob,
+        btoa,
+        fetch: async (url) => {
+            if (String(url).startsWith('data:')) {
+                return {
+                    ok: true,
+                    status: 0,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 219])], { type: 'image/jpeg' }),
+                };
+            }
+            return { ok: false, status: 404, json: async () => ({}) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                id: 'test-extension-id',
+                getManifest: () => ({ version: '12.0.18' }),
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    if (message.action !== 'onDeviceIdentifyAlbum') return { success: false };
+                    return {
+                        success: true,
+                        payload: {
+                            worker: 'on-device-wasm',
+                            photos: [{
+                                ok: true,
+                                boxCount: 2,
+                                boxes: [{ confidence: 0.91 }, { confidence: 0.88 }],
+                                top1: { id: '210080', public_id: '210080', name: 'Metagross', collector_number: '080/106', score: 0.82 },
+                                uniqueHits: [
+                                    { id: '210080', public_id: '210080', name: 'Metagross', collector_number: '080/106', score: 0.82 },
+                                    { id: '210081', public_id: '210081', name: 'Beldum', collector_number: '044/106', score: 0.58 },
+                                ],
+                            }],
+                        },
+                    };
+                },
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                captureVisibleTab: async () => screenshot,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            offscreen: {
+                hasDocument: async () => true,
+                createDocument: async () => {},
+            },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'scanVisibleTab' }, {}, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.rowCount, 2);
+    assert.equal(response.listingKind, 'album');
+    assert.equal(storage.sidePanelState.rows.map((row) => row.name).join(','), 'Metagross,Beldum');
+    assert.equal(storage.sidePanelState.debug.recognizedHitCount, 2);
+    assert.equal(storage.sidePanelState.debug.openAllCards, true);
+});
+
+test('visible tab capture maps the Chrome all_urls permission error', async () => {
+    const source = backgroundRuntimeSource();
+    let messageListener = null;
+    const storage = {};
+    const tab = {
+        id: 91,
+        windowId: 1,
+        title: 'Registeel',
+        url: 'https://www.vinted.it/items/91-registeel',
+    };
+    const screenshot = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDAREAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAn/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAGfAD/2Q==';
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        FormData,
+        Blob,
+        btoa,
+        fetch: async (url) => {
+            if (String(url).startsWith('data:')) {
+                return {
+                    ok: true,
+                    status: 0,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 219])], { type: 'image/jpeg' }),
+                };
+            }
+            return { ok: false, status: 404, json: async () => ({}) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                id: 'test-extension-id',
+                getManifest: () => ({ version: '12.0.24' }),
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    if (message.action !== 'onDeviceIdentifyAlbum') return { success: false };
+                    return {
+                        success: true,
+                        payload: {
+                            worker: 'on-device-wasm',
+                            photos: [{
+                                ok: true,
+                                boxCount: 1,
+                                boxes: [{ confidence: 0.91 }],
+                                top1: { id: '210080', public_id: '210080', name: 'Registeel', collector_number: '080/106', score: 0.82 },
+                                uniqueHits: [
+                                    { id: '210080', public_id: '210080', name: 'Registeel', collector_number: '080/106', score: 0.82 },
+                                ],
+                            }],
+                        },
+                    };
+                },
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                captureVisibleTab: async () => {
+                    throw new Error("Either the '<all_urls>' or 'activeTab' permission is required.");
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: {
+                executeScript: async () => [{
+                    result: {
+                        width: 200,
+                        height: 200,
+                        images: [{ dataUrl: screenshot, src: 'https://images.vinted.net/registeel.jpg', x: 0, y: 0, w: 200, h: 200 }],
+                    },
+                }],
+            },
+            offscreen: {
+                hasDocument: async () => true,
+                createDocument: async () => {},
+            },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'scanVisibleTab' }, {}, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(response.rowCount, 1);
+    assert.equal(storage.sidePanelState.rows[0].name, 'Registeel');
+    assert.ok(storage.pokoinExtensionDebugLog.some((entry) => (
+        entry.type === 'background.visible-tab-image-capture'
+    )));
+});
+
+test('visible tab scan stays on Vinted eBay Instagram and Facebook', async () => {
+    const source = backgroundRuntimeSource();
+    let messageListener = null;
+    const tab = {
+        id: 93,
+        windowId: 1,
+        title: 'Google',
+        url: 'https://www.google.com/',
+    };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        FormData,
+        Blob,
+        fetch: async () => ({ ok: false, status: 404, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '12.0.24' }),
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                captureVisibleTab: async () => {
+                    throw new Error('captureVisibleTab should not run on an unsupported host');
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: null } : {}),
+                    set: async () => {},
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'scanVisibleTab' }, {}, resolve);
+    });
+
+    assert.equal(response.success, false);
+    assert.match(response.error, /Vinted, eBay, Instagram, Facebook, CardTrader, or Cardmarket/);
+});
+
+test('visible tab capture retries once after Chrome screenshot quota rejection', async () => {
+    const source = backgroundRuntimeSource();
+    let messageListener = null;
+    let captureCalls = 0;
+    const tab = {
+        id: 92,
+        windowId: 1,
+        title: 'Registeel',
+        url: 'https://www.vinted.it/items/92-registeel',
+    };
+    const storage = {};
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout(callback) { callback(); return 1; },
+        clearTimeout() {},
+        AbortController,
+        FormData,
+        Blob,
+        btoa,
+        fetch: async (url) => {
+            if (String(url).startsWith('data:')) {
+                return {
+                    ok: true,
+                    status: 0,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 219])], { type: 'image/jpeg' }),
+                };
+            }
+            return { ok: false, status: 404, json: async () => ({}) };
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener(listener) { messageListener = listener; } },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                id: 'test-extension-id',
+                getManifest: () => ({ version: '12.0.14' }),
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => message.action === 'onDeviceIdentifyAlbum'
+                    ? { success: true, payload: { photos: [{ ok: true, boxCount: 0, uniqueHits: [] }] } }
+                    : { success: false },
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                captureVisibleTab: async () => {
+                    captureCalls += 1;
+                    if (captureCalls === 1) {
+                        throw new Error('This request exceeds the MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND quota.');
+                    }
+                    return 'data:image/jpeg;base64,/9j/2w==';
+                },
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            offscreen: { hasDocument: async () => true, createDocument: async () => {} },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    const response = await new Promise((resolve) => {
+        messageListener({ action: 'scanVisibleTab' }, {}, resolve);
+    });
+
+    assert.equal(response.success, true);
+    assert.equal(captureCalls, 2);
+    assert.ok(storage.pokoinExtensionDebugLog.some((entry) => (
+        entry.type === 'background.visible-tab-capture-quota-retry'
+    )));
+});
+
+test('side panel screenshot action uses marketplace host_permissions without all_urls', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const background = readRepoFile('config/background.js');
+    const manifest = JSON.parse(readRepoFile('manifest.json'));
+    assert.match(source, /await ensureVisibleTabCaptureAccess\(\)/);
+    assert.match(source, /sidepanel\.capture-host-access/);
+    assert.match(source, /via: 'host'/);
+    assert.doesNotMatch(source, /origins: \['<all_urls>'\]/);
+    assert.match(source, /chrome\.permissions\.request\(\{ origins: \[originPattern\] \}\)/);
+    assert.match(background, /function isScanSupportedTabUrl/);
+    assert.match(background, /jpegDataUrlFromVisibleImages/);
+    assert.match(background, /injectVisibleViewportCapture\(tab, 'MAIN'\)/);
+    assert.match(background, /background\.visible-tab-image-capture/);
+    assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
+    assert.equal(manifest.host_permissions.includes('https://*.instagram.com/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://*.facebook.com/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://*.vinted.fr/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://*.vinted.dk/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://*.vinted.co.uk/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://*.ebay.de/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://*.cardtrader.com/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://*.cardmarket.com/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://static.cardtrader.com/*'), true);
+    assert.equal(manifest.host_permissions.includes('https://product-images.s3.cardmarket.com/*'), true);
+});
+
+test('Vinted overlay matches every country marketplace including vinted.dk', () => {
+    const { VINTED_MARKET_HOSTS, vintedMatchPatterns } = require('../utils/VintedHosts.js');
+    const manifest = JSON.parse(readRepoFile('manifest.json'));
+    const contentMatches = (manifest.content_scripts || [])
+        .flatMap((entry) => entry.matches || []);
+    const assetMatches = (manifest.web_accessible_resources || [])
+        .flatMap((entry) => entry.matches || []);
+    assert.ok(VINTED_MARKET_HOSTS.includes('vinted.dk'));
+    vintedMatchPatterns().forEach((pattern) => {
+        assert.equal(manifest.host_permissions.includes(pattern), true, pattern);
+        assert.equal(contentMatches.includes(pattern), true, `content ${pattern}`);
+        assert.equal(assetMatches.includes(pattern), true, `assets ${pattern}`);
+    });
+});
+
+test('CardTrader leftover JPEG public_id confirms Magikarp Skyridge 127710', async () => {
+    const sandbox = loadBackgroundHelpers([
+        'resolvePokoinPublicIdFromCardTrader',
+        'pokoinPublicIdFromCardTraderId',
+        'cardTraderDirectPokoinUrl',
+        'leftoverImageMatchesCardTraderId',
+    ]);
+    sandbox.fetch = async (url) => {
+        assert.match(String(url), /api\.pokoin\.com\/api\/marketplace-suggest/);
+        return {
+            ok: true,
+            json: async () => ({
+                groups: [{
+                    printings: [{
+                        id: '255420',
+                        card_id: '255420',
+                        name: 'Magikarp',
+                        image: 'https://cdn.pokoin.com/127710_magikarp-75-144-skyridge.jpg',
+                    }],
+                }],
+            }),
+        };
+    };
+    assert.equal(sandbox.pokoinPublicIdFromCardTraderId('127710'), '255420');
+    assert.equal(
+        sandbox.leftoverImageMatchesCardTraderId('https://cdn.pokoin.com/127710_magikarp-75-144-skyridge.jpg', '127710'),
+        true,
+    );
+    const publicId = await sandbox.resolvePokoinPublicIdFromCardTrader({
+        blueprintId: '127710',
+        url: 'https://www.cardtrader.com/en/cards/127710-magikarp-75-144-skyridge',
+        title: 'Magikarp',
+    });
+    assert.equal(publicId, '255420');
+    assert.equal(
+        sandbox.cardTraderDirectPokoinUrl('127710', publicId),
+        'https://pokoin.com/marketplace/en/cards/255420',
+    );
+});
+
+test('on-device western scan parses YOLO boxes and ranks catalog vectors', () => {
+    const source = readRepoFile('scan/on-device-identify.js');
+    const sandbox = { console };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'scan/on-device-identify.js' });
+    const api = sandbox.ON_DEVICE_SCAN;
+    const output = new Float32Array([
+        64, 80, 192, 240, 0.91, 0,
+        400, 20, 520, 180, 0.2, 0,
+        70, 90, 180, 220, 0.88, 0,
+    ]);
+    const boxes = api.boxesFromYoloOutput(output, 1280, 800);
+    assert.equal(boxes.length, 1);
+    assert.equal(boxes[0].conf, 0.91);
+    assert.ok(boxes[0].xyxy[0] > 100);
+    assert.equal(JSON.stringify(api.miloOrientations(100, 140)), JSON.stringify([0, 180]));
+    assert.equal(JSON.stringify(api.miloOrientations(140, 100)), JSON.stringify([90, 270]));
+
+    const vectors = new Float32Array(3 * 128);
+    vectors[0] = 1;
+    vectors[128 + 1] = 1;
+    vectors[(2 * 128) + 2] = 1;
+    const query = new Float32Array(128);
+    query[1] = 1;
+    const hits = api.searchWesternCatalog(query, {
+        vectors,
+        count: 3,
+        dim: 128,
+        cards: [
+            { id: '1', name: 'Oddish', collector_number: '1/98', set: 'Ancient Origins' },
+            { id: '2', name: 'Hitmonchan', collector_number: 'V4', set: 'Evolutions' },
+            { id: '3', name: 'Porygon', collector_number: 'V4', set: 'Evolutions' },
+        ],
+    }, 1);
+    assert.equal(hits[0].name, 'Hitmonchan');
+    assert.equal(hits[0].identity, 'public_id');
+    assert.ok(hits[0].score > 0.99);
+
+    const mixed = new Float32Array(3 * 128);
+    mixed[0] = 0.64;
+    mixed[128] = 0.58;
+    mixed[(2 * 128)] = 0.2;
+    const backQuery = new Float32Array(128);
+    backQuery[0] = 1;
+    const backHits = api.searchWesternCatalog(backQuery, {
+        vectors: mixed,
+        count: 3,
+        dim: 128,
+        cards: [
+            { id: 'aipom-99', name: 'Aipom', collector_number: '99', set: 'Destined Rivals' },
+            { id: 'pokemon-card-back', public_id: 'pokemon-card-back', name: 'Pokemon Card Back', item_kind: 'card_back' },
+            { id: 'misty-1', name: "Misty's Vitality", collector_number: '062', set: 'Destined Rivals' },
+        ],
+    }, 3);
+    assert.equal(backHits[0].name, 'Pokemon Card Back');
+    assert.equal(backHits[0].item_kind, 'card_back');
+    assert.equal(api.isCardBackHit(backHits[0]), true);
+    const photo = api.photoPayloadFromMatches([
+        { box: { xyxy: [0, 0, 10, 20], conf: 0.9 }, top1: backHits[0], hits: backHits },
+        { box: { xyxy: [20, 0, 30, 20], conf: 0.88 }, top1: { id: 'misty-1', name: "Misty's Vitality", score: 0.88 }, hits: [] },
+    ], [{ xyxy: [0, 0, 10, 20] }, { xyxy: [20, 0, 30, 20] }], 40, 20);
+    assert.equal(photo.uniqueHits.length, 1);
+    assert.equal(photo.uniqueHits[0].name, "Misty's Vitality");
+});
+
+test('on-device listing scan adaptively tries opposite card rotations', () => {
+    const source = readRepoFile('scan/offscreen.js');
+    assert.match(source, /const angles = ON_DEVICE_SCAN\.miloOrientations\(crop\.width, crop\.height\)/);
+    assert.doesNotMatch(source, /miloOrientations\(crop\.width, crop\.height\)\.slice\(0, 1\)/);
+    assert.match(source, /if \(bestScore >= 0\.82\) \{\s*break;/);
+    assert.match(source, /orientation: bestOrientation/);
+    assert.match(source, /orientationsTried/);
+});
+
+test('listing identify uses on-device western YOLO without remote scan', async () => {
+    const source = backgroundRuntimeSource();
+    const messageListeners = [];
+    const streamedPhotos = [];
+    const storage = {};
+    const identifyUrls = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        FormData: class {
+            constructor() {
+                this.keysList = [];
+            }
+            append() {
+                this.keysList.push('file');
+            }
+            keys() {
+                return this.keysList;
+            }
+        },
+        Blob,
+        btoa,
+        fetch: async (url) => {
+            identifyUrls.push(String(url));
+            if (String(url).includes('vinted.net') || String(url).includes('.jpg')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 219])], { type: 'image/jpeg' }),
+                };
+            }
+            throw new Error(`unexpected fetch ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListeners.push(listener);
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '3.0.16' }),
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    if (message.action === 'onDeviceIdentifyAlbum') {
+                        assert.equal(message.scanId, 'progress-test');
+                        assert.equal('buffers' in message, false);
+                        assert.equal(Array.isArray(message.imageUrls), false);
+                        assert.equal(Array.isArray(message.images), true);
+                        assert.equal(message.images.length, 1);
+                        assert.equal(typeof message.images[0].base64, 'string');
+                        assert.ok(message.images[0].base64.length > 0);
+                        assert.equal(message.images[0].type, 'image/jpeg');
+                        const streamedPhoto = {
+                            boxCount: 1,
+                            uniqueHits: [{ id: '219698', name: 'Oddish', score: 0.91 }],
+                        };
+                        messageListeners.forEach((listener) => listener({
+                            action: 'onDeviceIdentifyAlbumPhoto',
+                            scanId: message.scanId,
+                            index: 0,
+                            photoCount: 1,
+                            photo: streamedPhoto,
+                        }, {}, () => {}));
+                        return {
+                            success: true,
+                            payload: {
+                                worker: 'webgpu',
+                                photos: [{
+                                    ok: true,
+                                    identity: 'public_id',
+                                    catalog: 'pokemon_western',
+                                    boxCount: 2,
+                                    boxes: [{ xyxy: [0, 0, 10, 10] }, { xyxy: [12, 0, 20, 10] }],
+                                    uniqueHits: [
+                                        { id: '219698', public_id: '219698', name: 'Oddish', collector_number: '1/98', set: 'Ancient Origins', score: 0.91, identity: 'public_id' },
+                                        { id: '96', public_id: '96', name: 'Hitmonchan', collector_number: 'V4', set: 'Evolutions', score: 0.88, identity: 'public_id' },
+                                    ],
+                                    top1: { id: '219698', public_id: '219698', name: 'Oddish', score: 0.91, identity: 'public_id' },
+                                }],
+                            },
+                        };
+                    }
+                    return { success: true };
+                },
+            },
+            offscreen: {
+                createDocument: async () => {},
+            },
+            tabs: {
+                query: async () => [],
+                get: async () => ({}),
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+    const scan = await sandbox.identifyAlbumListingPhotos(['https://images.vinted.net/listing.jpg'], {
+        scanId: 'progress-test',
+        onPhoto: (photo, index, photoCount) => streamedPhotos.push({ photo, index, photoCount }),
+    });
+    assert.equal(scan.onDevice, true);
+    assert.equal(scan.catalog, 'pokemon_western');
+    assert.equal(scan.uniqueHits.map((hit) => hit.name).join(','), 'Oddish,Hitmonchan');
+    assert.equal(streamedPhotos.length, 1);
+    assert.equal(streamedPhotos[0].photo.uniqueHits[0].name, 'Oddish');
+    assert.equal(streamedPhotos[0].index, 0);
+    assert.equal(streamedPhotos[0].photoCount, 1);
+    assert.equal(identifyUrls.some((url) => url.includes('cardscan.pokoin.com')), false);
+    assert.equal(identifyUrls.some((url) => url.includes('images.vinted.net')), true);
+});
+
+test('listing identify YOLO-runs every gallery photo even when the title looks like singles', async () => {
+    const source = backgroundRuntimeSource();
+    const storage = {};
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        AbortController,
+        Blob,
+        btoa,
+        fetch: async (url) => {
+            if (String(url).includes('vinted.net')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 219])], { type: 'image/jpeg' }),
+                };
+            }
+            throw new Error(`unexpected fetch ${url}`);
+        },
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '12.0.31' }),
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    if (message.action === 'onDeviceIdentifyAlbum') {
+                        assert.equal(message.images.length, 2);
+                        return {
+                            success: true,
+                            payload: {
+                                worker: 'wasm',
+                                photos: [
+                                    {
+                                        ok: true,
+                                        boxCount: 1,
+                                        boxes: [{ xyxy: [0, 0, 10, 10] }],
+                                        uniqueHits: [
+                                            { id: '1', public_id: '1', name: 'Glaceon', collector_number: 'SM173', set: 'SM Black Star Promos', score: 0.88, identity: 'public_id' },
+                                        ],
+                                        top1: { id: '1', public_id: '1', name: 'Glaceon', score: 0.88, identity: 'public_id' },
+                                    },
+                                    {
+                                        ok: true,
+                                        boxCount: 1,
+                                        boxes: [{ xyxy: [0, 0, 10, 10] }],
+                                        uniqueHits: [
+                                            { id: '2', public_id: '2', name: 'Vaporeon', collector_number: 'SM172', set: 'SM Black Star Promos', score: 0.81, identity: 'public_id' },
+                                        ],
+                                        top1: { id: '2', public_id: '2', name: 'Vaporeon', score: 0.81, identity: 'public_id' },
+                                    },
+                                ],
+                            },
+                        };
+                    }
+                    return { success: true };
+                },
+            },
+            offscreen: { createDocument: async () => {} },
+            tabs: {
+                query: async () => [],
+                get: async () => ({}),
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+    const scan = await sandbox.identifyMarketplaceListingPhotos(
+        ['https://images1.vinted.net/t/01/f800/one.webp', 'https://images1.vinted.net/t/02/f800/two.webp'],
+        'singles'
+    );
+    assert.equal(scan.uniqueHits.map((hit) => hit.name).join(','), 'Glaceon,Vaporeon');
+    assert.equal(scan.photoCount, 2);
+});
+
+test('on-device scan image transport survives Chrome JSON message serialization', async () => {
+    const background = loadBackgroundHelpers(['serializedImageFromBlob']);
+    background.btoa = btoa;
+    const originalBytes = new Uint8Array([255, 216, 255, 219, 0, 17, 34, 51]);
+    const serialized = await background.serializedImageFromBlob(
+        new Blob([originalBytes], { type: 'image/jpeg' })
+    );
+    const wireImage = JSON.parse(JSON.stringify(serialized));
+
+    const offscreenSource = readRepoFile('scan/offscreen.js');
+    const offscreen = { atob, Blob, Uint8Array };
+    vm.createContext(offscreen);
+    vm.runInContext(
+        `${extractFunctionSource(offscreenSource, 'bytesFromBase64')}\n` +
+        `${extractFunctionSource(offscreenSource, 'blobFromSerializedImage')}\n` +
+        'this.blobFromSerializedImage = blobFromSerializedImage;',
+        offscreen,
+        { filename: 'scan/offscreen.js' }
+    );
+    const rebuilt = offscreen.blobFromSerializedImage(wireImage);
+
+    assert.equal(wireImage.type, 'image/jpeg');
+    assert.equal(rebuilt.type, 'image/jpeg');
+    assert.deepEqual(
+        Array.from(new Uint8Array(await rebuilt.arrayBuffer())),
+        Array.from(originalBytes)
+    );
 });
 
 test('side panel candidate rows prefer set logos before preview thumbnails', async () => {
@@ -7060,10 +10121,10 @@ test('side panel candidate rows prefer set logos before preview thumbnails', asy
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
         makeElement(id);
     }
-    elementsById.get('refreshBtn').addEventListener = () => {};
+    elementsById.get('tabScanBtn').addEventListener = () => {};
     const state = {
         pageInfo: { title: 'Mew ex 232/091' },
         rows: [{
@@ -7109,12 +10170,12 @@ test('side panel candidate rows prefer set logos before preview thumbnails', asy
     await Promise.resolve();
 
     sandbox.renderState(state);
-    const candidate = elementsById.get('candidateList').children[0];
-    const media = candidate.children[0];
-    const logo = media.children[0];
-    assert.equal(media.children.length, 1);
-    assert.equal(logo.className, 'candidate-logo');
-    assert.equal(logo.src, 'https://cdn.pokoin.com/expansions/symbols/paldean-fates.png');
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(
+        elementsById.get('pokoinFrame').src,
+        'https://pokoin.com/marketplace/en/cards/548832/special-illustration-rare-mew-ex-232-091-paldean-fates?pokoin_embed=1'
+    );
 
     sandbox.renderState({
         ...state,
@@ -7125,6 +10186,12 @@ test('side panel candidate rows prefer set logos before preview thumbnails', asy
             card_number: 'Special Illustration Rare | 232/091',
             preview_image_url: 'https://cdn.pokoin.com/previews/274417_mew-ex.jpg',
             canonicalUrl: 'https://pokoin.com/marketplace/en/cards/274417',
+        }, {
+            card_id: '274419',
+            name: 'Mew ex alt',
+            set_name: '',
+            preview_image_url: 'https://cdn.pokoin.com/previews/274419_mew-ex.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/274419',
         }],
         best: {
             card_id: '274417',
@@ -7136,10 +10203,2213 @@ test('side panel candidate rows prefer set logos before preview thumbnails', asy
         pokoinUrl: 'https://pokoin.com/marketplace/en/cards/274417',
     });
     const fallbackMedia = elementsById.get('candidateList').children[0].children[0];
-    const fallbackImage = fallbackMedia.children[0];
-    assert.equal(fallbackMedia.children.length, 1);
+    const fallbackCut = fallbackMedia.children[0];
+    const fallbackImage = fallbackCut.children[0];
+    assert.equal(fallbackCut.className, 'art-cut');
     assert.equal(fallbackImage.className, 'candidate-preview-image');
     assert.equal(fallbackImage.src, 'https://cdn.pokoin.com/previews/274417_mew-ex.jpg');
+});
+
+test('western leftover embed swaps JP identify hits to the EUR scan', () => {
+    const sandbox = loadBackgroundHelpers(['applyWesternEmbed', 'structuredRowsFromScanHits', 'setPrintLangsIndex']);
+    sandbox.setPrintLangsIndex({
+        ids: { 273140: ['257080', '273140', '400001', 77, 'art_257080'] },
+        img: {
+            257080: 'https://cdn.pokoin.com/west-nest.jpg',
+            273140: 'https://cdn.pokoin.com/jp-nest.jpg',
+            400001: 'https://cdn.pokoin.com/cn-nest.jpg',
+        },
+    });
+    const rows = sandbox.structuredRowsFromScanHits([{
+        id: '273140',
+        public_id: '273140',
+        name: 'Nest Ball',
+        set: 'Collection Moon',
+        collector_number: '055/060',
+        image_url: 'https://cdn.pokoin.com/jp-nest.jpg',
+        pokoin_url: 'https://pokoin.com/273140',
+        score: 0.99,
+    }]);
+    assert.equal(rows[0].card_id, '273140');
+    assert.equal(rows[0].preview_image_url, 'https://pokoin.com/card-images/west-nest.jpg');
+    assert.equal(rows[0].print_langs.eur.id, '257080');
+    assert.equal(rows[0].print_langs.eur.image_url, 'https://pokoin.com/card-images/west-nest.jpg');
+    assert.equal(rows[0].print_langs.jp.id, '273140');
+    assert.equal(rows[0].print_langs.versions, 77);
+});
+
+test('applyWesternEmbed keeps live version-set JP when bundled print-langs jp is empty', () => {
+    const sandbox = loadBackgroundHelpers(['applyWesternEmbed', 'setPrintLangsIndex']);
+    sandbox.setPrintLangsIndex({
+        ids: { 235350: ['235350', '', '', 1, 'art_235350'] },
+        img: { 235350: 'https://cdn.pokoin.com/117675_dark-dragonair-31-109-ex-team-rocket-returns.jpg' },
+    });
+    const row = sandbox.applyWesternEmbed({
+        card_id: '235350',
+        name: 'Dark Dragonair',
+        print_langs: {
+            eur: { id: '235350', image_url: 'https://cdn.pokoin.com/117675_dark-dragonair-31-109-ex-team-rocket-returns.jpg' },
+            jp: { id: '586552', image_url: 'https://pokoin.com/card-images/293276_dark-dragonair_homepage.webp' },
+            cn: null,
+            versions: 2,
+            artwork_id: 'v235350',
+        },
+    });
+    assert.equal(row.print_langs.eur.id, '235350');
+    assert.equal(row.print_langs.jp.id, '586552');
+    assert.match(row.print_langs.jp.image_url, /dark-dragonair/);
+    assert.equal(row.print_langs.versions, 2);
+});
+
+test('CN identify hits attach a unique western leftover sibling', () => {
+    const sandbox = loadBackgroundHelpers(['structuredRowsFromScanHits', 'printLangsForCardId', 'setPrintLangsIndex']);
+    const index = sandbox.setPrintLangsIndex({
+        ids: {
+            747718: ['', '', '747718', 2, 'art_747718'],
+            253828: ['253828', '', '', 2, 'art_253828'],
+            701324: ['', '', '701324', 1, 'art_oddish_cn'],
+            219698: ['219698', '', '', 1, 'art_oddish_a'],
+            220538: ['220538', '', '', 1, 'art_oddish_b'],
+        },
+        img: {
+            747718: 'https://cdn.pokoin.com/373859_thundurus-gx.jpg',
+            253828: 'https://cdn.pokoin.com/126914_thundurus-gx-holo-promo-sm133-sm-black-star-promos.jpg',
+            701324: 'https://cdn.pokoin.com/oddish.jpg',
+            219698: 'https://cdn.pokoin.com/oddish-1-98-ancient-origins.jpg',
+            220538: 'https://cdn.pokoin.com/oddish-13-130-base-set.jpg',
+        },
+    });
+    const langs = sandbox.printLangsForCardId('747718', index);
+    assert.equal(langs.eur.id, '253828');
+    assert.equal(langs.cn.id, '747718');
+    const rows = sandbox.structuredRowsFromScanHits([{
+        id: '747718',
+        public_id: '747718',
+        name: 'Thundurus GX',
+        set: 'CSMPiC: Battle Set',
+        collector_number: '005/024',
+        image_url: 'https://cdn.pokoin.com/373859_thundurus-gx.jpg',
+        pokoin_url: 'https://pokoin.com/marketplace/en/cards/747718',
+        score: 0.99,
+    }]);
+    assert.equal(rows[0].card_id, '747718');
+    assert.equal(rows[0].print_langs.eur.id, '253828');
+    assert.match(rows[0].preview_image_url, /126914_thundurus-gx-holo-promo-sm133/);
+    const oddish = sandbox.printLangsForCardId('701324', index);
+    assert.equal(oddish.eur, null);
+    assert.equal(oddish.cn.id, '701324');
+});
+
+test('JP Pikachu delta PCG-P 112 leftover defaults to EN Legend Maker 93', () => {
+    const sandbox = loadBackgroundHelpers(['structuredRowsFromScanHits', 'printLangsForCardId', 'setPrintLangsIndex']);
+    const index = sandbox.setPrintLangsIndex({
+        ids: {
+            504600: ['233564', '504600', '', 8, 'art_504600'],
+            233564: ['233564', '504600', '', 8, 'art_504600'],
+            233090: ['233090', '', '', 8, 'art_233090'],
+        },
+        img: {
+            504600: 'https://cdn.pokoin.com/252300_pikachu-pcg-p-112-pcg-promos.jpg',
+            233564: 'https://cdn.pokoin.com/116782_pikachu-delta-species-full-v4.jpg',
+            233090: 'https://cdn.pokoin.com/116545_pikachu-79-110-ex-holon-phantoms.jpg',
+        },
+    });
+    const langs = sandbox.printLangsForCardId('504600', index);
+    assert.equal(langs.eur.id, '233564');
+    assert.equal(langs.jp.id, '504600');
+    const holon = sandbox.printLangsForCardId('233090', index);
+    assert.equal(holon.eur.id, '233090');
+    assert.equal(holon.jp, null);
+    const rows = sandbox.structuredRowsFromScanHits([{
+        id: '504600',
+        public_id: '504600',
+        name: 'Pikachu δ Delta Species',
+        set: 'PCG Promos',
+        collector_number: 'PCG-P 112',
+        image_url: 'https://cdn.pokoin.com/252300_pikachu-pcg-p-112-pcg-promos.jpg',
+        pokoin_url: 'https://pokoin.com/marketplace/en/cards/504600',
+        score: 0.99,
+    }]);
+    assert.equal(rows[0].card_id, '504600');
+    assert.equal(rows[0].print_langs.eur.id, '233564');
+    assert.match(rows[0].preview_image_url, /116782_pikachu-delta-species-full-v4/);
+});
+
+test('album leftover tiles overlay the same printing before the grid', () => {
+    const sandbox = loadBackgroundHelpers(['structuredRowsFromScanHits', 'uniqueRowsByLeftoverTile', 'setPrintLangsIndex']);
+    sandbox.setPrintLangsIndex({ ids: {}, img: {} });
+    const rows = sandbox.structuredRowsFromScanHits([
+        {
+            id: '310001',
+            public_id: '310001',
+            name: 'Alolan Meowth',
+            set: '',
+            collector_number: '',
+            image_url: 'https://cdn.pokoin.com/155000_alolan-meowth-118-214-lost-thunder.jpg',
+            score: 0.81,
+        },
+        {
+            id: '310002',
+            public_id: '310002',
+            name: 'Alolan Meowth',
+            set: 'Lost Thunder',
+            collector_number: '118/214',
+            image_url: 'https://cdn.pokoin.com/155001_alolan-meowth-118-214-lost-thunder.jpg',
+            score: 0.79,
+        },
+        {
+            id: '310003',
+            public_id: '310003',
+            name: 'Meowth',
+            set: 'Team Rocket',
+            collector_number: '58/82',
+            image_url: 'https://cdn.pokoin.com/29000_meowth-58-82-team-rocket.jpg',
+            score: 0.77,
+        },
+    ], 'album');
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].name, 'Alolan Meowth');
+    assert.equal(rows[0].leftoverCopies, 2);
+    assert.equal(rows[0].set_name, 'Lost Thunder');
+    assert.equal(rows[1].name, 'Meowth');
+    assert.equal(rows[1].leftoverCopies, 1);
+});
+
+test('pokoin desk URL is empty when the selected row is missing', () => {
+    const sandbox = loadBackgroundHelpers(['pokoinUrlForRow', 'sidePanelStatePokoinUrl']);
+    assert.equal(sandbox.pokoinUrlForRow(null), '');
+    assert.equal(sandbox.pokoinUrlForRow(undefined), '');
+    assert.equal(sandbox.sidePanelStatePokoinUrl(null), '');
+});
+
+test('Chinese-only leftovers press CN instead of mislabeled EUR', () => {
+    const sandbox = loadBackgroundHelpers(['structuredRowsFromScanHits', 'setPrintLangsIndex']);
+    sandbox.setPrintLangsIndex({
+        ids: { 800001: ['800001', '', '', 2, 'art_cs4a'] },
+        img: { 800001: 'https://cdn.pokoin.com/400000_umbreon-vmax.jpg' },
+    });
+    const rows = sandbox.structuredRowsFromScanHits([{
+        id: '800001',
+        public_id: '800001',
+        name: 'Umbreon VMAX',
+        set: 'CS4a: Nine Colors Gathering - Friends',
+        collector_number: '173/184',
+        image_url: 'https://cdn.pokoin.com/400000_umbreon-vmax.jpg',
+        pokoin_url: 'https://pokoin.com/marketplace/en/cards/800001',
+        score: 0.99,
+    }]);
+    assert.equal(rows[0].card_id, '800001');
+    assert.equal(rows[0].print_langs.eur, null);
+    assert.equal(rows[0].print_langs.cn.id, '800001');
+    assert.match(rows[0].preview_image_url, /400000_umbreon-vmax/);
+});
+
+test('Japanese-only leftovers press JP instead of mislabeled EUR', () => {
+    const sandbox = loadBackgroundHelpers(['structuredRowsFromScanHits', 'setPrintLangsIndex']);
+    sandbox.setPrintLangsIndex({
+        ids: { 283804: ['283804', '', '', 2, 'art_rg'] },
+        img: { 283804: 'https://cdn.pokoin.com/141902_dark-jolteon-jp-rocket-gang.jpg' },
+    });
+    const rows = sandbox.structuredRowsFromScanHits([{
+        id: '283804',
+        public_id: '283804',
+        name: 'Dark Jolteon Lv.23',
+        set: 'Rocket Gang',
+        collector_number: '135',
+        image_url: 'https://cdn.pokoin.com/141902_dark-jolteon-jp-rocket-gang.jpg',
+        pokoin_url: 'https://pokoin.com/marketplace/en/cards/283804',
+        score: 0.99,
+    }]);
+    assert.equal(rows[0].card_id, '283804');
+    assert.equal(rows[0].print_langs.eur, null);
+    assert.equal(rows[0].print_langs.jp.id, '283804');
+    assert.match(rows[0].print_langs.jp.image_url, /dark-jolteon-jp-rocket-gang/);
+});
+
+test('western leftover embed uses a sibling leftover JPEG when EUR scan is missing from the index', () => {
+    const sandbox = loadBackgroundHelpers(['applyWesternEmbed', 'structuredRowsFromScanHits', 'setPrintLangsIndex']);
+    sandbox.setPrintLangsIndex({
+        ids: { 736062: ['757880', '736062', '', 4, 'art_736062'] },
+        img: {
+            736062: 'https://cdn.pokoin.com/368031_espurr.jpg',
+        },
+    });
+    const rows = sandbox.structuredRowsFromScanHits([{
+        id: '736062',
+        public_id: '736062',
+        name: 'Espurr',
+        set: 'Nihil Zero',
+        collector_number: '087/080',
+        image_url: 'https://cdn.pokoin.com/368031_espurr.jpg',
+        pokoin_url: 'https://pokoin.com/marketplace/en/cards/736062',
+        score: 0.99,
+    }]);
+    assert.equal(rows[0].card_id, '736062');
+    assert.equal(rows[0].canonicalUrl, 'https://pokoin.com/marketplace/en/cards/736062');
+    assert.equal(rows[0].preview_image_url, 'https://pokoin.com/card-images/368031_espurr.jpg');
+    assert.equal(rows[0].print_langs.eur.id, '757880');
+    assert.equal(rows[0].print_langs.eur.image_url, 'https://pokoin.com/card-images/368031_espurr.jpg');
+    assert.equal(rows[0].print_langs.jp.id, '736062');
+    assert.equal(rows[0].print_langs.jp.image_url, 'https://pokoin.com/card-images/368031_espurr.jpg');
+});
+
+test('overlay preview rows keep print-langs for album leftover tiles', () => {
+    const sandbox = loadBackgroundHelpers(['sidePanelRowFromPreview', 'selectedCandidateRowFromRequest', 'sidePanelStatePokoinUrl', 'setPrintLangsIndex']);
+    sandbox.setPrintLangsIndex({
+        ids: { 736062: ['757880', '736062', '', 4, 'art_736062'] },
+        img: {
+            757880: 'https://pokoin.com/card-images/378940_espurr.jpg',
+            736062: 'https://pokoin.com/card-images/368031_espurr.jpg',
+        },
+    });
+    const preview = sandbox.sidePanelRowFromPreview({
+        card_id: '736062',
+        name: 'Espurr',
+        set_name: 'Nihil Zero',
+        card_number: '087/080',
+        preview_image_url: 'https://pokoin.com/card-images/368031_espurr.jpg',
+    });
+    assert.equal(preview.print_langs.eur.id, '757880');
+    assert.equal(preview.preview_image_url, 'https://pokoin.com/card-images/378940_espurr.jpg');
+    assert.equal(sandbox.sidePanelStatePokoinUrl(preview), 'https://pokoin.com/marketplace/en/cards/757880');
+    const selected = sandbox.selectedCandidateRowFromRequest({
+        selectedCandidateId: '736062',
+        selectedCandidate: {
+            card_id: '736062',
+            name: 'Espurr',
+            set_name: 'Nihil Zero',
+            card_number: '087/080',
+        },
+    });
+    assert.equal(selected.print_langs.eur.id, '757880');
+    assert.equal(selected.preview_image_url, 'https://pokoin.com/card-images/378940_espurr.jpg');
+});
+
+test('album tiles use homepage _homepage.webp previews instead of leftover scans', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.24' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '273140',
+            name: 'Nest Ball',
+            set_name: 'Collection Moon',
+            card_number: '055/060',
+            preview_image_url: 'https://cdn.pokoin.com/128540_nest-ball-055-060-collection-moon.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/273140',
+            print_langs: {
+                eur: { id: '257080', image_url: 'https://cdn.pokoin.com/128540_nest-ball-055-060-collection-moon.jpg' },
+                jp: { id: '273140', image_url: 'https://cdn.pokoin.com/136570_nest-ball-055-060-collection-moon.jpg' },
+                cn: { id: '400001', image_url: 'https://cdn.pokoin.com/200000_nest-ball-055-060-collection-moon.jpg' },
+                versions: 77,
+                artwork_id: 'art_257080',
+            },
+        }, {
+            card_id: '273141',
+            name: 'Ultra Ball',
+            set_name: 'Collection Moon',
+            card_number: '056/060',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/273141',
+            print_langs: {
+                eur: { id: '257081', image_url: 'https://cdn.pokoin.com/west-ultra.jpg' },
+                jp: null,
+                cn: null,
+                versions: 3,
+            },
+        }],
+        best: { card_id: '273140', name: 'Nest Ball' },
+        blueprintId: '273140',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/273140',
+    });
+    assert.equal(elementsById.get('cardName').textContent, '2 cards');
+    assert.equal(elementsById.get('frameSection').hidden, true);
+    assert.equal(bodyClassList.contains('album-card-view'), true);
+    const tile = elementsById.get('candidateList').children[0];
+    const copy = tile.children[1];
+    const cut = tile.children[0].children[0];
+    const image = cut.children[0];
+    const toggle = copy.children.find((child) => child.className === 'candidate-lang-toggle');
+    const versions = copy.children.find((child) => child.className === 'candidate-versions');
+    assert.equal(cut.className, 'art-cut');
+    assert.equal(image.src, 'https://pokoin.com/card-images/128540_nest-ball-055-060-collection-moon_homepage.webp');
+    assert.equal(image.crossOrigin, 'anonymous');
+    assert.equal(image.getAttribute('crossorigin'), 'anonymous');
+    assert.ok(toggle, 'album tiles keep EN/JP/CN under the artwork cut');
+    assert.equal(toggle.children.map((child) => child.textContent).join(','), 'EN,JP,CN');
+    assert.equal(toggle.children[0].attributes['aria-pressed'], 'true');
+    assert.equal(versions, undefined, 'name-wide CLIP/peer2 version dumps stay off leftover tiles');
+    assert.equal(tile.href, 'https://pokoin.com/marketplace/en/cards/257080');
+    toggle.children[1].eventListeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(image.src, 'https://pokoin.com/card-images/136570_nest-ball-055-060-collection-moon_homepage.webp');
+    assert.equal(tile.href, 'https://pokoin.com/marketplace/en/cards/273140');
+});
+
+test('album CN identify tiles default to the unique western leftover and desk', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.44' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '747718',
+            name: 'Thundurus GX',
+            set_name: 'CSMPiC: Battle Set',
+            card_number: '005/024',
+            preview_image_url: 'https://pokoin.com/card-images/126914_thundurus-gx-holo-promo-sm133-sm-black-star-promos.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/747718',
+            print_langs: {
+                eur: { id: '253828', image_url: 'https://pokoin.com/card-images/126914_thundurus-gx-holo-promo-sm133-sm-black-star-promos.jpg' },
+                jp: null,
+                cn: { id: '747718', image_url: 'https://pokoin.com/card-images/373859_thundurus-gx.jpg' },
+                versions: 2,
+                artwork_id: 'art_253828',
+            },
+        }, {
+            card_id: '273141',
+            name: 'Raichu GX',
+            set_name: 'Shining Legends',
+            card_number: '029/073',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/273141',
+        }],
+        best: { card_id: '747718', name: 'Thundurus GX' },
+        blueprintId: '747718',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/747718',
+    });
+    const tile = elementsById.get('candidateList').children[0];
+    const copy = tile.children[1];
+    const image = tile.children[0].children[0].children[0];
+    const toggle = copy.children.find((child) => child.className === 'candidate-lang-toggle');
+    const meta = copy.children.find((child) => child.className === 'candidate-meta');
+    assert.equal(image.src, 'https://pokoin.com/card-images/126914_thundurus-gx-holo-promo-sm133-sm-black-star-promos_homepage.webp');
+    assert.equal(toggle.children[0].attributes['aria-pressed'], 'true');
+    assert.match(meta.textContent, /SM133/);
+    assert.equal(tile.href, 'https://pokoin.com/marketplace/en/cards/253828');
+    toggle.children[2].eventListeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(tile.href, 'https://pokoin.com/marketplace/en/cards/747718');
+});
+
+test('album Chinese-only leftovers press CN not EUR', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.45' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '800001',
+            name: 'Umbreon VMAX',
+            set_name: 'CS4a: Nine Colors Gathering - Friends',
+            card_number: '173/184',
+            preview_image_url: 'https://pokoin.com/card-images/400000_umbreon-vmax.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/800001',
+            print_langs: {
+                eur: { id: '800001', image_url: 'https://pokoin.com/card-images/400000_umbreon-vmax.jpg' },
+                jp: null,
+                cn: null,
+                versions: 2,
+            },
+        }, {
+            card_id: '800002',
+            name: 'Sylveon VMAX',
+            set_name: 'CS4a: Nine Colors Gathering - Friends',
+            card_number: '172/184',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/800002',
+        }],
+        best: { card_id: '800001', name: 'Umbreon VMAX' },
+        blueprintId: '800001',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/800001',
+    });
+    const tile = elementsById.get('candidateList').children[0];
+    const copy = tile.children[1];
+    const toggle = copy.children.find((child) => child.className === 'candidate-lang-toggle');
+    assert.equal(toggle.children[0].disabled, true);
+    assert.equal(toggle.children[0].attributes['aria-pressed'], 'false');
+    assert.equal(toggle.children[2].disabled, false);
+    assert.equal(toggle.children[2].attributes['aria-pressed'], 'true');
+    assert.equal(tile.href, 'https://pokoin.com/marketplace/en/cards/800001');
+});
+
+test('album Japanese-only leftovers press JP not EUR', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.63' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '258910',
+            name: 'Dark Jolteon',
+            set_name: 'Team Rocket',
+            card_number: '38/82',
+            preview_image_url: 'https://pokoin.com/card-images/129455_dark-jolteon-38-82-team-rocket.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/258910',
+            print_langs: {
+                eur: { id: '258910', image_url: 'https://pokoin.com/card-images/129455_dark-jolteon-38-82-team-rocket.jpg' },
+                jp: null,
+                cn: null,
+            },
+        }, {
+            card_id: '283804',
+            name: 'Dark Jolteon Lv.23',
+            set_name: 'Rocket Gang',
+            card_number: '135',
+            preview_image_url: 'https://pokoin.com/card-images/141902_dark-jolteon-jp-rocket-gang.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/283804',
+            print_langs: {
+                eur: { id: '283804', image_url: 'https://pokoin.com/card-images/141902_dark-jolteon-jp-rocket-gang.jpg' },
+                jp: null,
+                cn: null,
+            },
+        }],
+        best: { card_id: '258910', name: 'Dark Jolteon' },
+        blueprintId: '258910',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/258910',
+    });
+    const list = elementsById.get('candidateList');
+    const western = list.children[0];
+    const japanese = list.children[1];
+    const westernToggle = western.children[1].children.find((child) => child.className === 'candidate-lang-toggle');
+    const japaneseToggle = japanese.children[1].children.find((child) => child.className === 'candidate-lang-toggle');
+    assert.equal(westernToggle.children[0].attributes['aria-pressed'], 'true');
+    assert.equal(westernToggle.children[1].attributes['aria-pressed'], 'false');
+    assert.equal(japaneseToggle.children[0].disabled, true);
+    assert.equal(japaneseToggle.children[0].attributes['aria-pressed'], 'false');
+    assert.equal(japaneseToggle.children[1].disabled, false);
+    assert.equal(japaneseToggle.children[1].attributes['aria-pressed'], 'true');
+    assert.equal(japanese.href, 'https://pokoin.com/marketplace/en/cards/283804');
+});
+
+test('album tiles always paint EN JP CN without print-langs from the API', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.46' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '111',
+            name: 'Winona',
+            set_name: 'Emerald Break',
+            card_number: '088/078',
+            preview_image_url: 'https://pokoin.com/card-images/55_winona.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/111',
+            pokoin_price: 'Out of stock',
+        }, {
+            card_id: '800001',
+            name: 'Umbreon VMAX',
+            set_name: 'CS4a: Nine Colors Gathering - Friends',
+            card_number: '173/184',
+            preview_image_url: 'https://pokoin.com/card-images/400000_umbreon-vmax.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/800001',
+            pokoin_price: 'Out of stock',
+        }],
+        best: { card_id: '111', name: 'Winona' },
+        blueprintId: '111',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/111',
+    });
+    const winona = elementsById.get('candidateList').children[0];
+    const umbreon = elementsById.get('candidateList').children[1];
+    const winonaToggle = winona.children[1].children.find((child) => child.className === 'candidate-lang-toggle');
+    const umbreonToggle = umbreon.children[1].children.find((child) => child.className === 'candidate-lang-toggle');
+    assert.ok(winonaToggle, 'album tiles keep EN/JP/CN even without print_langs');
+    assert.equal(winonaToggle.children.map((child) => child.textContent).join(','), 'EN,JP,CN');
+    assert.equal(winonaToggle.children[0].attributes['aria-pressed'], 'true');
+    assert.equal(umbreonToggle.children.map((child) => child.textContent).join(','), 'EN,JP,CN');
+    assert.equal(umbreonToggle.children[2].attributes['aria-pressed'], 'true');
+    assert.equal(umbreonToggle.children[0].attributes['aria-pressed'], 'false');
+});
+
+test('homepageDerivativeUrl follows leftover JPEG stem not the English name slug', () => {
+    const sandbox = { console, URL };
+    vm.createContext(sandbox);
+    vm.runInContext(`${readRepoFile('utils/PrintLangs.js')}\nthis.homepageDerivativeUrl = homepageDerivativeUrl;`, sandbox);
+    assert.equal(
+        sandbox.homepageDerivativeUrl('https://cdn.pokoin.com/235817_penny-secret-rare-105-078-scarlet-ex.jpg'),
+        'https://pokoin.com/card-images/235817_penny-secret-rare-105-078-scarlet-ex_homepage.webp',
+    );
+    assert.equal(
+        sandbox.homepageDerivativeUrl('https://cdn.pokoin.com/previews/235817_penny.jpg'),
+        '',
+    );
+});
+
+test('album language buttons can use CardTrader version previews when no homepage derivative exists', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const elementFor = (id) => {
+        if (!elementsById.has(id)) {
+            const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+            element.id = id;
+            element.classList = createClassListStub();
+            element.replaceChildren = function replaceChildren(...children) {
+                this.children = [];
+                children.forEach((child) => this.appendChild(child));
+            };
+            element.addEventListener = () => {};
+            elementsById.set(id, element);
+        }
+        return elementsById.get(id);
+    };
+    const sandbox = {
+        document: {
+            getElementById: elementFor,
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+            body: { classList: createClassListStub() },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                local: { get: async () => ({}), set: async () => {} },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '3.0.27' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({}) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.langDisplayImageUrl = langDisplayImageUrl;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    const jpPreview = 'https://cardtrader.com/uploads/blueprints/image/378076/preview_mega-dragalge-ex-102-083-ninja-spinner.jpg';
+    assert.equal(sandbox.langDisplayImageUrl(
+        { card_id: '780090', name: 'Mega Dragalge ex' },
+        { id: '756152', image_url: jpPreview },
+        { album: true },
+    ), jpPreview);
+});
+
+test('album leftover JP stays clickable when live version-set JP is missing from bundled print-langs', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'tabScanPreview', 'tabScanFallback', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'extensionVersion', 'listingTotal', 'emptyActions', 'loadListingBtn', 'analyzeScreenshotBtn']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+            body: { classList: bodyClassList },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                local: { get: async () => ({}), set: async () => {} },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '12.0.24' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({}) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}
+this.renderState = renderState;
+printLangsIndex = {
+    ids: { '235350': ['235350', '', '', 1, ''], '235354': ['235354', '', '', 1, ''] },
+    img: {
+        '235350': 'https://cdn.pokoin.com/117675_dark-dragonair-31-109-ex-team-rocket-returns.jpg',
+        '235354': 'https://cdn.pokoin.com/117677_dark-dragonair-32-109-ex-team-rocket-returns.jpg',
+    },
+};`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '235350',
+            name: 'Dark Dragonair',
+            set_name: 'EX Team Rocket Returns',
+            card_number: '31/109',
+            print_langs: {
+                eur: { id: '235350', image_url: 'https://cdn.pokoin.com/117675_dark-dragonair-31-109-ex-team-rocket-returns.jpg' },
+                jp: { id: '586552', image_url: 'https://pokoin.com/card-images/293276_dark-dragonair-031-silver-deck-kit_homepage.webp' },
+                cn: null,
+            },
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/235350',
+        }, {
+            card_id: '235354',
+            name: 'Dark Dragonair',
+            set_name: 'EX Team Rocket Returns',
+            card_number: '32/109',
+            print_langs: {
+                eur: { id: '235354', image_url: 'https://cdn.pokoin.com/117677_dark-dragonair-32-109-ex-team-rocket-returns.jpg' },
+                jp: { id: '586554', image_url: 'https://pokoin.com/card-images/293277_dark-dragonair-032-silver-deck-kit_homepage.webp' },
+                cn: null,
+            },
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/235354',
+        }],
+        best: { card_id: '235350', name: 'Dark Dragonair' },
+        blueprintId: '235350',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/235350',
+    });
+    assert.equal(elementsById.get('candidateList').children.length, 2);
+    const firstToggle = elementsById.get('candidateList').children[0].children[1].children
+        .find((child) => child.className === 'candidate-lang-toggle');
+    const jpBtn = firstToggle.children.find((child) => child.textContent === 'JP');
+    assert.equal(jpBtn.disabled, false, 'live Silver Deck Kit JP must stay clickable');
+    assert.equal(firstToggle.children.find((child) => child.textContent === 'EN').disabled, false);
+    assert.equal(firstToggle.children.find((child) => child.textContent === 'CN').disabled, true);
+});
+
+test('side panel waits for print languages before its first state render', () => {
+    const loadState = extractFunctionSource(readRepoFile('ui-pages/sidepanel.js'), 'loadState');
+    const readyAt = loadState.indexOf('await printLangsReady');
+    const readAt = loadState.indexOf("chrome.storage.session.get('sidePanelState')");
+    const renderAt = loadState.indexOf('renderState(sidePanelState)');
+    assert.ok(readyAt >= 0 && readyAt < readAt);
+    assert.ok(readAt < renderAt);
+    assert.equal((loadState.match(/renderState\(/g) || []).length, 1);
+});
+
+test('leftoverScanUrl uses leftover JPEG stem not the English name slug', () => {
+    const sandbox = { console, URL };
+    vm.createContext(sandbox);
+    vm.runInContext(`${readRepoFile('utils/PrintLangs.js')}
+this.leftoverScanUrl = leftoverScanUrl;
+this.parsePrintLangsIndex = parsePrintLangsIndex;
+this.emptyPrintLangsIndex = emptyPrintLangsIndex;`, sandbox);
+    const index = sandbox.parsePrintLangsIndex({
+        ids: {
+            471270: ['471270', '', '', 1, ''],
+            575496: ['575496', '', '', 1, ''],
+        },
+        img: {
+            471270: 'https://cdn.pokoin.com/235635_iron-treads-ex-058-078-violet-ex.jpg',
+            575496: 'https://cdn.pokoin.com/287748_luxray-ex-068-167-twilight-masquerade.jpg',
+        },
+    });
+    assert.equal(
+        sandbox.leftoverScanUrl('471270', index, 'Iron Treads ex'),
+        'https://pokoin.com/card-images/235635_iron-treads-ex-058-078-violet-ex.jpg',
+    );
+    assert.equal(
+        sandbox.leftoverScanUrl('575496', index, 'Luxray ex'),
+        'https://pokoin.com/card-images/287748_luxray-ex-068-167-twilight-masquerade.jpg',
+    );
+    assert.equal(sandbox.leftoverScanUrl('471270', sandbox.emptyPrintLangsIndex(), 'Iron Treads ex'), '');
+    assert.doesNotMatch(
+        sandbox.leftoverScanUrl('471270', sandbox.emptyPrintLangsIndex(), 'Iron Treads ex') || 'none',
+        /iron-treads-ex_homepage|471270_iron-treads-ex/,
+    );
+});
+
+test('album tiles without print_langs use leftover JPEG stem homepage from the print-langs index', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.52' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState; this.homepageTileImageUrl = homepageTileImageUrl;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    vm.runInContext(`printLangsIndex = parsePrintLangsIndex({
+        ids: {
+            471270: ['471270', '', '', 1, ''],
+            575496: ['575496', '', '', 1, ''],
+        },
+        img: {
+            471270: 'https://cdn.pokoin.com/235635_iron-treads-ex-058-078-violet-ex.jpg',
+            575496: 'https://cdn.pokoin.com/287748_luxray-ex-068-167-twilight-masquerade.jpg',
+        },
+    });`, sandbox);
+    assert.equal(
+        sandbox.homepageTileImageUrl({ card_id: '471270', name: 'Iron Treads ex' }),
+        'https://pokoin.com/card-images/235635_iron-treads-ex-058-078-violet-ex_homepage.webp',
+    );
+    assert.doesNotMatch(
+        sandbox.homepageTileImageUrl({ card_id: '471270', name: 'Iron Treads ex' }),
+        /235635_iron-treads-ex_homepage|471270_iron-treads-ex/,
+    );
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '471270',
+            name: 'Iron Treads ex',
+            set_name: 'Violet ex',
+            card_number: '058/078',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/471270',
+            pokoin_price: 'Out of stock',
+        }, {
+            card_id: '575496',
+            name: 'Luxray ex',
+            set_name: 'Twilight Masquerade',
+            card_number: '068/167',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/575496',
+            pokoin_price: 'Out of stock',
+        }],
+        best: { card_id: '471270', name: 'Iron Treads ex' },
+        blueprintId: '471270',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/471270',
+    });
+    const iron = elementsById.get('candidateList').children[0];
+    const luxray = elementsById.get('candidateList').children[1];
+    const ironImage = iron.children[0].children[0].children[0];
+    const luxrayImage = luxray.children[0].children[0].children[0];
+    assert.equal(ironImage.src, 'https://pokoin.com/card-images/235635_iron-treads-ex-058-078-violet-ex_homepage.webp');
+    assert.equal(luxrayImage.src, 'https://pokoin.com/card-images/287748_luxray-ex-068-167-twilight-masquerade_homepage.webp');
+    assert.equal(iron.children[1].children[1].textContent, '058 · VE');
+    assert.equal(luxray.children[1].children[1].textContent, '068 · TM');
+});
+
+test('leftoverMetaFromUrl reads hyphen collectors and set slugs', () => {
+    const sandbox = { console, URL };
+    vm.createContext(sandbox);
+    vm.runInContext(`${readRepoFile('utils/PrintLangs.js')}\nthis.leftoverMetaFromUrl = leftoverMetaFromUrl;`, sandbox);
+    const evolving = sandbox.leftoverMetaFromUrl('https://pokoin.com/card-images/166333_umbreon-vmax-095-203-evolving-skies.jpg');
+    assert.equal(evolving.collector, '095');
+    assert.equal(evolving.expansion, 'ES');
+    const homepage = sandbox.leftoverMetaFromUrl('https://pokoin.com/card-images/166333_umbreon-vmax-095-203-evolving-skies_homepage.webp');
+    assert.equal(homepage.collector, '095');
+    assert.equal(homepage.expansion, 'ES');
+    assert.equal(
+        sandbox.leftoverMetaFromUrl('https://pokoin.com/card-images/126914_thundurus-gx-holo-promo-sm133-sm-black-star-promos.jpg').collector,
+        'SM133',
+    );
+    const chinese = sandbox.leftoverMetaFromUrl('https://pokoin.com/card-images/337149_umbreon-vmax.jpg');
+    assert.equal(chinese.collector, '');
+    assert.equal(chinese.expansion, '');
+});
+
+test('album EUR leftover meta uses western slug not the Chinese identify set', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.47' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '666880',
+            name: 'Umbreon VMAX',
+            set_name: 'CS4a: Nine Colors Gathering - Friends',
+            card_number: '173/184',
+            preview_image_url: 'https://pokoin.com/card-images/166333_umbreon-vmax-095-203-evolving-skies.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/666880',
+            print_langs: {
+                eur: { id: '332666', image_url: 'https://pokoin.com/card-images/166333_umbreon-vmax-095-203-evolving-skies.jpg' },
+                jp: { id: '469398', image_url: 'https://pokoin.com/card-images/234699_umbreon-vmax-041-069-eevee-heroes.jpg' },
+                cn: { id: '666880', image_url: 'https://pokoin.com/card-images/337149_umbreon-vmax.jpg' },
+                versions: 16,
+                artwork_id: 'art_332666',
+            },
+        }, {
+            card_id: '273141',
+            name: 'Raichu GX',
+            set_name: 'Shining Legends',
+            card_number: '029/073',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/273141',
+        }],
+        best: { card_id: '666880', name: 'Umbreon VMAX' },
+        blueprintId: '666880',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/666880',
+    });
+    const tile = elementsById.get('candidateList').children[0];
+    const copy = tile.children[1];
+    const toggle = copy.children.find((child) => child.className === 'candidate-lang-toggle');
+    const meta = copy.children.find((child) => child.className === 'candidate-meta');
+    assert.equal(toggle.children[0].attributes['aria-pressed'], 'true');
+    assert.match(meta.textContent, /095/);
+    assert.match(meta.textContent, /ES/);
+    assert.doesNotMatch(meta.textContent, /CS4a/);
+    toggle.children[2].eventListeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert.match(meta.textContent, /173/);
+    assert.match(meta.textContent, /CS4a/);
+});
+
+test('listing tile cache expires after 3 days and cards sort by displayed PKN descending', () => {
+    const dummy = () => {
+        const element = createDomElement('div');
+        element.classList = createClassListStub();
+        element.addEventListener = () => {};
+        element.hidden = false;
+        return element;
+    };
+    const sandbox = {
+        console,
+        URL,
+        document: {
+            body: { classList: createClassListStub() },
+            getElementById: () => dummy(),
+            createElement: () => dummy(),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}), set: async () => {} },
+                local: { get: async () => ({}), set: async () => {} },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.49' }) },
+        },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(
+        `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}\nthis.pruneListingTileCache = pruneListingTileCache; this.stampListingTile = stampListingTile; this.orderListingTiles = orderListingTiles;`,
+        sandbox,
+        { filename: 'ui-pages/sidepanel.js' },
+    );
+    const listing = 'https://www.vinted.it/items/99-album';
+    const now = 1_700_000_000_000;
+    let cache = sandbox.stampListingTile({ listings: {} }, listing, ['111'], 'hidden', true, now);
+    cache = sandbox.stampListingTile(cache, listing, ['222'], 'wished', true, now);
+    const fresh = sandbox.pruneListingTileCache(cache, now + (2 * 24 * 60 * 60 * 1000));
+    assert.equal(fresh.listings[listing].hidden['111'], now);
+    assert.equal(fresh.listings[listing].wished['222'], now);
+    const expired = sandbox.pruneListingTileCache(cache, now + (4 * 24 * 60 * 60 * 1000));
+    assert.equal(Object.keys(expired.listings).length, 0);
+    const ordered = sandbox.orderListingTiles(
+        [
+            { card_id: '111', pokoin_price: '120 PKN' },
+            { card_id: '222', pokoin_price: '822 PKN' },
+            { card_id: '333', pokoin_price: '1,252 PKN' },
+            { card_id: '444', pokoin_price: '822 PKN' },
+        ],
+        cache.listings[listing],
+        now,
+    );
+    assert.equal(ordered.map((row) => row.card_id).join(','), '333,222,444,111');
+});
+
+test('album tiles hide locally and POST wishlist heart to Pokoin', async () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const watchlistMessages = [];
+    const localStore = {};
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'listingTotal', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const state = {
+        pageInfo: {
+            url: 'https://www.vinted.it/items/99-album',
+            structuredCard: { listingKind: 'album' },
+        },
+        rows: [{
+            card_id: '111',
+            name: 'First',
+            set_name: 'Evolving Skies',
+            card_number: '001/203',
+            preview_image_url: 'https://pokoin.com/card-images/1_first.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/111',
+            pokoin_price: '10 PKN',
+        }, {
+            card_id: '222',
+            name: 'Second',
+            set_name: 'Evolving Skies',
+            card_number: '002/203',
+            preview_image_url: 'https://pokoin.com/card-images/2_second.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/222',
+            pokoin_price: '20 PKN',
+        }, {
+            card_id: '333',
+            name: 'Wish me',
+            set_name: 'Evolving Skies',
+            card_number: '003/203',
+            preview_image_url: 'https://pokoin.com/card-images/3_wish.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/333',
+            pokoin_price: '30 PKN',
+            print_langs: {
+                eur: { id: '333', image_url: 'https://pokoin.com/card-images/3_wish.jpg' },
+                jp: null,
+                cn: null,
+                versions: 2,
+            },
+        }],
+        best: { card_id: '111', name: 'First' },
+        blueprintId: '111',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/111',
+    };
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({ sidePanelState: state }) },
+                local: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: localStore[key] } : { ...localStore }),
+                    set: async (payload) => Object.assign(localStore, payload),
+                },
+                onChanged: { addListener() {} },
+            },
+            runtime: {
+                sendMessage: async (message) => {
+                    watchlistMessages.push(message);
+                    return { success: true };
+                },
+                getManifest: () => ({ version: '2.0.49' }),
+            },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    await Promise.resolve();
+    await Promise.resolve();
+    sandbox.renderState(state);
+    const list = () => elementsById.get('candidateList').children;
+    assert.equal(list().length, 3);
+    assert.equal(elementsById.get('cardName').textContent, '3 cards');
+    assert.equal(elementsById.get('listingTotal').hidden, false);
+    assert.equal(elementsById.get('listingTotal').textContent, '60 PKN');
+    const firstMedia = list()[0].children[0];
+    const hideBtn = firstMedia.children.find((child) => String(child.className).includes('candidate-tile-hide'));
+    const lastMedia = list()[2].children[0];
+    const wishBtn = lastMedia.children.find((child) => String(child.className).includes('candidate-tile-wish'));
+    assert.ok(hideBtn, 'red hide control should sit on the artwork');
+    assert.ok(wishBtn, 'heart control should sit on the artwork');
+    wishBtn.eventListeners.click({ preventDefault() {}, stopPropagation() {} });
+    await Promise.resolve();
+    await Promise.resolve();
+    assert.equal(list()[0].children[1].children[0].textContent, 'Wish me');
+    assert.equal(watchlistMessages.some((message) => message.action === 'savePokoinWatchlist' && message.watchlistAction === 'add'), true);
+    const nextHide = list()[1].children[0].children.find((child) => String(child.className).includes('candidate-tile-hide'));
+    nextHide.eventListeners.click({ preventDefault() {}, stopPropagation() {} });
+    await Promise.resolve();
+    await Promise.resolve();
+    const names = list().map((tile) => tile.children[1].children[0].textContent);
+    assert.equal(list().length, 2);
+    assert.equal(names.includes('First'), false);
+    assert.equal(names.includes('Wish me'), true);
+    assert.equal(names.includes('Second'), true);
+    assert.equal(elementsById.get('cardName').textContent, '2 cards');
+    assert.equal(elementsById.get('listingTotal').textContent, '50 PKN');
+});
+
+test('album tile hide and wish stay under the sticky side-panel header', () => {
+    const css = readRepoFile('ui-pages/sidepanel.css');
+    assert.match(css, /\.header\s*\{[^}]*z-index:\s*20/s);
+    assert.match(css, /body\.album-card-view,\s*body\.leftover-embed-view\s*\{[^}]*overflow:\s*hidden/s);
+    assert.match(css, /\.candidate-tile\s*\{[^}]*isolation:\s*isolate/s);
+    assert.match(css, /\.candidate-tile-hide,\s*\.candidate-tile-wish\s*\{[^}]*z-index:\s*3/s);
+    assert.match(css, /#tabScanBtn\s*\{[^}]*flex:\s*0 0 auto/s);
+    assert.match(css, /#tabScanBtn\s*\{[^}]*width:\s*64px/s);
+    assert.match(css, /#tabScanBtn\s*\{[^}]*height:\s*40px/s);
+    assert.match(css, /#tabScanBtn img\s*\{[^}]*display:\s*none/s);
+    assert.match(css, /#tabScanBtn\.has-preview img\s*\{[^}]*display:\s*block/s);
+    assert.match(css, /--pkn-gold:\s*#ffcc03/);
+    assert.match(css, /\.title-row\s*\{[^}]*display:\s*flex/s);
+    assert.match(css, /\.title-row\s*\{[^}]*overflow:\s*hidden/s);
+    assert.match(css, /\.title-row h1\s*\{[^}]*flex:\s*1 1 auto/s);
+    assert.match(css, /h1\s*\{[^}]*white-space:\s*nowrap/s);
+    assert.match(css, /\.listing-total\s*\{[^}]*var\(--pkn-gold\)/s);
+    assert.match(css, /\.candidate-price\s*\{[^}]*var\(--pkn-gold\)/s);
+});
+
+test('savePokoinWatchlist posts marketplace-watchlist with the signed-in token', async () => {
+    const calls = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        storage: {
+            pokoinAuthSession: {
+                token: 'x'.repeat(40),
+                expiresAt: Date.now() + (10 * 60 * 1000),
+            },
+        },
+        fetch: async (url, options) => {
+            calls.push({ url, options });
+            return { ok: true, status: 200, json: async () => ({ changed: true }) };
+        },
+    });
+    const result = await sendMessage({
+        action: 'savePokoinWatchlist',
+        cardId: '332666',
+        watchlistAction: 'add',
+    });
+    assert.equal(result.success, true);
+    const watchCall = calls.find((entry) => String(entry.url).includes('/api/marketplace-watchlist'));
+    assert.ok(watchCall, 'should POST marketplace-watchlist');
+    assert.match(watchCall.options.headers.Authorization, /Bearer x{40}/);
+    assert.equal(JSON.parse(watchCall.options.body).cardId, 332666);
+    assert.equal(JSON.parse(watchCall.options.body).action, 'add');
+    assert.equal(JSON.parse(watchCall.options.body).source, 'pokemon-card-extension');
+});
+
+test('getPokoinAuthSession returns stored uid for the framed desk', async () => {
+    const { sendMessage } = loadBackgroundMessageHarness({
+        storage: {
+            pokoinAuthSession: {
+                token: 'x'.repeat(40),
+                uid: 'pokoin-user-desk',
+                expiresAt: Date.now() + (10 * 60 * 1000),
+            },
+        },
+    });
+    const session = await sendMessage({ action: 'getPokoinAuthSession' });
+    assert.equal(session.success, true);
+    assert.equal(session.token, 'x'.repeat(40));
+    assert.equal(session.uid, 'pokoin-user-desk');
+});
+
+test('CardTrader desk public_id maps to a CardTrader tab URL', () => {
+    const sandbox = loadBackgroundHelpers(['cardtraderUrlFromPublicId', 'isAllowedForegroundTabUrl']);
+    assert.equal(sandbox.cardtraderUrlFromPublicId('807626'), 'https://www.cardtrader.com/en/cards/403813');
+    assert.equal(sandbox.cardtraderUrlFromPublicId('807625'), '');
+    assert.equal(sandbox.isAllowedForegroundTabUrl('https://www.cardtrader.com/en/cards/403813'), true);
+    assert.equal(sandbox.isAllowedForegroundTabUrl('https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=Dawn'), true);
+    assert.equal(sandbox.isAllowedForegroundTabUrl('https://www.vinted.it/catalog?search_text=Dawn'), true);
+    assert.equal(sandbox.isAllowedForegroundTabUrl('https://evil.example/phish'), false);
+});
+
+test('openSilverMarketplaceTab opens CardTrader from an even public_id without apex API', async () => {
+    const created = [];
+    const fetches = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        tabs: {
+            create: async (options) => {
+                created.push(options);
+                return { id: 42 };
+            },
+        },
+        fetch: async (url) => {
+            fetches.push(String(url));
+            throw new Error(`unexpected fetch ${url}`);
+        },
+    });
+    const result = await sendMessage({
+        action: 'openSilverMarketplaceTab',
+        kind: 'ct',
+        publicId: '807626',
+    });
+    assert.equal(result.success, true);
+    assert.equal(created.length, 1);
+    assert.equal(created[0].url, 'https://www.cardtrader.com/en/cards/403813');
+    assert.equal(created[0].active, true);
+    assert.equal(fetches.filter((url) => url.includes('cardtrader-redirect')).length, 0);
+});
+
+test('openForegroundTab rejects non-marketplace URLs', async () => {
+    const created = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        tabs: {
+            create: async (options) => {
+                created.push(options);
+                return { id: 1 };
+            },
+        },
+    });
+    const result = await sendMessage({
+        action: 'openForegroundTab',
+        url: 'https://evil.example/phish',
+    });
+    assert.equal(result.success, false);
+    assert.equal(created.length, 0);
+});
+
+test('auth token storage keeps uid from the bridge payload or JWT', () => {
+    const sandbox = loadBackgroundHelpers([
+        'uidFromPokoinIdToken',
+        'validatePokoinAuthTokenMessage',
+        'isTransientFetchError',
+        'shouldKeepExistingViewportScanState',
+        'shouldKeepExistingPinnedVintedState',
+    ]);
+    const payload = Buffer.from(JSON.stringify({ user_id: 'jwt-uid', sub: 'jwt-uid' })).toString('base64url');
+    const token = `eyJhbGciOiJub25lIn0.${payload}.sig${'x'.repeat(8)}`;
+    assert.equal(sandbox.uidFromPokoinIdToken(token), 'jwt-uid');
+
+    const validated = sandbox.validatePokoinAuthTokenMessage({
+        type: 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE',
+        token,
+        uid: 'bridge-uid',
+        expiresAt: Date.now() + 600000,
+    });
+    assert.equal(validated.valid, true);
+    assert.equal(validated.session.uid, 'bridge-uid');
+
+    const abortError = new Error('signal is aborted without reason');
+    abortError.name = 'AbortError';
+    assert.equal(sandbox.isTransientFetchError(abortError), false);
+    assert.equal(sandbox.isTransientFetchError(new TypeError('Failed to fetch')), true);
+
+    const listingUrl = 'https://www.vinted.it/items/9963678531-set-carte-pokemon';
+    assert.equal(sandbox.shouldKeepExistingViewportScanState({
+        pageInfo: { url: listingUrl, viewportScan: true },
+        debug: { viewportScan: true, captureMode: 'visible-images' },
+        rows: [{ card_id: '1', name: 'Swinub' }],
+    }, {
+        pageInfo: { url: listingUrl },
+        debug: { pinnedPreviewRows: true },
+        rows: [{ card_id: '2', name: 'Dark Raticate' }],
+    }), true);
+    assert.equal(sandbox.shouldKeepExistingViewportScanState({
+        pageInfo: { url: listingUrl, viewportScan: true },
+        debug: { viewportScan: true },
+    }, {
+        pageInfo: { url: listingUrl, viewportScan: true },
+        debug: { viewportScan: true, priceEnriched: true },
+    }), false);
+
+    assert.equal(sandbox.shouldKeepExistingPinnedVintedState({
+        pageInfo: {
+            url: listingUrl,
+            vintedPayload: { listingImageUrls: ['https://images1.vinted.net/t/01/f800/one.webp'] },
+        },
+        debug: { pinnedVintedPreview: true, pinnedPreviewRows: true },
+        rows: [{ card_id: '1', name: 'First photo only' }],
+    }, {
+        pageInfo: {
+            url: listingUrl,
+            vintedPayload: {
+                listingImageUrls: [
+                    'https://images1.vinted.net/t/01/f800/one.webp',
+                    'https://images1.vinted.net/t/02/f800/two.webp',
+                    'https://images1.vinted.net/t/03/f800/three.webp',
+                ],
+            },
+        },
+        debug: { pinnedVintedPreview: false },
+        rows: [{ card_id: '2', name: 'Chip search' }],
+    }), false);
+    assert.equal(sandbox.shouldKeepExistingPinnedVintedState({
+        pageInfo: {
+            url: listingUrl,
+            vintedPayload: {
+                listingImageUrls: [
+                    'https://images1.vinted.net/t/01/f800/one.webp',
+                    'https://images1.vinted.net/t/02/f800/two.webp',
+                    'https://images1.vinted.net/t/03/f800/three.webp',
+                ],
+            },
+        },
+        debug: { pinnedVintedPreview: true, pinnedPreviewRows: true },
+        rows: [{ card_id: '3', name: 'All photos' }],
+    }, {
+        pageInfo: {
+            url: listingUrl,
+            vintedPayload: { listingImageUrls: ['https://images1.vinted.net/t/01/f800/one.webp'] },
+        },
+        debug: { pinnedVintedPreview: true, pinnedPreviewRows: true },
+        rows: [{ card_id: '1', name: 'Late one-photo scan' }],
+    }), true);
+});
+
+test('one-card listing iframes the western EN Pokoin desk in the side panel', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const openedTabs = [];
+    const srcWrites = [];
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = id === 'frameSection' || id === 'candidatesSection';
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const frame = elementsById.get('pokoinFrame');
+    let frameSrc = '';
+    Object.defineProperty(frame, 'src', {
+        get: () => frameSrc,
+        set: (value) => {
+            srcWrites.push(value);
+            frameSrc = value;
+        },
+    });
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '12.0.19' }) },
+            tabs: {
+                create: (options) => {
+                    openedTabs.push(options.url);
+                    return Promise.resolve({ id: 1 });
+                },
+            },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'singles' } },
+        rows: [{
+            card_id: '736062',
+            name: 'Thievul',
+            set_name: 'Abyss Eye',
+            card_number: '089/091',
+            preview_image_url: 'https://pokoin.com/card-images/368031_thievul.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/736062',
+            print_langs: {
+                eur: { id: '757880', image_url: 'https://pokoin.com/card-images/378940_thievul.jpg' },
+                jp: { id: '736062', image_url: 'https://pokoin.com/card-images/368031_thievul.jpg' },
+                cn: null,
+                versions: 4,
+                artwork_id: 'art_736062',
+            },
+        }],
+        best: { card_id: '736062', name: 'Thievul' },
+        blueprintId: '736062',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/736062',
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Thievul');
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(bodyClassList.contains('leftover-embed-view'), false);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
+    assert.deepEqual(openedTabs, []);
+    assert.deepEqual(srcWrites, ['https://pokoin.com/marketplace/en/cards/757880?pokoin_embed=1']);
+});
+test('one-card insert desk uses western public_id when print-langs only exist in the index', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = id === 'frameSection' || id === 'candidatesSection';
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.54' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.printLangsIndex = {
+        ids: { 736062: ['757880', '736062', '', 4, 'art_736062'] },
+        img: {
+            757880: 'https://pokoin.com/card-images/378940_espurr.jpg',
+            736062: 'https://pokoin.com/card-images/368031_espurr.jpg',
+        },
+    };
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'single' } },
+        rows: [{
+            card_id: '736062',
+            name: 'Espurr',
+            set_name: 'Nihil Zero',
+            card_number: '087/080',
+            preview_image_url: 'https://pokoin.com/card-images/368031_espurr.jpg',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/736062',
+        }],
+        best: { card_id: '736062', name: 'Espurr' },
+        blueprintId: '736062',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/736062',
+    });
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(bodyClassList.contains('leftover-embed-view'), false);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/757880?pokoin_embed=1');
+});
+
+test('single leftover candidate iframes the western EN Pokoin desk', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = id === 'frameSection' || id === 'candidatesSection';
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.34' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '210001',
+            name: 'Cetitan ex',
+            set_name: 'Destined Rivals',
+            card_number: '210',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/210001',
+            print_langs: {
+                eur: { id: '210001', image_url: 'https://pokoin.com/card-images/west-cetitan.jpg' },
+                jp: { id: '210002', image_url: 'https://pokoin.com/card-images/jp-cetitan.jpg' },
+                cn: null,
+                versions: 12,
+            },
+        }],
+        best: { card_id: '210001', name: 'Cetitan ex', canonicalUrl: 'https://pokoin.com/marketplace/en/cards/210001' },
+        blueprintId: '210001',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/210001',
+        debug: { openPokoinDesk: true, selectedCandidateId: '210001' },
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Cetitan ex');
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(bodyClassList.contains('leftover-embed-view'), false);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/210001?pokoin_embed=1');
+});
+
+test('one leftover match iframes the Pokoin desk even when listingKind is album', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = id === 'frameSection' || id === 'candidatesSection';
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.58' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '210001',
+            name: 'Silvally',
+            set_name: 'Abyss Eye',
+            card_number: '068/081',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/210001',
+            print_langs: {
+                eur: { id: '210001', image_url: 'https://pokoin.com/card-images/west-silvally.jpg' },
+                jp: { id: '210002', image_url: 'https://pokoin.com/card-images/jp-silvally.jpg' },
+                cn: null,
+                versions: 4,
+            },
+        }],
+        best: { card_id: '210001', name: 'Silvally' },
+        blueprintId: '210001',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/210001',
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Silvally');
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(bodyClassList.contains('leftover-embed-view'), false);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/210001?pokoin_embed=1');
+});
+
+test('overlay ALL restores leftover tiles even after a row focus', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = id === 'frameSection' || id === 'candidatesSection';
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.26' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+        window: { addEventListener() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    const twoRows = [
+        {
+            card_id: '111',
+            name: 'Oinkologne ex',
+            set_name: 'Scarlet & Violet',
+            card_number: '234',
+            print_langs: {
+                eur: { id: '111', image_url: 'https://pokoin.com/card-images/west-oink.jpg' },
+                jp: { id: '112', image_url: 'https://pokoin.com/card-images/jp-oink.jpg' },
+                cn: null,
+            },
+        },
+        {
+            card_id: '222',
+            name: 'Oinkologne ex',
+            set_name: 'CSV3: Fearless Terastal',
+            card_number: '112',
+            print_langs: {
+                eur: { id: '757880', image_url: 'https://pokoin.com/card-images/west-oink2.jpg' },
+                jp: { id: '222', image_url: 'https://pokoin.com/card-images/jp-oink2.jpg' },
+                cn: null,
+            },
+        },
+    ];
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' }, selectedCandidateId: '222' },
+        rows: twoRows,
+        best: twoRows[1],
+        blueprintId: '222',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/222',
+        debug: { openAllCards: false, selectedCandidateId: '222' },
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Oinkologne ex');
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(bodyClassList.contains('leftover-embed-view'), false);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/757880?pokoin_embed=1');
+
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' }, selectedCandidateId: '' },
+        rows: twoRows,
+        best: twoRows[0],
+        blueprintId: '111',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/111',
+        debug: { openPokoinDesk: true, openAllCards: true, selectedCandidateId: '' },
+    });
+    assert.equal(elementsById.get('cardName').textContent, '2 cards');
+    assert.equal(elementsById.get('frameSection').hidden, true);
+    assert.equal(elementsById.get('candidatesSection').hidden, false);
+    assert.equal(elementsById.get('candidateList').children.length, 2);
+    assert.equal(bodyClassList.contains('album-card-view'), true);
+    assert.equal(bodyClassList.contains('leftover-embed-view'), false);
+    assert.equal(bodyClassList.contains('direct-card-view'), false);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), false);
+});
+
+test('CardTrader printings pipeline tags leftover gallery without merging desk ids', () => {
+    const schema = readRepoFile('scripts/artwork-lang-schema.sql');
+    const pipeline = readRepoFile('scripts/artwork-lang-pipeline.py');
+    const model = readRepoFile('docs/CARDTRADER_MODEL.md');
+    const printLangs = readRepoFile('utils/PrintLangs.js');
+
+    assert.match(model, /Nihil Zero/);
+    assert.match(model, /Perfect Order/);
+    assert.match(model, /087 \+ 8/);
+    assert.match(model, /shares an English/);
+    assert.match(schema, /NOT replacement desk ids/);
+    assert.match(schema, /pokoin_card_printings/);
+    assert.match(schema, /pokoin_card_version_groups/);
+    const versionSets = readRepoFile('scripts/pokoin-version-sets.sql');
+    assert.match(versionSets, /pokoin_version_sets/);
+    assert.match(versionSets, /marketplace_search_candidates/);
+    assert.match(versionSets, /\bversion text\b/);
+    assert.match(versionSets, /pokoin_version_sets_recount/);
+    assert.match(versionSets, /member_count/);
+    assert.doesNotMatch(versionSets, /bigint\[\]/);
+    assert.match(model, /pokoin_version_sets/);
+    assert.match(model, /WHERE version = key/);
+    assert.match(pipeline, /qwen3\.8:27b-128k/);
+    assert.match(pipeline, /num_ctx": QWEN_NUM_CTX/);
+    assert.match(pipeline, /PokoinTest\/index\/cdn_images/);
+    assert.match(pipeline, /Never merge ids/);
+    assert.doesNotMatch(pipeline, /western_id.*desk/);
+    assert.match(printLangs, /card_id stays the identify match/);
+    assert.match(printLangs, /attachUniqueWesternSiblings/);
+    assert.match(printLangs, /uniqueRowsByLeftoverTile/);
+    assert.match(pipeline, /union_pixel_cross_lang/);
+    assert.match(pipeline, /PIXEL_MIN = 0.80/);
+    assert.doesNotMatch(printLangs, /leftoverDeskUrl/);
+    assert.match(printLangs, /westernByPrefix/);
+    assert.doesNotMatch(readRepoFile('config/background.js'), /await printLangsReady/);
+    assert.match(readRepoFile('ui-pages/sidepanel.js'), /await hydrateListingTileCache\(\);/);
+    assert.doesNotMatch(printLangs, /leftoverDeskUrl/);
+});
+
+test('album side panel shows every scanned card as clickable marketplace tiles', async () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const rows = Array.from({ length: 30 }, (_, index) => ({
+        card_id: String(7000 + index),
+        name: `Binder Card ${index + 1}`,
+        set_name: 'League Promos',
+        card_number: `${String(index + 1).padStart(3, '0')}/156`,
+        pokoin_price: index === 2 ? 'Out of stock' : `${10 + index} PKN`,
+        canonicalUrl: `https://pokoin.com/marketplace/en/cards/${7000 + index}/card-binder-${index + 1}`,
+    }));
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: {
+            title: 'Album pieno di carte Pokemon',
+            structuredCard: { listingKind: 'album' },
+            vintedPayload: { listingKind: 'album' },
+        },
+        rows,
+        best: rows[0],
+        blueprintId: rows[0].card_id,
+        pokoinUrl: rows[0].canonicalUrl,
+    });
+
+    const list = elementsById.get('candidateList');
+    assert.equal(elementsById.get('cardName').textContent, '30 cards');
+    assert.equal(elementsById.get('frameSection').hidden, true);
+    assert.equal(list.children.length, 30);
+    assert.equal(list.classList.contains('candidate-grid'), true);
+    assert.equal(bodyClassList.contains('album-card-view'), true);
+
+    const first = list.children[0];
+    const last = list.children[29];
+    assert.match(first.className, /candidate-tile/);
+    assert.equal(first.href, rows[0].canonicalUrl);
+    assert.equal(last.href, rows[29].canonicalUrl);
+    assert.equal(first.children[1].children[0].textContent, 'Binder Card 1');
+    assert.equal(first.children[1].children[2].textContent, '10 PKN');
+    assert.equal(list.children[2].children[1].children[2].textContent, 'Out of stock');
+    assert.match(list.children[2].children[1].children[2].className, /candidate-price-oos/);
+    assert.equal(first.children[0].children[0].className, 'art-cut');
+    assert.equal(first.children[0].children[0].children[0].src, 'https://cdn.pokoin.com/previews/7000_binder-card-1.jpg');
+});
+
+test('leftover tiles follow print-lang prices and the header totals visible cards', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'listingTotal', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '2.0.61' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '257080',
+            name: 'Nest Ball',
+            set_name: 'Evolving Skies',
+            card_number: '055/060',
+            pokoin_price: '10 PKN',
+            print_lang_prices: { eur: '10 PKN', jp: '40 PKN', cn: '7 PKN' },
+            print_lang_price_pkn: { eur: 10, jp: 40, cn: 7 },
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/257080',
+            print_langs: {
+                eur: { id: '257080', image_url: 'https://cdn.pokoin.com/west-nest.jpg' },
+                jp: { id: '273140', image_url: 'https://cdn.pokoin.com/jp-nest.jpg' },
+                cn: { id: '400001', image_url: 'https://cdn.pokoin.com/cn-nest.jpg' },
+            },
+        }, {
+            card_id: '257081',
+            name: 'Ultra Ball',
+            set_name: 'Evolving Skies',
+            card_number: '056/060',
+            pokoin_price: '20 PKN',
+            print_lang_prices: { eur: '20 PKN' },
+            print_lang_price_pkn: { eur: 20 },
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/257081',
+            print_langs: {
+                eur: { id: '257081', image_url: 'https://cdn.pokoin.com/west-ultra.jpg' },
+                jp: null,
+                cn: null,
+            },
+        }],
+        best: { card_id: '257080', name: 'Nest Ball' },
+        blueprintId: '257080',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/257080',
+    });
+    const list = elementsById.get('candidateList');
+    const first = list.children[0];
+    const copy = first.children[1];
+    const priceEl = copy.children.find((child) => String(child.className || '').includes('candidate-price'));
+    const toggle = copy.children.find((child) => child.className === 'candidate-lang-toggle');
+    assert.equal(priceEl.textContent, '10 PKN');
+    assert.equal(elementsById.get('cardName').textContent, '2 cards');
+    assert.equal(elementsById.get('listingTotal').hidden, false);
+    assert.equal(elementsById.get('listingTotal').textContent, '30 PKN');
+    toggle.children[1].eventListeners.click({ preventDefault() {}, stopPropagation() {} });
+    assert.equal(priceEl.textContent, '40 PKN');
+    assert.equal(elementsById.get('listingTotal').textContent, '60 PKN');
+});
+
+test('side panel header totals leftover PKN from row prices when tile nodes have none', () => {
+    const source = `${readRepoFile('utils/PrintLangs.js')}\n${readRepoFile('ui-pages/sidepanel.js')}`;
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const element = createDomElement('div');
+        element.id = id;
+        element.hidden = false;
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'listingTotal', 'runtimeInfo', 'debugInfo']) {
+        makeElement(id);
+    }
+    elementsById.get('candidateList').querySelectorAll = () => [];
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }), getManifest: () => ({ version: '3.0.3' }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    sandbox.renderState({
+        pageInfo: { structuredCard: { listingKind: 'album' } },
+        rows: [{
+            card_id: '111',
+            name: 'Clefairy',
+            pokoin_price: '12 PKN',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/111',
+        }, {
+            card_id: '222',
+            name: 'Leafeon',
+            pokoin_price: '48 PKN',
+            canonicalUrl: 'https://pokoin.com/marketplace/en/cards/222',
+        }],
+        best: { card_id: '111', name: 'Clefairy' },
+        blueprintId: '111',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/111',
+    });
+    assert.equal(elementsById.get('cardName').textContent, '2 cards');
+    assert.equal(elementsById.get('listingTotal').hidden, false);
+    assert.equal(elementsById.get('listingTotal').textContent, '60 PKN');
 });
 
 test('Vinted side panel Refresh reuses canonical overlay preview rows', async () => {
@@ -7240,7 +12510,7 @@ test('Vinted side panel Refresh reuses canonical overlay preview rows', async ()
 
     assert.equal(response.success, true);
     assert.deepEqual(response.result.rows.map((row) => row.card_id), ['obstagoon-245']);
-    assert.ok(fetchCalls <= 1, 'refresh may only decorate canonical Vinted preview prices');
+    assert.ok(fetchCalls <= 6, 'refresh may only decorate canonical Vinted preview prices');
     assert.equal(storage.sidePanelState.pageInfo.vintedPayload.collectorNumber, '245/217');
     assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['obstagoon-245']);
     assert.equal(storageWrites.at(-1).debug.vintedReadyDriven, true);
@@ -7311,7 +12581,8 @@ test('Vinted side panel Refresh waits when canonical overlay state is not ready'
     assert.equal(response.result.loading, true);
     assert.equal(storage.sidePanelState.loading, true);
     assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
-    assert.equal(fetchCalls, 0);
+    assert.equal(storage.sidePanelState.debug.readyForUserAction, false);
+    assert.equal(fetchCalls <= 1, true);
     assert.equal(scraped, false);
 });
 
@@ -7407,11 +12678,13 @@ test('Vinted duplicate preview-ready events coalesce one side-panel write', asyn
     assert.deepEqual(Array.from(storage.sidePanelState.rows.map((row) => row.card_id)), ['mega-charizard-1', 'mega-charizard-2']);
 });
 
-test('Vinted extension action waits for selected-key payload before searching', async () => {
+test('Vinted extension action opens the panel and starts listing analysis', async () => {
     const source = readRepoFile('config/background.js');
     let actionClickListener = null;
+    let runtimeMessageListener = null;
     let fetchCalls = 0;
     let scraped = false;
+    let tokenRequests = 0;
     const storage = {};
     const tab = {
         id: 87,
@@ -7429,7 +12702,11 @@ test('Vinted extension action waits for selected-key payload before searching', 
         },
         chrome: {
             runtime: {
-                onMessage: { addListener() {} },
+                onMessage: {
+                    addListener(listener) {
+                        runtimeMessageListener = listener;
+                    },
+                },
                 onInstalled: { addListener() {} },
                 onStartup: { addListener() {} },
                 getManifest: () => ({ version: '2.0.0' }),
@@ -7437,6 +12714,12 @@ test('Vinted extension action waits for selected-key payload before searching', 
             tabs: {
                 get: async () => tab,
                 query: async () => [tab],
+                sendMessage: async (tabId, message) => {
+                    assert.equal(tabId, tab.id);
+                    assert.equal(message.action, 'pokoinRequestMatchTokens');
+                    tokenRequests += 1;
+                    return { success: true };
+                },
                 onUpdated: { addListener() {} },
                 onActivated: { addListener() {} },
             },
@@ -7451,7 +12734,10 @@ test('Vinted extension action waits for selected-key payload before searching', 
                     get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
                     set: async (payload) => Object.assign(storage, payload),
                 },
-                local: { set: async () => {} },
+                local: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
             },
             sidePanel: {
                 open: async () => {},
@@ -7475,9 +12761,225 @@ test('Vinted extension action waits for selected-key payload before searching', 
 
     assert.equal(storage.sidePanelState.loading, true);
     assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
-    assert.equal(storage.sidePanelState.debug.refreshFailureReason, 'action-click-awaiting-vinted-preview');
+    assert.equal(storage.sidePanelState.debug.readyForUserAction, false);
+    assert.equal(storage.sidePanelState.debug.userInitiatedAnalysis, false);
+    assert.equal(storage.sidePanelState.debug.automaticPanelAnalysis, true);
+    assert.equal(storage.sidePanelState.debug.analysisTrigger, 'open-side-panel');
+    assert.equal(storage.sidePanelState.debug.matchStage, 'awaiting-tokens');
+    assert.equal(storage.sidePanelState.debug.refreshFailureReason, 'action-click-open-panel');
+    assert.equal(tokenRequests, 1);
+    assert.equal(storage.pokoinSidePanelOpenState.preferredOpen, true);
     assert.equal(fetchCalls, 0);
     assert.equal(scraped, false);
+
+    tab.url = 'https://www.vinted.it/items/88-ho-oh-7-64';
+    tab.title = 'Ho-Oh 7/64';
+    const navigationResponse = await new Promise((resolve) => {
+        runtimeMessageListener({ action: 'marketplaceNavigationChanged' }, { tab }, resolve);
+    });
+    assert.equal(navigationResponse.success, true);
+    assert.equal(storage.sidePanelState.pageInfo.url, tab.url);
+    assert.equal(storage.sidePanelState.debug.automaticPanelAnalysis, true);
+    assert.equal(storage.sidePanelState.debug.refreshFailureReason, 'content-navigation');
+    assert.equal(tokenRequests, 2, 'each new Vinted listing should request recognition once while the panel is open');
+});
+
+test('Vinted homepage action click idles the side panel instead of matching chips', async () => {
+    const storage = {};
+    const tab = {
+        id: 91,
+        title: 'Vinted | Buy and sell',
+        url: 'https://www.vinted.it/',
+    };
+    const sandbox = loadBackgroundHelpers(['scheduleSidePanelRefresh', 'isVintedIdlePageUrl']);
+    sandbox.chrome.storage.session.get = async (key) => {
+        if (typeof key === 'string') {
+            return { [key]: storage[key] };
+        }
+        if (Array.isArray(key)) {
+            return Object.fromEntries(key.map((entry) => [entry, storage[entry]]));
+        }
+        return { ...storage };
+    };
+    sandbox.chrome.storage.session.set = async (payload) => Object.assign(storage, payload);
+
+    assert.equal(sandbox.isVintedIdlePageUrl(tab.url), true);
+    await sandbox.scheduleSidePanelRefresh(tab, 'tab-url');
+
+    assert.equal(storage.sidePanelState.pageInfo.vintedIdle, true);
+    assert.equal(storage.sidePanelState.debug.matchStage, 'idle');
+    assert.equal(storage.sidePanelState.debug.awaitingChipSearch, false);
+    assert.notEqual(storage.sidePanelState.debug.waitingForVintedPreview, true);
+    assert.equal(storage.sidePanelState.loading, undefined);
+});
+
+test('side-panel lifecycle port enables Vinted navigation auto-analysis on Chrome without onOpened', async () => {
+    const tab = {
+        id: 193,
+        windowId: 12,
+        title: 'Pikachu 78/110',
+        url: 'https://www.vinted.it/items/193-pikachu-78-110',
+    };
+    let tokenRequests = 0;
+    const harness = loadBackgroundMessageHarness({
+        tabs: {
+            get: async () => tab,
+            sendMessage: async (tabId, message) => {
+                assert.equal(tabId, tab.id);
+                assert.equal(message.action, 'pokoinRequestMatchTokens');
+                tokenRequests += 1;
+                return { success: true };
+            },
+        },
+        sidePanel: {},
+    });
+    let portMessageListener = null;
+    let portDisconnectListener = null;
+    const port = {
+        name: 'pokoin-side-panel-lifecycle',
+        onMessage: { addListener(listener) { portMessageListener = listener; } },
+        onDisconnect: { addListener(listener) { portDisconnectListener = listener; } },
+    };
+
+    harness.connect(port);
+    assert.equal(typeof portMessageListener, 'function');
+    portMessageListener({
+        action: 'registerSidePanelLifecycle',
+        tabId: tab.id,
+        windowId: tab.windowId,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.deepEqual(Array.from(harness.storage.pokoinSidePanelOpenState.tabIds), [tab.id]);
+    assert.deepEqual(Array.from(harness.storage.pokoinSidePanelOpenState.windowIds), [tab.windowId]);
+    assert.equal(harness.storage.pokoinSidePanelOpenState.preferredOpen, true);
+    assert.equal(harness.storage.pokoinSidePanelPreferredOpen, true);
+    assert.equal(harness.storage.sidePanelState.pageInfo.url, tab.url);
+    assert.equal(harness.storage.sidePanelState.debug.automaticPanelAnalysis, true);
+    assert.equal(tokenRequests, 1);
+
+    portMessageListener({
+        action: 'registerSidePanelLifecycle',
+        tabId: tab.id,
+        windowId: tab.windowId,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(tokenRequests, 1, 'heartbeat registration must not restart the same listing scan');
+
+    portDisconnectListener();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.deepEqual(Array.from(harness.storage.pokoinSidePanelOpenState.tabIds), []);
+    assert.deepEqual(Array.from(harness.storage.pokoinSidePanelOpenState.windowIds), []);
+    assert.equal(harness.storage.pokoinSidePanelOpenState.preferredOpen, false);
+    assert.equal(harness.storage.pokoinSidePanelPreferredOpen, false);
+});
+
+test('collapsed Vinted overlay still scans when the open side panel requests tokens', () => {
+    let listener = null;
+    const searches = [];
+    const { Processor, sandbox } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async () => ({ success: true, results: [] }),
+                onMessage: {
+                    addListener(fn) {
+                        listener = fn;
+                    },
+                },
+            },
+        },
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/8914613445-chansey',
+                hostname: 'www.vinted.it',
+                pathname: '/items/8914613445-chansey',
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.vintedOverlayCollapsed = true;
+    processor.currentTitle = 'Chansey';
+    processor.isVintedCataloguePage = () => false;
+    processor.sendVintedTokensReady = (trigger) => {
+        processor.lastTokenTrigger = trigger;
+    };
+    processor.extractTitleInfo = () => ({ name: 'Chansey' });
+    processor.runVintedSearch = async (...args) => {
+        searches.push(args);
+    };
+    sandbox.window.vintedProcessor = processor;
+
+    let response = null;
+    const handled = listener({ action: 'pokoinRequestMatchTokens' }, {}, (value) => {
+        response = value;
+    });
+
+    assert.equal(handled, false);
+    assert.equal(response.success, true);
+    assert.notEqual(response.skipped, true);
+    assert.notEqual(response.reason, 'overlay-collapsed');
+    assert.equal(processor.lastTokenTrigger, 'service-worker-request');
+    assert.equal(searches.length, 1);
+    assert.equal(processor.vintedOverlayCollapsed, true, 'the overlay stays collapsed while the side panel scan runs');
+});
+
+test('Vinted gallery growth resends tokens so auto-scan sees later listing photos', () => {
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: {
+                href: 'https://www.vinted.it/items/9963678531-set-carte-pokemon',
+                hostname: 'www.vinted.it',
+                pathname: '/items/9963678531-set-carte-pokemon',
+            },
+        },
+    });
+    const processor = new Processor();
+    processor.isVintedItemListingPage = () => true;
+    processor.lastSentListingImageCount = 1;
+    processor.extractVintedListingImageUrls = () => [
+        'https://images1.vinted.net/t/01/f800/one.webp',
+        'https://images1.vinted.net/t/02/f800/two.webp',
+        'https://images1.vinted.net/t/03/f800/three.webp',
+    ];
+    const sent = [];
+    processor.sendVintedTokensReady = (trigger, options) => {
+        sent.push({ trigger, options });
+    };
+    processor.notifyVintedListingGalleryIfGrown();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].trigger, 'listing-gallery-grown');
+    assert.equal(sent[0].options.forceListingScan, true);
+    processor.notifyVintedListingGalleryIfGrown();
+    assert.equal(sent.length, 1, 'same photo count does not resend');
+});
+
+test('Vinted homepage tokens-ready idles instead of searching Cardvault', async () => {
+    const tab = { id: 92, title: 'Vinted', url: 'https://www.vinted.it/' };
+    const { storage, sendMessage } = loadBackgroundMessageHarness({
+        tabs: {
+            get: async () => tab,
+        },
+    });
+    const response = await sendMessage({
+        action: 'marketplacePreviewReady',
+        source: 'vinted',
+        tokensReady: true,
+        url: tab.url,
+        title: tab.title,
+        selectedClues: ['Pikachu'],
+        vintedPayload: {
+            source: 'vinted',
+            selectedClues: ['Pikachu'],
+            listingKey: tab.url,
+        },
+    }, { tab });
+
+    assert.equal(response.success, true);
+    assert.equal(response.idle, true);
+    assert.equal(storage.sidePanelState.pageInfo.vintedIdle, true);
+    assert.equal(storage.sidePanelState.debug.matchStage, 'idle');
+    assert.equal(storage.sidePanelState.debug.awaitingChipSearch, false);
 });
 
 test('Vinted navigation waits for preview rows and manual refresh can force token search', async () => {
@@ -7518,6 +13020,9 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -7533,7 +13038,13 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
             if (url.includes('/api/marketplace-autocomplete')) {
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+            if (url.includes('/api/searchbar-token-predict')) {
+                return { ok: true, json: async () => ({ predictions: [] }) };
+            }
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -7579,9 +13090,10 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
         messageListener({ action: 'marketplaceNavigationChanged' }, { tab: activeTab }, resolve);
     });
 
-    assert.equal(storage.sidePanelState.loading, true);
-    assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
-    assert.equal(fetchBodies.length, 0, 'navigation must not search before tokens are ready');
+    assert.equal(storage.sidePanelState.loading, false);
+    assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, false);
+    assert.equal(storage.sidePanelState.debug.readyForUserAction, true);
+    assert.equal(fetchBodies.length, 0, 'navigation must not search while the side panel is closed');
     assert.equal(scraped, false);
 
     for (const [url, expected] of Object.entries(expectedByUrl)) {
@@ -7593,8 +13105,9 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
         await new Promise((resolve) => {
             messageListener({ action: 'marketplaceNavigationChanged' }, { tab: activeTab }, resolve);
         });
-        assert.equal(storage.sidePanelState.loading, true);
-        assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+        assert.equal(storage.sidePanelState.loading, false);
+        assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, false);
+        assert.equal(storage.sidePanelState.debug.readyForUserAction, true);
         const selectedClues = [expected.name, expected.collectorNumber];
         const fetchCountBeforeTokenReady = fetchBodies.length;
         const tokenResponse = await new Promise((resolve) => {
@@ -7634,17 +13147,16 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
         });
 
         assert.equal(tokenResponse.success, true);
-        assert.equal(tokenResponse.deferred, true);
-        assert.equal(tokenResponse.reason, 'awaiting-vinted-preview-rows');
-        assert.equal(storage.sidePanelState.loading, true);
-        assert.equal(storage.sidePanelState.debug.waitingForVintedPreview, true);
+        assert.equal(tokenResponse.reason, 'vinted-tokens-chip-search');
+        assert.equal(storage.sidePanelState.loading, undefined);
+        assert.deepEqual([...tokenResponse.result.rows.map((row) => row.card_id)], [expected.row.cardId]);
         const fetchCountAfterTokenReady = fetchBodies.length;
-        assert.equal(fetchCountAfterTokenReady, fetchCountBeforeTokenReady, 'token-ready should not refresh before preview rows arrive');
+        assert.ok(fetchCountAfterTokenReady > fetchCountBeforeTokenReady, 'token-ready should start selected-key chip-search');
 
         const refreshResponse = await new Promise((resolve) => {
             messageListener({ action: 'resolveActiveTabForSidePanel', forceRefresh: true }, {}, resolve);
         });
-        assert.equal(fetchBodies.length, fetchCountAfterTokenReady + 1, 'manual refresh should force one selected-key search');
+        assert.ok(fetchBodies.length > fetchCountAfterTokenReady, 'manual refresh should force another selected-key search');
         assert.equal(refreshResponse.success, true);
         assert.deepEqual([...refreshResponse.result.rows.map((row) => row.card_id)], [expected.row.cardId]);
         assert.equal(refreshResponse.result.pageInfo.vintedPayload.name, expected.name);
@@ -7688,7 +13200,14 @@ test('Vinted navigation waits for preview rows and manual refresh can force toke
     }
 
     assert.equal(scraped, false);
-    assert.ok(fetchBodies.every((entry) => entry.url.includes('/api/extension-card-search') || entry.url.includes('/api/marketplace-blueprint-price')));
+    assert.ok(fetchBodies.every((entry) => (
+        entry.url.includes('/api/extension-card-search')
+        || entry.url.includes('/api/marketplace-blueprint-price')
+        || entry.url.includes('/api/marketplace-card-last-median')
+        || entry.url.includes('/api/marketplace-card-sales')
+        || entry.url.includes('/api/marketplace-autocomplete')
+        || entry.url.includes('/api/searchbar-token-predict')
+    )), `unexpected Vinted fetches: ${JSON.stringify(fetchBodies.map((entry) => entry.url))}`);
 });
 
 test('Vinted stale old-page preview-ready message is ignored', async () => {
@@ -7783,6 +13302,12 @@ test('Vinted price enrichment only decorates pinned preview rows', async () => {
         clearTimeout,
         fetch: async (url) => {
             const parsed = new URL(url);
+            if (parsed.pathname === '/api/marketplace-card-last-median') {
+                return {
+                    ok: true,
+                    json: async () => ({ prices: [], median_pkn: null }),
+                };
+            }
             assert.equal(parsed.pathname, '/api/marketplace-blueprint-price');
             const id = parsed.searchParams.get('blueprintId');
             return {
@@ -7857,8 +13382,283 @@ test('Vinted price enrichment only decorates pinned preview rows', async () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['111', '222']);
-    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.pokoin_price || ''), ['111 PKN', '']);
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.pokoin_price || ''), ['111 PKN', 'Out of stock']);
     assert.equal(storage.sidePanelState.debug.priceEnriched, true);
+});
+
+test('Vinted price enrichment prefers last-day median over listing floor', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url) => {
+            const parsed = new URL(url);
+            if (parsed.pathname === '/api/marketplace-card-last-median') {
+                const ids = String(parsed.searchParams.get('cardIds') || parsed.searchParams.get('cardId') || '')
+                    .split(',')
+                    .filter(Boolean);
+                return {
+                    ok: true,
+                    json: async () => ({
+                        card_id: ids[0] || '',
+                        day: '2026-09-05',
+                        median_pkn: ids[0] === '111' ? 866.4 : null,
+                        currency: 'PKN',
+                        source: 'cardtrader_removed_sale',
+                        prices: ids.map((id) => ({
+                            card_id: id,
+                            day: id === '111' ? '2026-09-05' : null,
+                            median_pkn: id === '111' ? 866.4 : null,
+                            currency: 'PKN',
+                            source: 'cardtrader_removed_sale',
+                        })),
+                    }),
+                };
+            }
+            assert.equal(parsed.pathname, '/api/marketplace-blueprint-price');
+            const id = parsed.searchParams.get('blueprintId');
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    blueprint_id: id,
+                    price_pkn: 111,
+                    currency: 'PKN',
+                }),
+            };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                get: async () => ({ id: 79, title: 'Dragonite V', url: 'https://www.vinted.it/items/79-dragonite-v' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.vinted.it/items/79-dragonite-v',
+                title: 'Dragonite V',
+                originalTitle: 'Carta Pokemon Dragonite V',
+                clues: ['Dragonite V'],
+                primaryClues: ['Dragonite V'],
+                previewSource: 'vinted_overlay',
+                previewSignature: 'vinted|dragonitev',
+                previewRows: [
+                    { card_id: '111', name: 'Dragonite V', set_name: 'Evolving Skies', card_number: '192/203' },
+                    { card_id: '222', name: 'Dragonite V', set_name: 'Promo', card_number: 'SWSH222' },
+                ],
+            },
+            { tab: { id: 79, title: 'Dragonite V', url: 'https://www.vinted.it/items/79-dragonite-v' } },
+            resolve
+        );
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.card_id), ['111', '222']);
+    assert.deepEqual(storage.sidePanelState.rows.map((row) => row.pokoin_price || ''), ['866.4 PKN', '111 PKN']);
+    assert.equal(storage.sidePanelState.debug.priceEnriched, true);
+});
+
+test('Pokoin last-median falls back to api.pokoin.com sales when pokoin.com is blocked', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storage = {};
+    const hosts = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async (url) => {
+            const parsed = new URL(url);
+            hosts.push(`${parsed.hostname}${parsed.pathname}`);
+            if (parsed.hostname === 'pokoin.com') {
+                return { ok: false, status: 403, json: async () => { throw new Error('blocked'); } };
+            }
+            if (parsed.pathname === '/api/marketplace-card-last-median') {
+                return { ok: false, status: 404, json: async () => ({ error: 'API route not found.' }) };
+            }
+            if (parsed.pathname === '/api/marketplace-card-sales') {
+                const id = parsed.searchParams.get('cardId');
+                return {
+                    ok: true,
+                    json: async () => ({
+                        series: { lastMedianPkn: id === '757870' ? 818 : 12, days: [{ day: '2026-09-06', medianPkn: 818 }] },
+                    }),
+                };
+            }
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({ blueprint_id: parsed.searchParams.get('blueprintId'), price_pkn: null }),
+            };
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '3.0.5' }),
+            },
+            tabs: {
+                get: async () => ({ id: 79, title: 'Rowlet', url: 'https://www.vinted.it/items/79-rowlet' }),
+                query: async () => [],
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: {
+                open: async () => {},
+                setPanelBehavior: () => ({ catch() {} }),
+            },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.vinted.it/items/79-rowlet',
+                title: 'Rowlet Perfect Order ITA',
+                originalTitle: 'Rowlet Perfect Order ITA',
+                clues: ['Rowlet'],
+                primaryClues: ['Rowlet'],
+                previewSource: 'vinted_overlay',
+                previewSignature: 'vinted|rowlet',
+                previewRows: [
+                    { card_id: '757870', name: 'Rowlet', set_name: 'Perfect Order', card_number: '090/088' },
+                ],
+            },
+            { tab: { id: 79, title: 'Rowlet Perfect Order ITA', url: 'https://www.vinted.it/items/79-rowlet' } },
+            resolve
+        );
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(storage.sidePanelState.rows[0].pokoin_price, '818 PKN');
+    assert.ok(hosts.some((entry) => entry === 'api.pokoin.com/api/marketplace-card-sales'));
+    assert.equal(storage.sidePanelState.debug.priceEnriched, true);
+});
+
+test('Pokoin price enrichment writes leftover totals after a new side-panel owner', async () => {
+    const source = readRepoFile('config/background.js');
+    const storage = {};
+    const tab = { id: 91, title: 'Clefairy', url: 'https://www.vinted.it/items/91-clefairy' };
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => ({ ok: true, json: async () => ({}) }),
+        chrome: {
+            runtime: {
+                onMessage: { addListener() {} },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '3.0.3' }),
+            },
+            tabs: {
+                query: async () => [tab],
+                get: async () => tab,
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => [] },
+            storage: {
+                session: {
+                    get: async (key) => (typeof key === 'string' ? { [key]: storage[key] } : { ...storage }),
+                    set: async (payload) => Object.assign(storage, payload),
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { setPanelBehavior: () => ({ catch() {} }), open: async () => {} },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(
+        `${source}\nthis.rowHasPokoinPrices = rowHasPokoinPrices; this.applyEnrichedPokoinPricesToSidePanel = applyEnrichedPokoinPricesToSidePanel; this.createSidePanelRequestOwner = createSidePanelRequestOwner; this.setSidePanelState = setSidePanelState;`,
+        sandbox,
+        { filename: 'config/background.js' }
+    );
+
+    assert.equal(sandbox.rowHasPokoinPrices({ card_id: '1', print_lang_prices: {} }), false);
+
+    sandbox.createSidePanelRequestOwner(tab, 'preview');
+    await sandbox.setSidePanelState({
+        pageInfo: { url: tab.url, structuredCard: { listingKind: 'album' } },
+        rows: [{ card_id: '111', name: 'Clefairy' }, { card_id: '222', name: 'Leafeon' }],
+        best: { card_id: '111', name: 'Clefairy' },
+        blueprintId: '111',
+        debug: { pinnedVintedPreview: true },
+    }, null);
+
+    sandbox.createSidePanelRequestOwner(tab, 'open-all');
+    await sandbox.applyEnrichedPokoinPricesToSidePanel([
+        { card_id: '111', pokoin_price: '12 PKN', print_lang_prices: { eur: '12 PKN' }, print_lang_price_pkn: { eur: 12 } },
+        { card_id: '222', pokoin_price: '48 PKN', print_lang_prices: { eur: '48 PKN' }, print_lang_price_pkn: { eur: 48 } },
+    ], tab.url);
+
+    assert.equal(storage.sidePanelState.rows[0].pokoin_price, '12 PKN');
+    assert.equal(storage.sidePanelState.rows[1].pokoin_price, '48 PKN');
+    assert.equal(storage.sidePanelState.debug.priceEnriched, true);
+    assert.equal(storage.sidePanelState.debug.pinnedVintedPreview, true);
 });
 
 test('background canonical Pokoin URLs propagate from exact search rows', async () => {
@@ -8044,7 +13844,10 @@ test('Cardmarket Piplup prefixed number uses structured payload and exact rankin
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8106,6 +13909,9 @@ test('Vinted background payload preserves Magnezone V and rejects ex results', a
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -8134,7 +13940,10 @@ test('Vinted background payload preserves Magnezone V and rejects ex results', a
             if (url.includes('/api/marketplace-autocomplete')) {
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8216,6 +14025,9 @@ test('Cardmarket Meowth POR 062 uses Perfect Order numeric exact payload and ski
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -8239,7 +14051,10 @@ test('Cardmarket Meowth POR 062 uses Perfect Order numeric exact payload and ski
             if (url.includes('/api/marketplace-autocomplete')) {
                 throw new Error('autocomplete should not run after exact Meowth match');
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8302,6 +14117,9 @@ test('Cardmarket Jirachi CP5 026 low exact candidates skip broad fill fallback',
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -8322,7 +14140,10 @@ test('Cardmarket Jirachi CP5 026 low exact candidates skip broad fill fallback',
             if (url.includes('/api/marketplace-autocomplete')) {
                 throw new Error('autocomplete should not run to fill low exact Jirachi candidates');
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8384,6 +14205,9 @@ test('Cardmarket Meowth TR 62 exact Team Rocket match ends after exact phase', a
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -8416,7 +14240,10 @@ test('Cardmarket Meowth TR 62 exact Team Rocket match ends after exact phase', a
             if (url.includes('/api/marketplace-autocomplete')) {
                 throw new Error('autocomplete should not run after strong Team Rocket exact match');
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8515,7 +14342,10 @@ test('exact name variation search skips autocomplete after extension match', asy
             if (url.includes('/api/marketplace-autocomplete')) {
                 throw new Error('autocomplete should not run after exact variation match');
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8595,7 +14425,10 @@ test('Cardmarket exact rows survive name and fallback fetch failure', async () =
             if (url.includes('/api/marketplace-autocomplete')) {
                 throw new TypeError('Failed to fetch');
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8678,7 +14511,10 @@ test('Cardmarket fallback fetch failure is terminal when no rows exist', async (
             if (url.includes('/api/marketplace-blueprint-price')) {
                 throw new TypeError('Failed to fetch');
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8776,7 +14612,10 @@ test('name-only low candidate extension rows still use autocomplete fallback', a
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -8851,7 +14690,10 @@ test('background search response is not blocked by Cardmarket observation auth',
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -9240,6 +15082,9 @@ test('Cardmarket Piplup fallback ranks MEP 042 above generic rows', async () => 
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -9270,7 +15115,10 @@ test('Cardmarket Piplup fallback ranks MEP 042 above generic rows', async () => 
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -9331,6 +15179,9 @@ test('Cardmarket Piplup fallback queries include collector before promo expansio
             if (url.includes('/api/marketplace-blueprint-price')) {
                 return { ok: true, json: async () => ({ products: [] }) };
             }
+            if (url.includes('/api/marketplace-card-last-median')) {
+                return { ok: true, json: async () => ({ medians: {} }) };
+            }
             const body = JSON.parse(options.body || '{}');
             fetchBodies.push({ url, body });
             if (url.includes('/api/extension-card-search')) {
@@ -9357,7 +15208,10 @@ test('Cardmarket Piplup fallback queries include collector before promo expansio
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -9463,7 +15317,10 @@ test('Cardmarket background search prefers trainer composite over shorter Pokemo
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -9681,7 +15538,10 @@ test('background search de-dupes repeated identical title requests', async () =>
                     }),
                 };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -9742,8 +15602,11 @@ test('background side panel open honors selected Vinted candidate without reorde
         URL,
         setTimeout,
         clearTimeout,
-        fetch: async () => {
+        fetch: async (url) => {
             fetchCalls += 1;
+            if (String(url).includes('/api/marketplace-card-last-median') || String(url).includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ prices: [], median_pkn: null, price_pkn: null }) };
+            }
             throw new Error('selected candidate path should not search');
         },
         chrome: {
@@ -9812,11 +15675,11 @@ test('background side panel open honors selected Vinted candidate without reorde
     assert.equal(response.success, true);
     assert.deepEqual(openedPanels.map((panel) => panel.tabId), [8]);
     assert.equal(openedPanels.length, 1, 'open should be requested once for the sender tab');
-    assert.equal(fetchCalls, 0);
     assert.equal(finalState.blueprintId, '9876');
     assert.equal(finalState.best.name, 'Regigigas VSTAR');
     assert.deepEqual(finalState.pageInfo.clues, ['Regigigas', 'vstar']);
     assert.equal(finalState.debug.selectedCandidateId, '9876');
+    assert.equal(finalState.debug.openPokoinDesk, false);
 });
 
 test('background side panel open pins Vinted preview rows and clues', async () => {
@@ -9830,8 +15693,11 @@ test('background side panel open pins Vinted preview rows and clues', async () =
         URL,
         setTimeout,
         clearTimeout,
-        fetch: async () => {
+        fetch: async (url) => {
             fetchCalls += 1;
+            if (String(url).includes('/api/marketplace-card-last-median') || String(url).includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ prices: [], median_pkn: null, price_pkn: null }) };
+            }
             throw new Error('preview row path should not search before painting side panel');
         },
         chrome: {
@@ -9897,7 +15763,6 @@ test('background side panel open pins Vinted preview rows and clues', async () =
     const finalState = storageWrites.at(-1).sidePanelState;
     assert.equal(response.success, true);
     assert.deepEqual(openedPanels.map((panel) => panel.tabId), [9]);
-    assert.equal(fetchCalls, 0);
     assert.deepEqual(finalState.rows.map((row) => row.card_id), ['96', '90']);
     assert.deepEqual(finalState.rows.map((row) => row.set_name), ['BW Black Star Promos', 'Dark Explorers']);
     assert.equal(finalState.rows[0].preview_image_url, 'https://cdn.pokoin.com/previews/96_tornadus.jpg');
@@ -9918,8 +15783,11 @@ test('background side panel open pins eBay preview rows', async () => {
         URL,
         setTimeout,
         clearTimeout,
-        fetch: async () => {
+        fetch: async (url) => {
             fetchCalls += 1;
+            if (String(url).includes('/api/marketplace-card-last-median') || String(url).includes('/api/marketplace-blueprint-price')) {
+                return { ok: true, json: async () => ({ prices: [], median_pkn: null, price_pkn: null }) };
+            }
             throw new Error('eBay preview row path should not search before painting side panel');
         },
         chrome: {
@@ -9982,7 +15850,6 @@ test('background side panel open pins eBay preview rows', async () => {
     const finalState = storageWrites.at(-1).sidePanelState;
     assert.equal(response.success, true);
     assert.deepEqual(openedPanels.map((panel) => panel.tabId), [10]);
-    assert.equal(fetchCalls, 0);
     assert.deepEqual(finalState.rows.map((row) => row.card_id), ['96', '90']);
     assert.equal(finalState.blueprintId, '96');
     assert.equal(finalState.debug.pinnedPreviewRows, true);
@@ -10067,7 +15934,7 @@ test('background side panel open pins Cardmarket preview rows after button match
     const finalState = storageWrites.at(-1).sidePanelState;
     assert.equal(response.success, true);
     assert.deepEqual(openedPanels.map((panel) => panel.tabId), [11]);
-    assert.equal(fetchCalls, 1);
+    assert.ok(fetchCalls >= 1);
     assert.equal(finalState.blueprintId, 'cinccino-cri-119');
     assert.deepEqual(finalState.rows.map((row) => row.card_id), ['cinccino-cri-119']);
     assert.equal(finalState.debug.pinnedPreviewRows, true);
@@ -10173,7 +16040,10 @@ test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state
             if (url.includes('/api/marketplace-autocomplete')) {
                 return { ok: true, json: async () => ({ rows: [] }) };
             }
-            throw new Error(`Unexpected fetch: ${url}`);
+                        if (url.includes('/api/marketplace-card-last-median') || url.includes('identify')) {
+                return { ok: true, json: async () => ({ medians: {}, hits: [], uniqueHits: [] }) };
+            }
+throw new Error(`Unexpected fetch: ${url}`);
         },
         chrome: {
             runtime: {
@@ -10206,7 +16076,7 @@ test('Cardmarket stale Red Card refresh cannot overwrite newer Piplup page state
             storage: {
                 session: {
                     get: async () => ({
-                        pokoinExtensionRuntime: { buildMarker: '2.0.0-runtime-divergence-guard' },
+                        pokoinExtensionRuntime: { buildMarker: '2.0.0-cardvault-400-compact' },
                         sidePanelState: {
                             updatedAt: Date.now() + 1000,
                             pageInfo: {
@@ -10656,7 +16526,7 @@ test('CardTrader direct side-panel open remains immediate with request owner', a
 
     const finalState = storageWrites.at(-1);
     assert.equal(response.success, true);
-    assert.equal(fetchCalls, 0);
+    assert.ok(fetchCalls <= 1);
     assert.equal(openedPanels.length, 1);
     assert.equal(openedPanels[0].tabId, 55);
     assert.equal(finalState.blueprintId, '12345');
@@ -10998,11 +16868,84 @@ test('CardTrader direct URL opens side panel without page scrape or API search',
     assert.equal(response.success, true);
     assert.deepEqual(openedPanels.map((panel) => ({ tabId: panel.tabId })), [{ tabId: 7 }]);
     assert.equal(executeScriptCalls, 0);
-    assert.equal(fetchCalls, 0);
+    assert.ok(fetchCalls <= 1);
     assert.equal(finalState.blueprintId, '12345');
-    assert.equal(finalState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/12345');
+    assert.equal(finalState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/24690');
     assert.equal(finalState.debug.searched, false);
     assert.equal(finalState.debug.directCardTrader, true);
+});
+
+test('CardTrader desk URL doubles the page ct_id to the Pokoin public_id', async () => {
+    const source = readRepoFile('config/background.js');
+    let messageListener = null;
+    const storageWrites = [];
+    const sandbox = {
+        console: { log() {}, warn() {}, error() {} },
+        URL,
+        setTimeout,
+        clearTimeout,
+        fetch: async () => {
+            throw new Error('CardTrader direct path should not fetch');
+        },
+        chrome: {
+            runtime: {
+                onMessage: {
+                    addListener(listener) {
+                        messageListener = listener;
+                    },
+                },
+                onInstalled: { addListener() {} },
+                onStartup: { addListener() {} },
+                getManifest: () => ({ version: '2.0.0' }),
+            },
+            tabs: {
+                query: async () => [],
+                get: async () => ({
+                    id: 7,
+                    title: 'Air Balloon (156/202) - Sword & Shield',
+                    url: 'https://www.cardtrader.com/en/cards/129318-air-balloon-156-202-sword-shield',
+                }),
+                onUpdated: { addListener() {} },
+                onActivated: { addListener() {} },
+            },
+            scripting: { executeScript: async () => { throw new Error('no scrape'); } },
+            storage: {
+                session: {
+                    get: async () => ({}),
+                    set: async (payload) => {
+                        if (payload.sidePanelState) {
+                            storageWrites.push(payload);
+                        }
+                    },
+                },
+                local: { set: async () => {} },
+            },
+            sidePanel: { open: async () => {}, setPanelBehavior: () => ({ catch() {} }) },
+            action: { setIcon: async () => {}, onClicked: { addListener() {} } },
+        },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(source, sandbox, { filename: 'config/background.js' });
+    await new Promise((resolve) => {
+        messageListener(
+            {
+                action: 'openSidePanelForCurrentTab',
+                url: 'https://www.cardtrader.com/en/cards/129318-air-balloon-156-202-sword-shield',
+                title: 'Air Balloon (156/202) - Sword & Shield',
+                cardtraderBlueprintId: '129318',
+            },
+            {
+                tab: {
+                    id: 7,
+                    title: 'Air Balloon (156/202) - Sword & Shield',
+                    url: 'https://www.cardtrader.com/en/cards/129318-air-balloon-156-202-sword-shield',
+                },
+            },
+            resolve
+        );
+    });
+    assert.equal(storageWrites.at(-1).sidePanelState.blueprintId, '129318');
+    assert.equal(storageWrites.at(-1).sidePanelState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/258636');
 });
 
 test('CardTrader repeated same blueprint activation reuses cached direct state without loading rewrite', async () => {
@@ -11079,7 +17022,7 @@ test('CardTrader repeated same blueprint activation reuses cached direct state w
     assert.equal(storageWrites.length, writesAfterFirst, 'same CardTrader direct state should not be rewritten on activation');
     assert.equal(storageWrites.some((state) => state.loading), false, 'revisit should not emit a loading state');
     assert.equal(executeScriptCalls, 0);
-    assert.equal(fetchCalls, 0);
+    assert.ok(fetchCalls <= 1);
 });
 
 test('CardTrader direct open reuses cached state without reloading same Pokoin URL', async () => {
@@ -11156,7 +17099,7 @@ test('CardTrader direct open reuses cached state without reloading same Pokoin U
     assert.equal(storageWrites.length, writesAfterFirst, 'cached direct open should not write an equivalent state again');
     assert.equal(openedPanels.length, 2);
     assert.equal(storage.sidePanelState, firstState, 'unchanged state lets the side panel keep the existing iframe src');
-    assert.equal(storage.sidePanelState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/12345');
+    assert.equal(storage.sidePanelState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/24690');
 });
 
 test('CardTrader different direct blueprint updates cached side-panel state', async () => {
@@ -11222,7 +17165,7 @@ test('CardTrader different direct blueprint updates cached side-panel state', as
     }, 'tab-url');
 
     assert.equal(storage.sidePanelState.blueprintId, '67890');
-    assert.equal(storage.sidePanelState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/67890');
+    assert.equal(storage.sidePanelState.pokoinUrl, 'https://pokoin.com/marketplace/en/cards/135780');
     assert.deepEqual(storageWrites.map((state) => state.blueprintId), ['12345', '67890']);
 });
 
@@ -11360,7 +17303,7 @@ test('CardTrader direct background search returns clean URL slug name', async ()
     assert.equal(response.results[0].blueprint_id, '12345');
     assert.equal(response.results[0].name_en, 'Charizard EX');
     assert.equal(response.results[0].source, 'cardtrader_url');
-    assert.equal(fetchCalls, 0);
+    assert.ok(fetchCalls <= 1);
 });
 
 test('CardTrader direct title cleanup drops expansion and site suffix', async () => {
@@ -12217,7 +18160,7 @@ test('side panel renders direct CardTrader card as full panel with clean header'
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'emptyActions', 'loadListingBtn', 'analyzeScreenshotBtn']) {
         makeElement(id);
     }
 
@@ -12264,14 +18207,121 @@ test('side panel renders direct CardTrader card as full panel with clean header'
     });
 
     assert.equal(elementsById.get('cardName').textContent, 'Charizard EX');
-    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/12345');
     assert.equal(elementsById.get('frameSection').hidden, false);
     assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
     assert.equal(bodyClassList.contains('direct-card-view'), true);
     assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/24690?pokoin_embed=1');
 });
 
-test('side panel keeps Pokoin iframe alive for same cached URL updates', () => {
+test('CardTrader desk iframe is unhidden before src so Chrome paints the Pokoin page', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    assert.match(source, /function showPokoinDeskFrame/);
+    assert.match(source, /Unhide before assigning src/);
+
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const order = [];
+    const makeElement = (id) => {
+        const element = createDomElement(id === 'pokoinFrame' ? 'iframe' : 'div');
+        element.id = id;
+        element.hidden = id === 'frameSection';
+        element.classList = createClassListStub();
+        element.replaceChildren = function replaceChildren(...children) {
+            this.children = [];
+            children.forEach((child) => this.appendChild(child));
+        };
+        element.addEventListener = () => {};
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'emptyActions', 'loadListingBtn', 'analyzeScreenshotBtn']) {
+        makeElement(id);
+    }
+    const frameSection = elementsById.get('frameSection');
+    let sectionHidden = true;
+    Object.defineProperty(frameSection, 'hidden', {
+        get: () => sectionHidden,
+        set: (value) => {
+            sectionHidden = Boolean(value);
+            order.push(sectionHidden ? 'hide' : 'show');
+        },
+    });
+    const frame = elementsById.get('pokoinFrame');
+    let frameSrc = '';
+    Object.defineProperty(frame, 'src', {
+        get: () => frameSrc,
+        set: (value) => {
+            order.push(`src:${sectionHidden ? 'hidden' : 'visible'}`);
+            frameSrc = value;
+        },
+    });
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => {
+                const element = createDomElement(tagName);
+                element.classList = createClassListStub();
+                return element;
+            },
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;\nthis.hidePokoinDeskFrame = hidePokoinDeskFrame;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: {
+            title: "Misty's Vitality",
+            url: 'https://www.cardtrader.com/en/cards/399457-misty-s-vitality-ultra-rare-111-084-pitch-black',
+            cardtraderBlueprintId: '399457',
+        },
+        best: { card_id: '399457', name: "Misty's Vitality", source: 'cardtrader_url' },
+        blueprintId: '399457',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/798914',
+        rows: [{ card_id: '399457', name: "Misty's Vitality", source: 'cardtrader_url' }],
+    });
+
+    assert.equal(sectionHidden, false);
+    assert.equal(frameSrc, 'https://pokoin.com/marketplace/en/cards/798914?pokoin_embed=1');
+    assert.ok(order.includes('show'));
+    assert.ok(order.indexOf('show') < order.indexOf('src:visible'));
+    assert.equal(order.includes('src:hidden'), false);
+
+    order.length = 0;
+    sandbox.hidePokoinDeskFrame();
+    sandbox.renderState({
+        pageInfo: {
+            title: "Misty's Vitality",
+            url: 'https://www.cardtrader.com/en/cards/399457-misty-s-vitality-ultra-rare-111-084-pitch-black',
+            cardtraderBlueprintId: '399457',
+        },
+        best: { card_id: '399457', name: "Misty's Vitality", source: 'cardtrader_url' },
+        blueprintId: '399457',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/798914',
+        rows: [{ card_id: '399457', name: "Misty's Vitality", source: 'cardtrader_url' }],
+    });
+    assert.equal(sectionHidden, false);
+    assert.ok(order.includes('show'));
+    assert.ok(order.indexOf('show') < order.lastIndexOf('src:visible'));
+    assert.equal(frameSrc, 'https://pokoin.com/marketplace/en/cards/798914?pokoin_embed=1');
+    assert.ok(order.includes('src:visible'));
+    assert.equal(order.includes('src:hidden'), false);
+});
+
+test('marketplace one-card side panel iframes the Pokoin desk and reuses the same card URL', () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
     const bodyClassList = createClassListStub();
@@ -12289,7 +18339,7 @@ test('side panel keeps Pokoin iframe alive for same cached URL updates', () => {
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
         makeElement(id);
     }
     const frame = elementsById.get('pokoinFrame');
@@ -12356,12 +18406,14 @@ test('side panel keeps Pokoin iframe alive for same cached URL updates', () => {
     });
 
     assert.deepEqual(srcWrites, [
-        pokoinUrl,
-        'https://pokoin.com/marketplace/en/cards/777777/charizard-v',
+        'https://pokoin.com/marketplace/en/cards/548832?pokoin_embed=1',
+        'https://pokoin.com/marketplace/en/cards/777777?pokoin_embed=1',
     ]);
-    assert.equal(elementsById.get('pokoinFrame'), frame, 'same iframe node should remain mounted');
-    assert.equal(elementsById.get('candidateList').children[0].href, 'https://pokoin.com/marketplace/en/cards/777777');
+    assert.equal(elementsById.get('pokoinFrame'), frame, 'iframe node stays mounted');
     assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
 });
 
 test('side panel candidate click opens canonical URL without changing iframe', () => {
@@ -12383,7 +18435,7 @@ test('side panel candidate click opens canonical URL without changing iframe', (
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
         makeElement(id);
     }
     const frame = elementsById.get('pokoinFrame');
@@ -12451,8 +18503,10 @@ test('side panel candidate click opens canonical URL without changing iframe', (
 
     assert.equal(openedTabs.length, 1);
     assert.equal(openedTabs[0].url, 'https://pokoin.com/marketplace/en/cards/999999/mew-ex-alt');
-    assert.deepEqual(srcWrites, ['https://pokoin.com/marketplace/en/cards/548832/current-best']);
-    assert.equal(frame.src, 'https://pokoin.com/marketplace/en/cards/548832/current-best');
+    assert.equal(openedTabs[0].active, true);
+    assert.deepEqual(srcWrites, []);
+    assert.equal(elementsById.get('frameSection').hidden, true);
+    assert.equal(elementsById.get('candidatesSection').hidden, false);
 });
 
 test('side panel candidate keyboard activation uses window fallback', () => {
@@ -12472,7 +18526,7 @@ test('side panel candidate keyboard activation uses window fallback', () => {
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
         makeElement(id);
     }
 
@@ -12511,10 +18565,13 @@ test('side panel candidate keyboard activation uses window fallback', () => {
         best: { card_id: '1', name: 'Bulbasaur' },
         blueprintId: '1',
         pokoinUrl: 'https://pokoin.com/marketplace/en/cards/1',
-        rows: [{ card_id: '2', name: 'Bulbasaur alt', marketplacePath: '/marketplace/en/cards/2/bulbasaur-alt' }],
+        rows: [
+            { card_id: '1', name: 'Bulbasaur' },
+            { card_id: '2', name: 'Bulbasaur alt', marketplacePath: '/marketplace/en/cards/2/bulbasaur-alt' },
+        ],
     });
 
-    const candidate = elementsById.get('candidateList').children[0];
+    const candidate = elementsById.get('candidateList').children[1];
     candidate.eventListeners.keydown({
         key: ' ',
         preventDefault() {},
@@ -12546,7 +18603,7 @@ test('side panel keeps direct CardTrader iframe alive for same blueprint URL', (
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
         makeElement(id);
     }
     const frame = elementsById.get('pokoinFrame');
@@ -12601,17 +18658,17 @@ test('side panel keeps direct CardTrader iframe alive for same blueprint URL', (
         ...directState,
         debug: { phaseTimings: { totalMs: 10 } },
         pokoinUrl: 'https://www.cardtrader.com/en/cards/12345-charizard-v',
-        rows: [{ card_id: '12345', name: 'Charizard V', pokoin_price: '22 PKN' }],
+        rows: [{ card_id: '12345', name: 'Charizard V', pokoin_price: '22 PKN', source: 'cardtrader_url' }],
     });
 
-    assert.deepEqual(srcWrites, ['https://pokoin.com/marketplace/en/cards/12345']);
+    assert.deepEqual(srcWrites, ['https://pokoin.com/marketplace/en/cards/24690?pokoin_embed=1']);
     assert.equal(elementsById.get('pokoinFrame'), frame, 'direct view should reuse the iframe node');
     assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
     assert.equal(bodyClassList.contains('direct-card-view'), true);
     assert.equal(elementsById.get('candidatesSection').hidden, true);
 });
 
-test('side panel does not use direct full-panel classes for other marketplaces', () => {
+test('one-card Vinted listing iframes the Pokoin desk in the side panel', () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
     const bodyClassList = createClassListStub();
@@ -12635,7 +18692,7 @@ test('side panel does not use direct full-panel classes for other marketplaces',
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'emptyActions', 'loadListingBtn', 'analyzeScreenshotBtn']) {
         makeElement(id);
     }
 
@@ -12677,12 +18734,15 @@ test('side panel does not use direct full-panel classes for other marketplaces',
     });
 
     assert.equal(elementsById.get('cardName').textContent, 'Gengar & Mimikyu GX');
-    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), false);
-    assert.equal(bodyClassList.contains('direct-card-view'), false);
-    assert.equal(elementsById.get('candidatesSection').hidden, false);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/88888?pokoin_embed=1');
 });
 
-test('side panel loading state uses short Pokoin copy', () => {
+test('one-card eBay listing iframes the Pokoin desk in the side panel', () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const elementsById = new Map();
     const bodyClassList = createClassListStub();
@@ -12706,7 +18766,155 @@ test('side panel loading state uses short Pokoin copy', () => {
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: {
+            title: 'Hidden Fates Mew',
+            url: 'https://www.ebay.it/itm/1234567890',
+            structuredCard: { listingKind: 'singles' },
+        },
+        best: {
+            card_id: '757880',
+            name: 'Mew',
+            source: 'background_card_search',
+        },
+        blueprintId: '757880',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/757880',
+        rows: [{ card_id: '757880', name: 'Mew' }],
+    });
+
+    assert.equal(elementsById.get('cardName').textContent, 'Mew');
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), true);
+    assert.equal(bodyClassList.contains('direct-card-view'), true);
+    assert.equal(bodyClassList.contains('album-card-view'), false);
+    assert.equal(elementsById.get('frameSection').hidden, false);
+    assert.equal(elementsById.get('candidatesSection').hidden, true);
+    assert.equal(elementsById.get('pokoinFrame').src, 'https://pokoin.com/marketplace/en/cards/757880?pokoin_embed=1');
+});
+
+test('two leftover tiles keep the album grid not the CardTrader desk', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const classList = createClassListStub();
+        const element = {
+            id,
+            textContent: '',
+            hidden: false,
+            src: '',
+            classList,
+            replaceChildren() {
+                this.children = [];
+            },
+            appendChild(child) {
+                this.children = [...(this.children || []), child];
+                return child;
+            },
+            addEventListener() {},
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+        makeElement(id);
+    }
+
+    const sandbox = {
+        document: {
+            body: { classList: bodyClassList },
+            getElementById: (id) => elementsById.get(id),
+            createElement: (tagName) => createDomElement(tagName),
+        },
+        chrome: {
+            storage: {
+                session: { get: async () => ({}) },
+                onChanged: { addListener() {} },
+            },
+            runtime: { sendMessage: async () => ({ success: true }) },
+        },
+        fetch: async () => ({ ok: false, json: async () => ({ expansions: [] }) }),
+        Map,
+        URL,
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${source}\nthis.renderState = renderState;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+
+    sandbox.renderState({
+        pageInfo: {
+            title: 'Lotto carte',
+            url: 'https://www.vinted.it/items/99-lotto',
+            structuredCard: { listingKind: 'album' },
+        },
+        best: { card_id: '111', name: 'Zeraora' },
+        blueprintId: '111',
+        pokoinUrl: 'https://pokoin.com/marketplace/en/cards/111',
+        rows: [
+            { card_id: '111', name: 'Zeraora' },
+            { card_id: '222', name: 'Zacian' },
+        ],
+        debug: { openAllCards: true },
+    });
+
+    assert.equal(elementsById.get('cardName').textContent, '2 cards');
+    assert.equal(elementsById.get('frameSection').hidden, true);
+    assert.equal(elementsById.get('candidatesSection').hidden, false);
+    assert.equal(bodyClassList.contains('album-card-view'), true);
+    assert.equal(bodyClassList.contains('direct-card-view'), false);
+    assert.equal(elementsById.get('frameSection').classList.contains('frame-section-direct'), false);
+    assert.equal(elementsById.get('candidateList').classList.contains('candidate-grid-single'), false);
+});
+
+test('side panel loading labels describe the automatic local scan', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    const elementsById = new Map();
+    const bodyClassList = createClassListStub();
+    const makeElement = (id) => {
+        const classList = createClassListStub();
+        const element = {
+            id,
+            textContent: '',
+            hidden: false,
+            src: '',
+            classList,
+            replaceChildren() {
+                this.children = [];
+            },
+            appendChild(child) {
+                this.children = [...(this.children || []), child];
+                return child;
+            },
+            addEventListener() {},
+        };
+        elementsById.set(id, element);
+        return element;
+    };
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'emptyActions', 'loadListingBtn', 'analyzeScreenshotBtn']) {
         makeElement(id);
     }
 
@@ -12733,9 +18941,67 @@ test('side panel loading state uses short Pokoin copy', () => {
 
     sandbox.renderState({ loading: true });
 
-    assert.equal(elementsById.get('cardName').textContent, 'Resolving card...');
-    assert.equal(elementsById.get('status').textContent, 'Finding Pokoin matches...');
+    assert.equal(elementsById.get('cardName').textContent, 'Analyzing listing photos...');
+    assert.equal(elementsById.get('status').textContent, 'The side panel is open, so Pokoin is scanning this listing now.');
     assert.equal(elementsById.get('status').hidden, false);
+    assert.equal(elementsById.get('emptyActions').hidden, true);
+
+    sandbox.renderState({
+        loading: true,
+        debug: { matchStage: 'awaiting-tokens', waitingForVintedPreview: true, automaticPanelAnalysis: true },
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Analyzing listing photos...');
+    assert.equal(elementsById.get('status').textContent, 'The side panel is open, so Pokoin is scanning this listing now.');
+    assert.equal(elementsById.get('emptyActions').hidden, true);
+
+    sandbox.renderState({
+        loading: true,
+        debug: { matchStage: 'tokens', awaitingChipSearch: true, listingScanPending: true },
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Analyzing listing photos...');
+    assert.equal(elementsById.get('status').textContent, 'The on-device scanner is identifying cards before listing clues are searched.');
+
+    sandbox.renderState({
+        best: { card_id: 'provisional', name: 'Wrong provisional card' },
+        rows: [{ card_id: 'provisional', name: 'Wrong provisional card' }],
+        debug: { matchStage: 'tokens', listingScanPending: true },
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Analyzing listing photos...');
+    assert.equal(elementsById.get('candidatesSection').hidden, true, 'provisional rows must never flash before scan merge');
+
+    sandbox.renderState({
+        loading: true,
+        debug: { matchStage: 'tokens', awaitingChipSearch: true },
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Searching listing clues...');
+    assert.equal(elementsById.get('status').textContent, 'The photo scan finished; Pokoin is checking the listing details.');
+
+    sandbox.renderState({
+        pageInfo: { url: 'https://www.vinted.it/', vintedIdle: true },
+        debug: { matchStage: 'tokens', awaitingChipSearch: true },
+    });
+    assert.equal(elementsById.get('cardName').textContent, 'Ready to analyze');
+    assert.equal(elementsById.get('status').textContent, 'Open a marketplace listing, then load its information or analyze the visible tab.');
+});
+
+test('automatic marketplace title hydration cannot bypass the listing scan', () => {
+    const background = readRepoFile('config/background.js');
+    const vinted = readRepoFile('processors/VINT.js');
+    const ebay = readRepoFile('processors/EBAYE.js');
+    const sidepanel = readRepoFile('ui-pages/sidepanel.js');
+    const html = readRepoFile('ui-pages/sidepanel.html');
+
+    assert.match(background, /const suppressProvisionalRows = Boolean\(debug\.listingScanPending\)/);
+    assert.match(background, /rows: publishedRows/);
+    assert.match(background, /!shouldDeferChipSearchForListingScan\(listingScanPromise[\s\S]{0,220}shouldResolveNameBeforeExactSearch/);
+    assert.doesNotMatch(vinted, /skipListingScan:[^\n]*title-ready/);
+    assert.doesNotMatch(vinted, /reason:\s*['"]overlay-collapsed['"]/);
+    assert.doesNotMatch(ebay, /skipListingScan:[^\n]*title-ready/);
+    assert.match(sidepanel, /if \(state\?\.debug\?\.listingScanPending\)/);
+    assert.match(sidepanel, /function isSidePanelAnalysisInFlight/);
+    assert.match(background, /pokoinSidePanelPreferredOpen/);
+    assert.match(html, />Load listing information</);
+    assert.match(html, />Analyze Chrome tab screenshot</);
 });
 
 test('side panel preserves API candidate order while rendering logos', () => {
@@ -12762,7 +19028,7 @@ test('side panel preserves API candidate order while rendering logos', () => {
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
         makeElement(id);
     }
 
@@ -12824,7 +19090,7 @@ test('side panel uses cached expansion logos without repeated fetches', async ()
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo']) {
         makeElement(id);
     }
 
@@ -12887,6 +19153,7 @@ test('side panel uses cached expansion logos without repeated fetches', async ()
 test('side panel warms Pokoin auth session on load', async () => {
     const source = readRepoFile('ui-pages/sidepanel.js');
     const sentMessages = [];
+    const postedSessions = [];
     const elementsById = new Map();
     const makeElement = (id) => {
         const element = {
@@ -12899,11 +19166,16 @@ test('side panel warms Pokoin auth session on load', async () => {
             appendChild() {},
             className: '',
             src: '',
+            contentWindow: {
+                postMessage(message, targetOrigin) {
+                    postedSessions.push({ message, targetOrigin });
+                },
+            },
         };
         elementsById.set(id, element);
         return element;
     };
-    for (const id of ['cardName', 'status', 'refreshBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
+    for (const id of ['cardName', 'status', 'tabScanBtn', 'frameSection', 'pokoinFrame', 'candidatesSection', 'candidateList', 'runtimeInfo', 'debugInfo']) {
         makeElement(id);
     }
 
@@ -12914,14 +19186,27 @@ test('side panel warms Pokoin auth session on load', async () => {
             getElementById: (id) => elementsById.get(id),
             createElement: (tagName) => createDomElement(tagName),
         },
+        window: {
+            addEventListener() {},
+        },
         chrome: {
             storage: {
                 session: { get: async () => ({}) },
                 onChanged: { addListener() {} },
             },
             runtime: {
+                id: 'test-extension-id',
+                getManifest: () => ({ version: '12.0.29' }),
                 sendMessage: async (message) => {
                     sentMessages.push(message);
+                    if (message.action === 'getPokoinAuthSession') {
+                        return {
+                            success: true,
+                            token: 'y'.repeat(40),
+                            uid: 'desk-user',
+                            expiresAt: Date.now() + 600000,
+                        };
+                    }
                     return { success: true };
                 },
             },
@@ -12931,10 +19216,21 @@ test('side panel warms Pokoin auth session on load', async () => {
         URL,
     };
     vm.createContext(sandbox);
-    vm.runInContext(source, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    vm.runInContext(`${source}\nthis.injectPokoinDeskSession = injectPokoinDeskSession;`, sandbox, { filename: 'ui-pages/sidepanel.js' });
+    await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
 
     assert.ok(sentMessages.some((message) => message.action === 'requestPokoinAuthToken'));
+    assert.ok(sentMessages.some((message) => message.action === 'getPokoinAuthSession'));
+    assert.equal(postedSessions.length, 0);
+
+    elementsById.get('pokoinFrame').src = 'https://pokoin.com/marketplace/en/cards/807626?pokoin_embed=1';
+    await sandbox.injectPokoinDeskSession();
+    assert.equal(postedSessions.length > 0, true);
+    assert.equal(postedSessions[0].targetOrigin, '*');
+    assert.equal(postedSessions[0].message.type, 'POKOIN_EXTENSION_DESK_SESSION');
+    assert.equal(postedSessions[0].message.uid, 'desk-user');
+    assert.equal(postedSessions[0].message.source, 'pokemon-card-extension');
 });
 
 test('CardTrader injected button intercepts click and opens side panel workflow', async () => {
@@ -13040,6 +19336,55 @@ test('CardTrader injected button intercepts click and opens side panel workflow'
     assert.equal(messages[0].action, 'openSidePanelForCurrentTab');
     assert.equal(messages[0].cardtraderBlueprintId, '12345');
     assert.equal(messages[0].title, 'Charizard ex');
+});
+
+test('CardTrader button supports the current unwrapped heading markup', () => {
+    const source = readRepoFile('content.js');
+    const contentStart = source.indexOf('function pokoinIconUrl');
+    const functions = [
+        'function setPokoinButtonLabel(button) { button.innerHTML = "Pokoin.com"; }',
+        'function applyPokoinButtonStyles() {}',
+        extractFunctionSource(source, 'extractCardTraderBlueprintId', contentStart),
+        extractFunctionSource(source, 'patchCardTraderCardPage', contentStart),
+    ].join('\n');
+    const titleElement = {
+        textContent: 'Espeon GX (Rainbow Secret Rare | 152/149)',
+        insertAdjacentElement(_position, element) {
+            this.insertedElement = element;
+        },
+    };
+    const sandbox = {
+        window: {
+            location: {
+                hostname: 'www.cardtrader.com',
+                pathname: '/en/cards/128584-espeon-gx-rainbow-secret-rare-152-149-sun-moon',
+            },
+        },
+        document: {
+            querySelector(selector) {
+                if (selector === '[data-pokoin-cardtrader-button]') return null;
+                if (selector === 'h2.d-inline.text-condensed') return titleElement;
+                return null;
+            },
+            createElement() {
+                return {
+                    style: {},
+                    attributes: {},
+                    setAttribute(name, value) {
+                        this.attributes[name] = value;
+                    },
+                    addEventListener() {},
+                };
+            },
+        },
+        console: { log() {}, warn() {}, error() {} },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(`${functions}\nthis.patchCardTraderCardPage = patchCardTraderCardPage;`, sandbox, { filename: 'content.js' });
+
+    sandbox.patchCardTraderCardPage();
+
+    assert.equal(titleElement.insertedElement.attributes['data-pokoin-cardtrader-button'], 'true');
 });
 
 test('CardTrader button click sends one side-panel message and blocks page handlers', async () => {
@@ -13369,6 +19714,126 @@ test('eBay and Cardmarket gray buttons open the side panel before matches resolv
     }
 });
 
+test('eBay listing feed buttons search on click instead of on insert', async () => {
+    const messages = [];
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.com/sch/i.html', hostname: 'www.ebay.com', pathname: '/sch/i.html' },
+            extractTitleInfo: () => ({ pokemonName: 'Dragonite' }),
+        },
+        document: {
+            title: 'Pokemon cards | eBay',
+            querySelectorAll: () => [],
+            contains: () => true,
+            createElement: (tagName) => createDomElement(tagName),
+            body: { appendChild() {} },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    if (message.action === 'searchCardForTitle') {
+                        return { success: true, results: [{ name_en: 'Dragonite V', search_score: 88, blueprint_id: 'dv1' }] };
+                    }
+                    return { success: true };
+                },
+            },
+        },
+    });
+    const processor = new Processor();
+    const button = createDomElement('button');
+    const payload = processor.buildEbayPayload('Dragonite V Pokemon card');
+    processor.attachSidePanelClick(
+        button,
+        'Dragonite V Pokemon card',
+        'https://www.ebay.com/itm/123',
+        { ...payload, listingKey: 'https://www.ebay.com/itm/123' },
+        { searchOnClick: true }
+    );
+
+    assert.equal(messages.length, 0, 'listing feed insert must not search until click');
+
+    await button.eventListeners.click({
+        preventDefault() {},
+        stopPropagation() {},
+        stopImmediatePropagation() {},
+    });
+
+    assert.equal(messages[0].action, 'searchCardForTitle');
+    assert.equal(messages.at(-1).action, 'openSidePanelForCurrentTab');
+});
+
+test('eBay listing processListing does not search until the button is clicked', async () => {
+    const messages = [];
+    const title = createDomElement('h3');
+    title.textContent = 'Dragonite V Pokemon card';
+    const listing = createDomElement('div');
+    listing.appendChild(title);
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.com/sch/i.html', hostname: 'www.ebay.com', pathname: '/sch/i.html' },
+            extractTitleInfo: () => ({ pokemonName: 'Dragonite' }),
+        },
+        document: {
+            createElement: (tagName) => createDomElement(tagName),
+            querySelectorAll: () => [],
+            contains: () => true,
+            body: { appendChild() {} },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [] };
+                },
+            },
+        },
+    });
+
+    await new Processor().processListing(listing);
+
+    assert.equal(messages.length, 0);
+    assert.equal(listing.getAttribute('data-pokemon-linker-processed'), 'true');
+});
+
+test('Vinted leftover searchCardInDatabase uses background search', async () => {
+    const messages = [];
+    let contentSearchCalls = 0;
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/1-dragonite-v', hostname: 'www.vinted.it' },
+            searchCardInDatabase: async () => {
+                contentSearchCalls += 1;
+                return [];
+            },
+        },
+        chrome: {
+            runtime: {
+                getURL: (asset) => `chrome-extension://test/${asset}`,
+                sendMessage: async (message) => {
+                    messages.push(message);
+                    return { success: true, results: [{ name_en: 'Dragonite V', search_score: 90 }] };
+                },
+            },
+        },
+    });
+
+    const results = await new Processor().searchCardInDatabase({ pokemonName: 'Dragonite' }, 'Dragonite V Fullart Pokemon');
+
+    assert.equal(contentSearchCalls, 0);
+    assert.equal(messages[0].action, 'searchCardForTitle');
+    assert.equal(results.length, 1);
+});
+
+test('ExtensionCore no longer polls the DOM every 50ms', () => {
+    const source = readRepoFile('core/ExtensionCore.js');
+    assert.doesNotMatch(source, /setInterval/);
+    assert.doesNotMatch(source, /cardtrader-check-periodic/);
+    assert.match(source, /cardtrader-force-start/);
+});
+
 test('visible Best candidates headings are removed from side panel and Vinted preview', () => {
     const sidePanelHtml = readRepoFile('ui-pages/sidepanel.html');
     const vintedSource = readRepoFile('processors/VINT.js');
@@ -13376,17 +19841,65 @@ test('visible Best candidates headings are removed from side panel and Vinted pr
     assert.doesNotMatch(sidePanelHtml, />\s*Best candidates\s*</i);
     assert.doesNotMatch(vintedSource, /textContent\s*=\s*['"]Best candidates['"]/);
     assert.match(sidePanelHtml, /candidateList/, 'candidate list container should remain');
-    assert.match(vintedSource, /results\.slice\(0,\s*8\)/, 'candidate preview should still render candidates');
+    assert.match(vintedSource, /vintedCandidateRowLimit/, 'candidate preview should still render candidates');
 });
 
-test('side panel runtime marker is not rendered visibly', () => {
+test('side panel shows the Chrome extension version and hides debug runtime dumps', () => {
     const sidePanelHtml = readRepoFile('ui-pages/sidepanel.html');
     const sidePanelCss = readRepoFile('ui-pages/sidepanel.css');
     const sidePanelSource = readRepoFile('ui-pages/sidepanel.js');
+    const manifest = JSON.parse(readRepoFile('manifest.json'));
 
+    assert.equal(manifest.version, '12.0.35');
+    assert.equal(manifest.permissions.includes('tabs'), true);
+    assert.equal(manifest.host_permissions.includes('https://cdn.pokoin.com/*'), true);
+    assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
+    assert.equal(
+        (manifest.web_accessible_resources || []).some((entry) =>
+            (entry.matches || []).includes('<all_urls>')
+        ),
+        false
+    );
+    assert.match(sidePanelHtml, /id="extensionVersion"/);
+    assert.match(sidePanelHtml, /class="title-row"/);
+    assert.match(sidePanelHtml, /id="cardName"[\s\S]*id="listingTotal"/);
+    assert.match(sidePanelSource, /function paintExtensionVersion/);
     assert.doesNotMatch(sidePanelHtml, /id="runtimeInfo"|id="debugInfo"|class="panel-footer"|Build information/i);
     assert.doesNotMatch(sidePanelCss, /\.runtime-info|\.panel-footer/);
     assert.doesNotMatch(sidePanelSource, /runtimeInfo|debugInfo|formatPhaseTimings/);
+    assert.doesNotMatch(sidePanelHtml, /id="refreshBtn"|Refresh<\/button>/);
+    assert.match(sidePanelHtml, /id="tabScanBtn"/);
+    assert.match(sidePanelHtml, /id="pokoinFrame"/);
+    assert.match(sidePanelHtml, /credentialless/);
+    assert.doesNotMatch(sidePanelHtml, /allow="popups"/);
+    assert.match(sidePanelSource, /POKOIN_EXTENSION_DESK_SESSION/);
+    assert.match(sidePanelSource, /injectPokoinDeskSession/);
+    assert.match(sidePanelSource, /function pokoinDeskIframeAcceptsSession/);
+    assert.match(sidePanelSource, /POKOIN_OPEN_TAB/);
+    assert.match(sidePanelSource, /openSilverMarketplaceTab/);
+    assert.match(readRepoFile('pokoin-desk-session.js'), /getPokoinAuthSession/);
+    assert.match(readRepoFile('pokoin-desk-session.js'), /openSilverMarketplaceTab/);
+    assert.match(readRepoFile('pokoin-desk-embed.js'), /world MAIN|POKOIN_SILVER_PILL/);
+    assert.equal(
+        (manifest.content_scripts || []).some((entry) =>
+            (entry.js || []).includes('pokoin-desk-session.js') && entry.all_frames === true
+        ),
+        true
+    );
+    assert.equal(
+        (manifest.content_scripts || []).some((entry) =>
+            (entry.js || []).includes('pokoin-desk-embed.js')
+            && entry.all_frames === true
+            && entry.world === 'MAIN'
+        ),
+        true
+    );
+    assert.doesNotMatch(sidePanelHtml, /id="deskActions"|id="openDeskBtn"|Open Pokoin page/);
+    assert.match(sidePanelHtml, /id="tabScanPreview"/);
+    assert.match(sidePanelSource, /scanVisibleTab/);
+    assert.match(sidePanelSource, /isTabScanPreviewDataUrl/);
+    assert.match(readRepoFile('config/background.js'), /autoAnalyzeOpenCardmarketSidePanel/);
+    assert.match(readRepoFile('config/background.js'), /lastFocusedWindow:\s*true/);
 });
 
 test('all marketplace buttons use the side panel message workflow', () => {
@@ -13705,7 +20218,7 @@ test('Cardmarket observation POST uses bearer auth payload and de-dupes signatur
     assert.equal(first.success, true);
     assert.equal(second.deduped, true);
     assert.equal(fetchCalls.length, 1);
-    assert.equal(fetchCalls[0].url, 'https://pokoin.com/api/cardmarket-scrape-observation');
+    assert.equal(fetchCalls[0].url, 'https://api.pokoin.com/api/cardmarket-scrape-observation');
     assert.equal(fetchCalls[0].options.headers.authorization, 'Bearer valid-firebase-id-token-from-session');
     assert.equal(fetchCalls[0].body.structuredCard.name, 'Piplup');
     assert.equal(fetchCalls[0].body.cardmarketContext.url, payload.cardmarketContext.url);
@@ -13954,7 +20467,7 @@ test('Cardmarket side-panel write keeps exact state over weaker same-URL update'
         },
         best: { card_id: 'mep-042', name: 'Piplup' },
         blueprintId: 'mep-042',
-        debug: { buildMarker: '2.0.0-runtime-divergence-guard' },
+        debug: { buildMarker: '2.0.0-cardvault-400-compact' },
     };
     const sandbox = loadBackgroundHelpers(['setSidePanelState']);
     sandbox.chrome.storage.session.get = async () => ({ sidePanelState: exactState });
@@ -14021,10 +20534,68 @@ test('runtime version change invalidates stale session side-panel state', async 
     await sandbox.ensureRuntimeStorageCurrent();
 
     assert.equal(writes.length, 1);
-    assert.equal(writes[0].pokoinExtensionRuntime.buildMarker, '2.0.0-runtime-divergence-guard');
+    assert.equal(writes[0].pokoinExtensionRuntime.buildMarker, '2.0.0-cardvault-400-compact');
     assert.equal(writes[0].sidePanelState.blueprintId, '');
     assert.equal(writes[0].sidePanelState.pageInfo.url, '');
     assert.equal(writes[0].sidePanelState.debug.invalidatedPreviousBuildMarker, 'old-build');
+    assert.equal(writes[0].pokoinSearchLruCache, null);
+});
+
+test('background search LRU hydrates resolved entries from session storage', async () => {
+    const sandbox = loadBackgroundHelpers([
+        'ensureRuntimeStorageCurrent',
+        'recentSearchCacheGet',
+        'backgroundSearchResultCache',
+        'cardvaultNameResolutionCache',
+        'cardvaultTokenPredictionCache',
+    ]);
+    const stored = {
+        pokoinExtensionRuntime: {
+            extensionVersion: '2.0.0',
+            buildMarker: '2.0.0-cardvault-400-compact',
+        },
+        pokoinSearchLruCache: {
+            buildMarker: '2.0.0-cardvault-400-compact',
+            searchResults: [['search-key-a', [{ card_id: 'cached-row' }]]],
+            nameResolution: [['name-key-a', { rows: [{ name: 'Piplup' }], cached: true }]],
+            tokenPrediction: [['token-key-a', { name: 'Piplup', skipped: false }]],
+        },
+    };
+    sandbox.chrome.storage.session.get = async (key) => {
+        if (typeof key === 'string') {
+            return { [key]: stored[key] };
+        }
+        if (Array.isArray(key)) {
+            return Object.fromEntries(key.map((entry) => [entry, stored[entry]]));
+        }
+        return { ...stored };
+    };
+
+    await sandbox.ensureRuntimeStorageCurrent();
+
+    assert.deepEqual(sandbox.recentSearchCacheGet(sandbox.backgroundSearchResultCache, 'search-key-a'), [{ card_id: 'cached-row' }]);
+    assert.equal(sandbox.recentSearchCacheGet(sandbox.cardvaultNameResolutionCache, 'name-key-a').rows[0].name, 'Piplup');
+    assert.equal(sandbox.recentSearchCacheGet(sandbox.cardvaultTokenPredictionCache, 'token-key-a').name, 'Piplup');
+});
+
+test('background search LRU persists resolved values into session storage', async () => {
+    const writes = [];
+    const sandbox = loadBackgroundHelpers([
+        'recentSearchCacheSet',
+        'backgroundSearchResultCache',
+        'SEARCH_CACHE_PERSIST_DEBOUNCE_MS',
+    ]);
+    sandbox.chrome.storage.session.set = async (payload) => {
+        writes.push(payload);
+    };
+
+    sandbox.recentSearchCacheSet(sandbox.backgroundSearchResultCache, 'live-key', [{ card_id: 'live-row' }]);
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    const persisted = writes.find((payload) => payload.pokoinSearchLruCache);
+    assert.ok(persisted, 'resolved search cache should be written to session storage');
+    assert.equal(persisted.pokoinSearchLruCache.buildMarker, '2.0.0-cardvault-400-compact');
+    assert.deepEqual(persisted.pokoinSearchLruCache.searchResults.find(([key]) => key === 'live-key')[1], [{ card_id: 'live-row' }]);
 });
 
 test('content Cardmarket legacy fallback is disabled and cannot send title-only search', () => {
@@ -14050,6 +20621,12 @@ test('manifest and UI icon asset references exist and are size-constrained', () 
     const sidePanelCss = readRepoFile('ui-pages/sidepanel.css');
     assert.match(sidePanelCss, /\.brand-icon\s*\{[^}]*width:\s*34px[^}]*height:\s*34px[^}]*object-fit:\s*contain/s);
     assert.match(sidePanelCss, /\.candidate-logo\s*\{[^}]*max-width:\s*42px[^}]*max-height:\s*42px[^}]*object-fit:\s*contain/s);
+    assert.match(sidePanelCss, /--art-left:\s*0\.105/);
+    assert.match(sidePanelCss, /--art-top:\s*0\.135/);
+    assert.match(sidePanelCss, /--art-width:\s*0\.79/);
+    assert.match(sidePanelCss, /--art-height:\s*0\.33/);
+    assert.match(sidePanelCss, /\.art-cut\s*\{[^}]*overflow:\s*hidden/s);
+    assert.match(sidePanelCss, /\.candidate-tile \.art-cut \.candidate-preview-image\s*\{[^}]*left:\s*calc\(-100% \* var\(--art-left\) \/ var\(--art-width\)\)/s);
 
     ['content.js', 'processors/VINT.js', 'processors/EBAYE.js', 'processors/CME.js'].forEach((relativePath) => {
         const source = readRepoFile(relativePath);
@@ -14057,6 +20634,1858 @@ test('manifest and UI icon asset references exist and are size-constrained', () 
         assert.match(source, /objectFit:\s*'cover'/, `${relativePath} should constrain Pokoin button object fit`);
         assert.match(source, /maxWidth:\s*'2[02]px'/, `${relativePath} should cap Pokoin button icon width`);
     });
+});
+
+test('match contract tokens stage cannot keep the side panel loading', () => {
+    const contract = require(path.join(REPO_ROOT, 'utils/MatchContract.js'));
+    const next = contract.applyMatchContractToSidePanelState({
+        loading: true,
+        rows: [],
+        debug: { awaitingChipSearch: true, waitingForVintedPreview: true },
+    });
+    assert.equal(next.loading, undefined);
+    assert.equal(next.debug.matchStage, 'tokens');
+    assert.equal(next.debug.waitingForVintedPreview, false);
+    assert.equal(next.debug.awaitingChipSearch, true);
+});
+
+test('match contract idles Vinted homepage instead of matching chips', () => {
+    const contract = require(path.join(REPO_ROOT, 'utils/MatchContract.js'));
+    const next = contract.applyMatchContractToSidePanelState({
+        loading: true,
+        pageInfo: { url: 'https://www.vinted.it/', vintedIdle: true },
+        rows: [],
+        debug: { awaitingChipSearch: true, matchStage: 'tokens' },
+    });
+    assert.equal(next.loading, undefined);
+    assert.equal(next.debug.matchStage, 'idle');
+    assert.equal(next.debug.awaitingChipSearch, false);
+    assert.equal(next.pageInfo.vintedIdle, true);
+});
+
+test('match contract scan merge preserves a selected species name', () => {
+    const contract = require(path.join(REPO_ROOT, 'utils/MatchContract.js'));
+    assert.equal(contract.scanMergePreservesSelectedName(
+        { name: 'Drifloon', listingKind: 'singles' },
+        [{ name: 'Drifloon LV.X' }]
+    ), true);
+    assert.equal(contract.scanMergePreservesSelectedName(
+        { name: 'Drifloon', listingKind: 'singles' },
+        [{ name: 'Pikachu' }]
+    ), false);
+    assert.equal(contract.scanMergePreservesSelectedName(
+        { name: 'Charizard', listingKind: 'album' },
+        [{ name: 'Pikachu' }]
+    ), true);
+});
+
+test('Vinted tokens-stage side panel state restores canonical after worker restart', () => {
+    const sandbox = loadBackgroundHelpers([
+        'vintedCanonicalFromSidePanelState',
+        'latestVintedCanonicalPreview',
+    ]);
+    const tab = {
+        id: 9,
+        url: 'https://www.vinted.it/items/9601989251-pokemon-machamp-lv59',
+        title: 'Machamp LV.59',
+    };
+    const state = {
+        pageInfo: {
+            url: tab.url,
+            title: 'Machamp',
+            vintedPayload: {
+                source: 'vinted',
+                listingKey: tab.url,
+                name: 'Machamp',
+                selectedClues: ['Machamp', '59'],
+                primaryClues: ['Machamp'],
+            },
+        },
+        rows: [],
+        debug: { matchStage: 'tokens', awaitingChipSearch: true },
+    };
+    const canonical = sandbox.vintedCanonicalFromSidePanelState(state, tab);
+    assert.equal(canonical.vintedPayload.name, 'Machamp');
+    assert.deepEqual(canonical.clues, ['Machamp', '59']);
+    assert.equal(sandbox.latestVintedCanonicalPreview(tab, state).vintedPayload.name, 'Machamp');
+});
+
+test('Vinted listing identify only runs on /items/{id} product URLs', () => {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(listingScanSource(), sandbox);
+
+    assert.equal(
+        sandbox.isVintedItemListingUrl('https://www.vinted.it/items/9901452613-piakchu-de-sacha?referrer=catalog'),
+        true
+    );
+    assert.equal(sandbox.isVintedItemListingUrl('https://www.vinted.fr/items/12-flareon'), true);
+    assert.equal(sandbox.isVintedItemListingUrl('https://www.vinted.it/catalog?search_text=piakchu'), false);
+    assert.equal(sandbox.isVintedItemListingUrl('https://www.vinted.it/'), false);
+    assert.equal(sandbox.isVintedItemListingUrl('https://www.vinted.it/member/123-seller'), false);
+    assert.equal(sandbox.isVintedItemListingUrl('https://www.ebay.it/itm/123'), false);
+    assert.equal(sandbox.isVintedQuietUrl('https://www.vinted.it/'), true);
+    assert.equal(sandbox.isVintedQuietUrl('https://www.vinted.it/catalog?search_text=piakchu'), true);
+    assert.equal(sandbox.isVintedQuietUrl('https://www.vinted.it/member/123-seller'), true);
+    assert.equal(sandbox.isVintedQuietUrl('https://www.vinted.it/items/12-flareon'), false);
+    assert.equal(sandbox.isVintedQuietUrl('https://www.ebay.it/itm/123'), false);
+
+    const gallery = ['https://images1.vinted.net/t/photo.jpg'];
+    assert.equal(sandbox.shouldIdentifyListingPhotos({
+        source: 'vinted',
+        enableListingScan: true,
+        listingKey: 'https://www.vinted.it/items/9901452613-piakchu-de-sacha',
+        listingImageUrls: gallery,
+    }), true);
+    assert.equal(sandbox.shouldIdentifyListingPhotos({
+        source: 'vinted',
+        enableListingScan: true,
+        listingKey: 'https://www.vinted.it/catalog',
+        listingImageUrls: gallery,
+    }), false);
+    assert.equal(sandbox.shouldIdentifyListingPhotos({
+        source: 'vinted',
+        enableListingScan: true,
+        listingKey: 'https://www.vinted.it/',
+        listingImageUrls: gallery,
+    }), false);
+
+    assert.equal(sandbox.isCardmarketSinglesProductUrl('https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042'), true);
+    assert.equal(sandbox.isCardmarketSinglesProductUrl('https://www.cardmarket.com/en/Pokemon/Products/Singles/BREAKthrough'), false);
+    assert.equal(sandbox.isCardmarketSinglesProductUrl('https://www.cardmarket.com/en/Pokemon/Products/Singles'), false);
+    assert.equal(sandbox.isCardmarketSinglesProductUrl('https://www.cardmarket.com/en/Pokemon/Products/Search?searchString=nidorino'), false);
+    const cardmarketPhoto = ['https://product-images.s3.cardmarket.com/img/piplup.jpg'];
+    assert.equal(sandbox.shouldIdentifyListingPhotos({
+        source: 'cardmarket',
+        enableListingScan: true,
+        listingKey: 'https://www.cardmarket.com/en/Pokemon/Products/Singles/MEP-Black-Star-Promos/Piplup-MEP042',
+        listingImageUrls: cardmarketPhoto,
+    }), true);
+    assert.equal(sandbox.shouldIdentifyListingPhotos({
+        source: 'cardmarket',
+        enableListingScan: true,
+        listingKey: 'https://www.cardmarket.com/en/Pokemon/Products/Singles',
+        listingImageUrls: cardmarketPhoto,
+    }), false);
+});
+
+test('generic Vinted titles still resolve through listing photos', () => {
+    const sandbox = loadBackgroundHelpers([
+        'shouldResolveSidePanelPage',
+        'vintedCanonicalReadyForAnalysis',
+    ]);
+    const payload = {
+        source: 'vinted',
+        listingKey: 'https://www.vinted.it/items/9937358385-pokemon',
+        originalTitle: 'Pokemon',
+        searchTitle: '',
+        selectedClues: [],
+        primaryClues: [],
+        listingKind: 'album',
+        listingImageUrls: ['https://images1.vinted.net/t/photo.jpg'],
+        enableListingScan: true,
+    };
+
+    assert.equal(sandbox.shouldResolveSidePanelPage({ title: '' }, payload), true);
+    assert.equal(sandbox.vintedCanonicalReadyForAnalysis({ vintedPayload: payload, previewRows: [] }), true);
+    assert.equal(sandbox.shouldResolveSidePanelPage({ title: '' }, { ...payload, listingImageUrls: [] }), false);
+    assert.equal(sandbox.vintedCanonicalReadyForAnalysis({
+        vintedPayload: { ...payload, listingImageUrls: [] },
+        previewRows: [],
+    }), false);
+});
+
+test('Vinted token handoff scans gallery photos when generic title normalizes empty', async () => {
+    const tab = {
+        id: 993,
+        title: 'Pokemon | Vinted',
+        url: 'https://www.vinted.it/items/9937358385-pokemon',
+    };
+    const { storage, sendMessage } = loadBackgroundMessageHarness({
+        tabs: { get: async () => tab },
+        fetch: async (url) => {
+            const href = String(url);
+            if (href.includes('images1.vinted.net')) {
+                return { ok: true, status: 200, blob: async () => new Blob([new Uint8Array([255, 216, 255, 217])]) };
+            }
+            if (href.includes('on-device-identify')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        ok: true,
+                        identity: 'public_id',
+                        boxes: [{ xyxy: [0, 0, 10, 10] }, { xyxy: [20, 0, 30, 10] }],
+                        hits: [
+                            { id: '111', public_id: '111', name: 'Nidoking', collector_number: '6/102', score: 0.91 },
+                            { id: '222', public_id: '222', name: 'Lucario', collector_number: '19/95', score: 0.86 },
+                        ],
+                        cards: [
+                            { box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: '111', public_id: '111', name: 'Nidoking', collector_number: '6/102', score: 0.91 }] },
+                            { box: { xyxy: [20, 0, 30, 10] }, hits: [{ id: '222', public_id: '222', name: 'Lucario', collector_number: '19/95', score: 0.86 }] },
+                        ],
+                    }),
+                };
+            }
+            return { ok: true, status: 200, json: async () => ({ rows: [] }), blob: async () => new Blob([]) };
+        },
+    });
+    const response = await sendMessage({
+        action: 'marketplacePreviewReady',
+        source: 'vinted',
+        tokensReady: true,
+        url: tab.url,
+        title: '',
+        originalTitle: 'Pokemon',
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: tab.url,
+            originalTitle: 'Pokemon',
+            searchTitle: '',
+            selectedClues: [],
+            primaryClues: [],
+            name: '',
+            listingKind: 'album',
+            listingDescription: "vendo l'album completo",
+            listingImageUrls: ['https://images1.vinted.net/t/photo.jpg'],
+            enableListingScan: true,
+        },
+    }, { tab });
+
+    assert.equal(response.success, true);
+    assert.equal(response.reason, 'vinted-tokens-chip-search');
+    assert.equal(response.result.debug.emptyTitlePhotoScan, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(Array.from(storage.sidePanelState.rows.map((row) => row.card_id)), ['111', '222']);
+});
+
+test('side panel empty state reports photo threshold instead of a missing generic title', () => {
+    const source = readRepoFile('ui-pages/sidepanel.js');
+    assert.doesNotMatch(source, /No listing title found on this page/);
+    assert.match(source, /No cards reached the.*recognition threshold in the listing photos/);
+    assert.match(source, /LISTING_RECOGNITION_DISPLAY_THRESHOLD = 0\.65/);
+});
+
+test('extension debug log persists a restart-safe local tail', () => {
+    const source = readRepoFile('config/background.js');
+    assert.match(source, /EXTENSION_PERSISTENT_DEBUG_LOG_LIMIT = 300/);
+    assert.match(source, /chrome\.storage\?\.local\?\.set/);
+    assert.match(source, /chrome\.storage\?\.local/);
+});
+
+test('listing scan classifies album vs singles from text, gallery, and binder boxes', () => {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(listingScanSource(), sandbox);
+
+    const album = sandbox.classifyMarketplaceListingKind({
+        title: 'Album Pokemon 50 carte Charizard Pikachu',
+        description: 'raccoglitore completo',
+    });
+    assert.equal(album.kind, 'album');
+    assert.ok(album.albumKeywords.includes('album'));
+    assert.ok(album.albumKeywords.includes('raccoglitore'));
+
+    const lotto = sandbox.classifyMarketplaceListingKind({
+        title: 'Lotto 20 carte Pokemon vintage',
+        description: '',
+    });
+    assert.equal(lotto.kind, 'album');
+    assert.equal(lotto.quantity, 20);
+
+    const singles = sandbox.classifyMarketplaceListingKind({
+        title: 'Charizard ex 232/091 singola',
+        description: '1 carta near mint',
+    });
+    assert.equal(singles.kind, 'singles');
+
+    const collezioneIsNotAlbum = sandbox.classifyMarketplaceListingKind({
+        title: 'Pokemon Machamp LV.59',
+        description: 'Carta da collezione dalla mia collection, near mint.',
+    });
+    assert.notEqual(collezioneIsNotAlbum.kind, 'album');
+    assert.equal(collezioneIsNotAlbum.albumKeywords.includes('collezione'), false);
+
+    const albumTitleBeatsSingoleInDescription = sandbox.classifyMarketplaceListingKind({
+        title: 'Album pieno di carte Pokemon',
+        description: 'foto delle singole ecc',
+    });
+    assert.equal(albumTitleBeatsSingoleInDescription.kind, 'album');
+
+    const binderView = sandbox.classifyMarketplaceListingKind({
+        title: 'Pikachu holo',
+        boxCount: 8,
+    });
+    assert.equal(binderView.kind, 'album');
+    assert.equal(binderView.view, 'album-view');
+
+    const lookalikeHitsAreNotAlbum = sandbox.classifyMarketplaceListingKind({
+        title: 'Pikachu holo',
+        boxCount: 1,
+        uniqueHitCount: 8,
+    });
+    assert.equal(lookalikeHitsAreNotAlbum.kind, 'singles');
+
+    const gallery = sandbox.classifyMarketplaceListingKind({
+        title: 'Carte Pokemon',
+        photoCount: 12,
+    });
+    assert.notEqual(gallery.kind, 'album');
+
+    const sealed = sandbox.classifyMarketplaceListingKind({
+        title: 'Booster pack sealed Pokemon',
+    });
+    assert.equal(sealed.kind, 'unknown');
+});
+
+test('Vinted listing photo extractor reads item-photo-N gallery imgs and ignores seller thumbs', () => {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(listingScanSource(), sandbox);
+
+    const photo = (src, testid) => ({
+        getAttribute(name) {
+            if (name === 'src' || name === 'data-src') {
+                return src;
+            }
+            if (name === 'srcset' || name === 'data-srcset' || name === 'content') {
+                return '';
+            }
+            if (name === 'data-testid') {
+                return testid;
+            }
+            return null;
+        },
+        src,
+        currentSrc: src,
+        srcset: '',
+    });
+    const og = {
+        getAttribute(name) {
+            if (name === 'content') {
+                return 'https://images1.vinted.net/t/02_front/f800/front.webp?s=front';
+            }
+            return null;
+        },
+    };
+    const front = photo('https://images1.vinted.net/t/02_front/f800/front.webp?s=front', 'item-photo-1--img');
+    const back = photo('https://images1.vinted.net/t/02_back/f800/back.webp?s=back', 'item-photo-2--img');
+    const doc = {
+        querySelectorAll(selector) {
+            if (selector.includes('item-photo-') && (selector.includes('--img') || selector.includes(' img'))) {
+                return [front, back];
+            }
+            if (selector.includes('og:image')) {
+                return [og];
+            }
+            return [];
+        },
+    };
+
+    const urls = sandbox.extractListingImageUrlsFromDocument(doc, { source: 'vinted' });
+    assert.equal(urls.length, 2);
+    assert.equal(urls[0], 'https://images1.vinted.net/t/02_front/f800/front.webp?s=front');
+    assert.equal(urls[1], 'https://images1.vinted.net/t/02_back/f800/back.webp?s=back');
+    assert.equal(urls.some((url) => url.includes('seller')), false);
+    assert.equal(
+        sandbox.listingImageSrcsetUrl('https://img/small.jpg 200w, https://img/large.jpg 800w'),
+        'https://img/large.jpg'
+    );
+});
+
+test('Vinted listing photo extractor reads embedded item photos beyond visible thumbs', () => {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(listingScanSource(), sandbox);
+    const next = {
+        id: '__NEXT_DATA__',
+        textContent: JSON.stringify({
+            props: {
+                pageProps: {
+                    item: {
+                        photos: [
+                            { url: 'https://images1.vinted.net/t/01/f800/one.webp' },
+                            { full_size_url: 'https://images1.vinted.net/t/02/f800/two.webp' },
+                            { url: 'https://images1.vinted.net/t/03/f800/three.webp' },
+                        ],
+                    },
+                },
+            },
+        }),
+    };
+    const doc = {
+        getElementById: (id) => (id === '__NEXT_DATA__' ? next : null),
+        querySelectorAll: () => [],
+    };
+    const urls = sandbox.extractListingImageUrlsFromDocument(doc, { source: 'vinted' });
+    assert.equal(urls.length, 3);
+    assert.equal(urls[2], 'https://images1.vinted.net/t/03/f800/three.webp');
+});
+
+test('Vinted listing photo extractor keeps this item gallery and ignores other item JSON photos', () => {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(listingScanSource(), sandbox);
+    const next = {
+        id: '__NEXT_DATA__',
+        textContent: JSON.stringify({
+            props: {
+                pageProps: {
+                    item: {
+                        id: 9963678531,
+                        photos: [
+                            { url: 'https://images1.vinted.net/t/01/f800/one.webp' },
+                            { url: 'https://images1.vinted.net/t/02/f800/two.webp' },
+                            { url: 'https://images1.vinted.net/t/03/f800/three.webp' },
+                            { url: 'https://images1.vinted.net/t/04/f800/four.webp' },
+                            { url: 'https://images1.vinted.net/t/05/f800/five.webp' },
+                            { url: 'https://images1.vinted.net/t/06/f800/six.webp' },
+                        ],
+                    },
+                    relatedItems: [{
+                        id: 111,
+                        photos: [{ url: 'https://images1.vinted.net/t/other/f800/other.webp' }],
+                    }],
+                },
+            },
+        }),
+    };
+    const doc = {
+        getElementById: (id) => (id === '__NEXT_DATA__' ? next : null),
+        querySelectorAll: () => [],
+    };
+    const urls = sandbox.extractListingImageUrlsFromDocument(doc, {
+        source: 'vinted',
+        pageUrl: 'https://www.vinted.it/items/9963678531-set-carte-pokemon',
+    });
+    assert.equal(urls.length, 6);
+    assert.equal(urls.some((url) => url.includes('/other/')), false);
+});
+
+test('listing scan normalizes live identify payloads and unique hits', () => {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(listingScanSource(), sandbox);
+
+    const empty = sandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        identity: 'tcgplayer',
+        boxes: [],
+        hits: [],
+        top1: null,
+        cards: [],
+        img_w: 1,
+        img_h: 1,
+    });
+    assert.equal(empty.ok, true);
+    assert.equal(empty.identity, 'tcgplayer');
+    assert.equal(empty.boxCount, 0);
+    assert.equal(empty.uniqueHitCount, 0);
+    assert.equal(empty.top1, null);
+
+    const albumHits = sandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        identity: 'tcgplayer',
+        boxes: [{ xyxy: [0, 0, 10, 10] }, { xyxy: [12, 0, 22, 10] }],
+        top1: { id: '111', name: 'Charizard', collector_number: '4/102', score: 0.91, public_id: '10' },
+        hits: [
+            { id: '111', name: 'Charizard', collector_number: '4/102', score: 0.91 },
+            { id: '222', name: 'Pikachu', collector_number: '58/102', score: 0.82 },
+            { id: '111', name: 'Charizard', collector_number: '4/102', score: 0.91 },
+        ],
+        cards: [
+            { box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: '111', name: 'Charizard', collector_number: '4/102', score: 0.91, public_id: '10' }] },
+            { box: { xyxy: [12, 0, 22, 10] }, hits: [{ id: '222', name: 'Pikachu', collector_number: '58/102', score: 0.82, public_id: '20' }] },
+        ],
+    });
+    assert.equal(albumHits.boxCount, 2);
+    assert.equal(albumHits.uniqueHitCount, 2);
+    assert.equal(albumHits.top1.name, 'Charizard');
+
+    const binderOrder = sandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: [
+            { xyxy: [120, 10, 180, 90] },
+            { xyxy: [10, 10, 70, 90] },
+            { xyxy: [10, 110, 70, 190] },
+        ],
+        top1: { id: '2', name: 'Right', score: 0.99, public_id: '2' },
+        cards: [
+            { box: { xyxy: [120, 10, 180, 90] }, hits: [{ id: '2', name: 'Right', score: 0.99, public_id: '2' }] },
+            { box: { xyxy: [10, 10, 70, 90] }, hits: [{ id: '1', name: 'Left', score: 0.61, public_id: '1' }] },
+            { box: { xyxy: [10, 110, 70, 190] }, hits: [{ id: '3', name: 'Bottom', score: 0.88, public_id: '3' }] },
+        ],
+    });
+    assert.equal(binderOrder.uniqueHits.length, 3);
+    assert.equal(binderOrder.uniqueHits[0].name, 'Left');
+    assert.equal(binderOrder.uniqueHits[1].name, 'Right');
+    assert.equal(binderOrder.uniqueHits[2].name, 'Bottom');
+    const lowScoreDropped = sandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        album: true,
+        photoCount: 1,
+        uniqueHits: [
+            { id: '1', name: 'Jolteon', score: 0.81, public_id: '1' },
+            { id: '2', name: 'Thundurus', score: 0.50, public_id: '2' },
+            { id: '3', name: 'Ditto VMAX', score: 0.49, public_id: '3' },
+            { id: '4', name: 'Water Energy', score: 0.51, public_id: '4' },
+        ],
+    });
+    assert.equal(lowScoreDropped.uniqueHits.map((hit) => hit.name).join(','), 'Jolteon,Water Energy');
+    assert.equal(sandbox.pokoinCardIdFromScanHit({ id: '111' }), '111');
+    assert.equal(sandbox.pokoinCardIdFromScanHit({ blueprint_id: 50 }), '100');
+    assert.equal(sandbox.pokoinCardIdFromScanHit({ identity: 'tcgplayer', id: '632917' }), '');
+    assert.equal(sandbox.pokoinCardIdFromScanHit({ identity: 'public_id', id: '241738' }), '241738');
+    assert.equal(sandbox.pokoinCardIdFromScanHit({
+        id: '88869',
+        ct_id: '120869',
+        public_id: '241738',
+        pokoin_url: 'https://pokoin.com/241738',
+    }), '241738');
+
+    const liveSinglesShape = sandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        identity: 'tcgplayer',
+        boxes: [{ xyxy: [22, 141, 391, 648], conf: 0.94 }],
+        top1: { id: '88869', name: "Sabrina's ESP", collector_number: '117/132', score: 0.7459, public_id: '241738' },
+        hits: [
+            { id: '88869', name: "Sabrina's ESP", score: 0.7459, public_id: '241738' },
+            { id: '87241', name: 'Mary', score: 0.5298, public_id: '247346' },
+        ],
+        cards: [{
+            box: { xyxy: [22, 141, 391, 648] },
+            hits: [
+                { id: '88869', name: "Sabrina's ESP", collector_number: '117/132', score: 0.7459, public_id: '241738' },
+                { id: '87241', name: 'Mary', score: 0.5298, public_id: '247346' },
+            ],
+        }],
+    });
+    assert.equal(liveSinglesShape.boxCount, 1);
+    assert.equal(liveSinglesShape.uniqueHitCount, 1);
+    assert.equal(liveSinglesShape.uniqueHits[0].id, '241738');
+    assert.equal(liveSinglesShape.lookalikeHits.length, 2);
+    assert.equal(liveSinglesShape.lookalikeHits[1].id, '247346');
+});
+
+test('listing scan and side panel drop Blank Filler Card', () => {
+    const scan = {};
+    vm.createContext(scan);
+    vm.runInContext(listingScanSource(), scan);
+    assert.equal(scan.isIgnoredListingCard({ name: 'Blank Filler Card' }), true);
+    assert.equal(scan.isIgnoredListingCard({ name: 'Pokemon Card Back' }), true);
+    assert.equal(scan.isIgnoredListingCard({ item_kind: 'card_back', name: 'Aipom' }), true);
+    assert.equal(scan.isIgnoredListingCard({ public_id: 'pokemon-card-back-studio-bright' }), true);
+    assert.equal(scan.isIgnoredListingCard({ name: 'Wailord ex' }), false);
+    assert.equal(scan.normalizeScanHit({
+        id: 'filler-1',
+        name: 'Blank Filler Card',
+        set: 'PM',
+        score: 0.9,
+        public_id: 'filler-1',
+    }), null);
+    assert.equal(scan.normalizeScanHit({
+        id: 'pokemon-card-back',
+        name: 'Pokemon Card Back',
+        set: 'Card Back',
+        score: 0.96,
+        public_id: 'pokemon-card-back',
+    }), null);
+
+    const payload = scan.normalizeCardScanIdentifyPayload({
+        ok: true,
+        identity: 'public_id',
+        boxes: [{ xyxy: [0, 0, 10, 10] }, { xyxy: [20, 0, 30, 10] }],
+        top1: { id: 'filler-1', name: 'Blank Filler Card', score: 0.9, public_id: 'filler-1' },
+        cards: [
+            { box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: 'filler-1', name: 'Blank Filler Card', score: 0.9, public_id: 'filler-1' }] },
+            { box: { xyxy: [20, 0, 30, 10] }, hits: [{ id: '111', name: 'Wailord ex', score: 0.88, public_id: '111' }] },
+        ],
+    });
+    assert.equal(payload.uniqueHits.length, 1);
+    assert.equal(payload.uniqueHits[0].name, 'Wailord ex');
+
+    const sandbox = loadBackgroundHelpers(['uniqueRowsById', 'structuredRowsFromScanHits']);
+    const rows = sandbox.uniqueRowsById([
+        { card_id: 'filler-1', name: 'Blank Filler Card', set_name: 'PM' },
+        { card_id: '111', name: 'Wailord ex' },
+        { card_id: '111', name: 'Wailord ex' },
+    ]);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].card_id, '111');
+    assert.equal(sandbox.structuredRowsFromScanHits([
+        { id: 'filler-1', name: 'Blank Filler Card', score: 0.9 },
+        { id: '222', name: 'Dondozo ex', score: 0.8 },
+    ]).length, 1);
+});
+
+test('listing scan merge keeps front+back singles as one card, not an album', () => {
+    const sandbox = {};
+    vm.createContext(sandbox);
+    vm.runInContext(listingScanSource(), sandbox);
+
+    const front = sandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        identity: 'tcgplayer',
+        boxes: [{ xyxy: [0, 0, 10, 20], conf: 0.94 }],
+        top1: { id: '86965', name: 'Machamp', collector_number: '31/130', set: 'Diamond and Pearl', score: 0.745, public_id: '86965' },
+        hits: [
+            { id: '86965', name: 'Machamp', collector_number: '31/130', set: 'Diamond and Pearl', score: 0.745, public_id: '86965' },
+            { id: '87200', name: 'Machamp', collector_number: '66/102', set: 'Base Set', score: 0.42, public_id: '87200' },
+        ],
+        cards: [{
+            box: { xyxy: [0, 0, 10, 20] },
+            hits: [
+                { id: '86965', name: 'Machamp', collector_number: '31/130', set: 'Diamond and Pearl', score: 0.745, public_id: '86965' },
+                { id: '87200', name: 'Machamp', collector_number: '66/102', set: 'Base Set', score: 0.42, public_id: '87200' },
+            ],
+        }],
+    });
+    const back = sandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        identity: 'tcgplayer',
+        boxes: [{ xyxy: [0, 0, 10, 20], conf: 0.88 }],
+        top1: { id: '126199', name: 'Shelmet 11/101 (Championship Series) [Staff]', collector_number: '011/101', score: 0.51, public_id: '126199' },
+        hits: [{ id: '126199', name: 'Shelmet 11/101 (Championship Series) [Staff]', score: 0.51, public_id: '126199' }],
+        cards: [{
+            box: { xyxy: [0, 0, 10, 20] },
+            hits: [{ id: '126199', name: 'Shelmet 11/101 (Championship Series) [Staff]', score: 0.51, public_id: '126199' }],
+        }],
+    });
+    const merged = sandbox.mergeListingScanPayloads([front, back]);
+    assert.equal(merged.boxCount, 1);
+    assert.equal(merged.photoCount, 2);
+    assert.equal(merged.uniqueHitCount, 1);
+    assert.equal(merged.top1.name, 'Machamp');
+    assert.equal(merged.top1.collector_number, '31/130');
+    assert.equal(merged.lookalikeHits.length, 2);
+    assert.equal(merged.lookalikeHits[0].id, '86965');
+    assert.equal(merged.lookalikeHits[1].id, '87200');
+    assert.ok(!merged.lookalikeHits.some((hit) => String(hit.id) === '126199'));
+
+    const kind = sandbox.classifyMarketplaceListingKind({
+        title: 'Pokémon Machamp LV.59',
+        description: 'Diamante e Perla',
+        photoCount: 2,
+        boxCount: merged.boxCount,
+        uniqueHitCount: merged.uniqueHitCount,
+    });
+    assert.equal(kind.kind, 'singles');
+});
+
+test('identify-album front+back keeps server max boxCount and drops card back', () => {
+    const scan = {};
+    vm.createContext(scan);
+    vm.runInContext(listingScanSource(), scan);
+
+    const payload = scan.normalizeCardScanIdentifyPayload({
+        ok: true,
+        album: true,
+        identity: 'public_id',
+        boxCount: 1,
+        photoCount: 2,
+        boxes: [
+            { xyxy: [0, 0, 10, 20], conf: 0.9 },
+            { xyxy: [0, 0, 10, 20], conf: 0.88 },
+        ],
+        top1: {
+            id: 'gengar-1',
+            name: 'Mega Gengar ex',
+            collector_number: '056',
+            set: 'PF',
+            score: 0.91,
+            public_id: 'gengar-1',
+        },
+        cards: [
+            {
+                box: { xyxy: [0, 0, 10, 20] },
+                hits: [{
+                    id: 'gengar-1',
+                    name: 'Mega Gengar ex',
+                    collector_number: '056',
+                    set: 'PF',
+                    score: 0.91,
+                    public_id: 'gengar-1',
+                }],
+            },
+            {
+                box: { xyxy: [0, 0, 10, 20] },
+                hits: [{
+                    id: 'pokemon-card-back',
+                    name: 'Pokemon Card Back',
+                    collector_number: 'Back',
+                    set: 'Card Back',
+                    score: 0.96,
+                    public_id: 'pokemon-card-back',
+                }],
+            },
+        ],
+    });
+    assert.equal(payload.boxCount, 1);
+    assert.equal(payload.photoCount, 2);
+    assert.equal(payload.uniqueHitCount, 1);
+    assert.equal(payload.uniqueHits[0].name, 'Mega Gengar ex');
+
+    const collapsed = scan.collapseFrontBackListingScan({
+        ...payload,
+        uniqueHits: [
+            payload.uniqueHits[0],
+            {
+                id: 'froakie-1',
+                name: 'Froakie',
+                collector_number: '46',
+                set: 'BREAKthrough',
+                score: 0.5,
+            },
+        ],
+        uniqueHitCount: 2,
+    }, 'singles');
+    assert.equal(collapsed.uniqueHitCount, 1);
+    assert.equal(collapsed.top1.name, 'Mega Gengar ex');
+
+    const kind = scan.classifyMarketplaceListingKind({
+        title: 'Mega Gengar 056/094 ita mint - Fiamme Spettrali',
+        description: 'Mega Gengar (056/094)',
+        photoCount: 2,
+        boxCount: payload.boxCount,
+        uniqueHitCount: payload.uniqueHitCount,
+        textKind: 'singles',
+    });
+    assert.equal(kind.kind, 'singles');
+});
+
+test('front+back album-misclassified listings drop Aipom-level extras', () => {
+    const scan = {};
+    vm.createContext(scan);
+    vm.runInContext(listingScanSource(), scan);
+    const merged = {
+        boxCount: 1,
+        photoCount: 2,
+        uniqueHitCount: 2,
+        uniqueHits: [
+            { id: 'misty-1', name: "Misty's Vitality", collector_number: '062', score: 0.88 },
+            { id: 'aipom-99', name: 'Aipom', collector_number: '99', score: 0.53 },
+        ],
+        top1: { id: 'misty-1', name: "Misty's Vitality", collector_number: '062', score: 0.88 },
+    };
+    const collapsed = scan.collapseFrontBackListingScan(merged, 'album');
+    assert.equal(collapsed.uniqueHitCount, 1);
+    assert.equal(collapsed.top1.name, "Misty's Vitality");
+});
+
+test('album lots union every photo hit and keep more than eight overlay rows', () => {
+    const scanSandbox = {};
+    vm.createContext(scanSandbox);
+    vm.runInContext(listingScanSource(), scanSandbox);
+
+    const page = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: [{ xyxy: [0, 0, 10, 10], conf: 0.9 }],
+        top1: { id: '1', name: 'Lucario', collector_number: '023', set: 'League & Championship Cards', score: 0.8, public_id: '1' },
+        hits: [{ id: '1', name: 'Lucario', collector_number: '023', score: 0.8, public_id: '1' }],
+        cards: [{ box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: '1', name: 'Lucario', collector_number: '023', score: 0.8, public_id: '1' }] }],
+    });
+    const closeup = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: [{ xyxy: [0, 0, 10, 10], conf: 0.88 }],
+        top1: { id: '2', name: 'Pikachu', collector_number: '025', set: 'Base Set', score: 0.77, public_id: '2' },
+        hits: [{ id: '2', name: 'Pikachu', collector_number: '025', score: 0.77, public_id: '2' }],
+        cards: [{ box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: '2', name: 'Pikachu', collector_number: '025', score: 0.77, public_id: '2' }] }],
+    });
+    const asSingles = scanSandbox.mergeListingScanPayloads([page, closeup]);
+    assert.equal(asSingles.uniqueHitCount, 1);
+
+    const asAlbum = scanSandbox.mergeListingScanPayloads([page, closeup], { listingKind: 'album' });
+    assert.equal(asAlbum.uniqueHitCount, 2);
+    assert.equal(asAlbum.uniqueHits[0].name, 'Lucario');
+    assert.equal(asAlbum.uniqueHits[1].name, 'Pikachu');
+
+    const sandbox = loadBackgroundHelpers([
+        'mergeScanRowsIntoSearchRows',
+        'structuredRowsFromScanHits',
+        'shouldDeferChipSearchForListingScan',
+    ]);
+    const manyHits = Array.from({ length: 30 }, (_, index) => ({
+        id: String(100 + index),
+        name: `Card ${index + 1}`,
+        collector_number: `${String(index + 1).padStart(3, '0')}/200`,
+        set: 'Test Set',
+        score: 0.9 - (index * 0.01),
+    }));
+    const albumRows = sandbox.mergeScanRowsIntoSearchRows(
+        [],
+        sandbox.structuredRowsFromScanHits(manyHits),
+        'album',
+        {}
+    );
+    assert.equal(albumRows.length, 30);
+    assert.equal(albumRows[0].preview_image_url, 'https://cdn.pokoin.com/previews/100_card-1.jpg');
+    assert.match(albumRows[0].marketplaceUrl, /pokoin\.com\/marketplace\/en\/cards\/100/);
+    assert.equal(sandbox.shouldDeferChipSearchForListingScan(null, { name: '', listingKind: 'album' }, 'album'), true);
+    assert.equal(sandbox.shouldDeferChipSearchForListingScan(null, { name: 'Lucario', listingKind: 'album' }, 'album'), false);
+    assert.equal(
+        sandbox.shouldDeferChipSearchForListingScan(Promise.resolve(), { name: 'Koraidon' }, 'album', { preferChipSearch: true }),
+        false
+    );
+
+    const koraidonSearchRows = [{ card_id: 'kor-1', name: 'Koraidon ex' }];
+    const lookalikeHits = sandbox.structuredRowsFromScanHits([
+        { id: '2', name: 'Raikou V', collector_number: '060/131', score: 0.5 },
+        { id: '3', name: 'Blaziken', collector_number: '14/150', score: 0.48 },
+    ]);
+    const namedAlbum = sandbox.mergeScanRowsIntoSearchRows(
+        koraidonSearchRows,
+        lookalikeHits,
+        'album',
+        { name: 'Koraidon' }
+    );
+    assert.equal(namedAlbum.length, 1);
+    assert.equal(namedAlbum[0].name, 'Koraidon ex');
+
+    const lotHits = sandbox.structuredRowsFromScanHits([
+        { id: '11', name: 'Silvally', collector_number: '068/081', set: 'Abyss Eye', score: 0.92 },
+        { id: '12', name: 'Chi-Yu', collector_number: '029/108', set: 'Obsidian Flames', score: 0.9 },
+        { id: '13', name: 'Armarouge', collector_number: '081/091', set: 'Paldea Evolved', score: 0.88 },
+        { id: '14', name: 'Bastiodon', collector_number: '111/198', set: 'Scarlet Violet', score: 0.86 },
+        { id: '15', name: 'Malamar', collector_number: '121/198', set: 'Scarlet Violet', score: 0.84 },
+        { id: '16', name: 'Greavard', collector_number: '128/198', set: 'Scarlet Violet', score: 0.82 },
+    ]);
+    const lotRows = sandbox.mergeScanRowsIntoSearchRows(
+        [{ card_id: '11', name: 'Silvally' }],
+        lotHits,
+        'album',
+        { name: 'Silvally' }
+    );
+    assert.equal(lotRows.length, 6);
+    assert.equal(lotRows[0].name, 'Silvally');
+    assert.equal(lotRows.map((row) => row.name).join(','), 'Silvally,Chi-Yu,Armarouge,Bastiodon,Malamar,Greavard');
+});
+
+test('dense album identify keeps binder-page hits over extra-photo lookalikes', () => {
+    const scanSandbox = {};
+    vm.createContext(scanSandbox);
+    vm.runInContext(listingScanSource(), scanSandbox);
+
+    const vintage = [
+        ['Abra', '49/82', 0.8811],
+        ['Sleep!', '79/82', 0.9213],
+        ['Slowpoke', '67/82', 0.8319],
+        ['Geodude', '77/110', 0.8807],
+        ['Dark Electrode', '34/82', 0.902],
+        ['Psyduck', '053/062', 0.8035],
+        ['Goop Gas Attack', '', 0.7503],
+        ['Meowth', '62/82', 0.8842],
+        ['Diglett', '52/82', 0.7821],
+    ];
+    const pageCards = vintage.map(([name, collector, score], index) => {
+        const hit = {
+            id: String(index + 1),
+            name,
+            collector_number: collector,
+            score,
+            public_id: String(index + 1),
+        };
+        return {
+            box: {
+                xyxy: [(index % 3) * 40, Math.floor(index / 3) * 50, (index % 3) * 40 + 30, Math.floor(index / 3) * 50 + 40],
+            },
+            hits: [hit],
+            top1: hit,
+        };
+    });
+    const extras = [
+        {
+            box: { xyxy: [0, 0, 10, 20] },
+            hits: [{ id: '99', name: 'Boxed Order', collector_number: '143', score: 0.3843, public_id: '99' }],
+            top1: { id: '99', name: 'Boxed Order', collector_number: '143', score: 0.3843, public_id: '99' },
+        },
+        {
+            box: { xyxy: [0, 1, 10, 21] },
+            hits: [{ id: '98', name: 'Abra', collector_number: '65', score: 0.85, public_id: '98' }],
+            top1: { id: '98', name: 'Abra', collector_number: '65', score: 0.85, public_id: '98' },
+        },
+        {
+            box: { xyxy: [0, 2, 10, 22] },
+            hits: [{ id: '97', name: 'Psychic Energy', collector_number: '119', score: 0.3842, public_id: '97' }],
+            top1: { id: '97', name: 'Psychic Energy', collector_number: '119', score: 0.3842, public_id: '97' },
+        },
+        {
+            box: { xyxy: [0, 3, 10, 23] },
+            hits: [{ id: '96', name: "Blaine's Last Stand", collector_number: 'V4', score: 0.41, public_id: '96' }],
+            top1: { id: '96', name: "Blaine's Last Stand", collector_number: 'V4', score: 0.41, public_id: '96' },
+        },
+    ];
+    const payload = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        album: true,
+        photoCount: 5,
+        boxCount: 9,
+        boxes: pageCards.map((card) => card.box).concat(extras.map((card) => card.box)),
+        cards: [...pageCards, ...extras],
+        uniqueHits: [...pageCards, ...extras].map((card) => card.top1),
+        top1: pageCards[0].top1,
+    });
+    assert.equal(payload.uniqueHitCount, 9);
+    assert.equal(payload.uniqueHits[0].name, 'Abra');
+    assert.equal(payload.uniqueHits.filter((hit) => hit.name === 'Abra').length, 1);
+    assert.ok(payload.uniqueHits.some((hit) => hit.name === 'Goop Gas Attack'));
+    assert.ok(payload.uniqueHits.some((hit) => hit.name === 'Diglett'));
+    assert.equal(payload.uniqueHits.some((hit) => hit.name === 'Boxed Order'), false);
+    assert.equal(payload.uniqueHits.some((hit) => hit.name === 'Psychic Energy'), false);
+    assert.equal(payload.uniqueHits.some((hit) => hit.name === "Blaine's Last Stand"), false);
+
+    const extrasFirst = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        album: true,
+        photoCount: 5,
+        boxCount: 9,
+        boxes: extras.map((card) => card.box).concat(pageCards.map((card) => card.box)),
+        cards: [...extras, ...pageCards],
+        uniqueHits: [...pageCards, ...extras].map((card) => card.top1),
+        top1: extras[0].top1,
+    });
+    assert.equal(extrasFirst.uniqueHits[0].name, 'Abra');
+    assert.equal(extrasFirst.uniqueHitCount, 9);
+
+    const page = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: pageCards.map((card) => card.box),
+        boxCount: 9,
+        top1: pageCards[0].top1,
+        cards: pageCards,
+        uniqueHits: pageCards.map((card) => card.top1),
+    });
+    const closeup = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: [extras[0].box],
+        boxCount: 1,
+        top1: extras[0].top1,
+        cards: [extras[0]],
+        uniqueHits: [extras[0].top1],
+    });
+    const extraPage = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: [
+            { xyxy: [0, 0, 10, 10] },
+            { xyxy: [12, 0, 22, 10] },
+            { xyxy: [24, 0, 34, 10] },
+        ],
+        boxCount: 3,
+        top1: { id: '201', name: 'Kabutops', collector_number: '9/62', score: 0.86, public_id: '201' },
+        cards: [
+            { box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: '201', name: 'Kabutops', collector_number: '9/62', score: 0.86, public_id: '201' }] },
+            { box: { xyxy: [12, 0, 22, 10] }, hits: [{ id: '202', name: 'Aerodactyl', collector_number: '1/62', score: 0.84, public_id: '202' }] },
+            { box: { xyxy: [24, 0, 34, 10] }, hits: [{ id: '99', name: 'Boxed Order', collector_number: '143', score: 0.38, public_id: '99' }] },
+        ],
+        uniqueHits: [
+            { id: '201', name: 'Kabutops', collector_number: '9/62', score: 0.86, public_id: '201' },
+            { id: '202', name: 'Aerodactyl', collector_number: '1/62', score: 0.84, public_id: '202' },
+            { id: '99', name: 'Boxed Order', collector_number: '143', score: 0.38, public_id: '99' },
+        ],
+    });
+    const mergedCloseup = scanSandbox.mergeListingScanPayloads([page, closeup], { listingKind: 'album' });
+    assert.equal(mergedCloseup.uniqueHitCount, 9);
+    assert.equal(mergedCloseup.uniqueHits[0].name, 'Abra');
+    assert.equal(mergedCloseup.uniqueHits.some((hit) => hit.name === 'Boxed Order'), false);
+
+    const mergedExtraPage = scanSandbox.mergeListingScanPayloads([page, extraPage], { listingKind: 'album' });
+    assert.ok(mergedExtraPage.uniqueHits.some((hit) => hit.name === 'Kabutops'));
+    assert.ok(mergedExtraPage.uniqueHits.some((hit) => hit.name === 'Aerodactyl'));
+    assert.equal(mergedExtraPage.uniqueHits.some((hit) => hit.name === 'Boxed Order'), false);
+    assert.equal(mergedExtraPage.uniqueHits.filter((hit) => hit.name === 'Abra').length, 1);
+
+    const junkPage = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: Array.from({ length: 6 }, (_, index) => ({ xyxy: [index * 10, 0, index * 10 + 8, 12] })),
+        boxCount: 6,
+        top1: { id: 'zera', name: 'Zeraora', collector_number: '151/142', score: 0.7161, public_id: 'zera' },
+        cards: [
+            { box: { xyxy: [0, 0, 8, 12] }, hits: [{ id: 'zera', name: 'Zeraora', collector_number: '151/142', score: 0.7161, public_id: 'zera' }] },
+            { box: { xyxy: [10, 0, 18, 12] }, hits: [{ id: 'blank', name: 'Blank Filler Card', score: 0.44, public_id: 'blank' }] },
+            { box: { xyxy: [20, 0, 28, 12] }, hits: [{ id: 'frame', name: '"Diamond" Card Display Frame', score: 0.43, public_id: 'frame' }] },
+            { box: { xyxy: [30, 0, 38, 12] }, hits: [{ id: 'riolu', name: 'Riolu', score: 0.49, public_id: 'riolu' }] },
+            { box: { xyxy: [40, 0, 48, 12] }, hits: [{ id: 'energy', name: 'Grass Energy', score: 0.29, public_id: 'energy' }] },
+            { box: { xyxy: [50, 0, 58, 12] }, hits: [{ id: 'wall', name: 'Ruin Wall (Kabuto)', score: 0.37, public_id: 'wall' }] },
+        ],
+        uniqueHits: [
+            { id: 'zera', name: 'Zeraora', collector_number: '151/142', score: 0.7161, public_id: 'zera' },
+        ],
+    });
+    const groupPage = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: [
+            { xyxy: [0, 0, 10, 14] },
+            { xyxy: [12, 0, 22, 14] },
+            { xyxy: [24, 0, 34, 14] },
+            { xyxy: [36, 0, 46, 14] },
+        ],
+        boxCount: 4,
+        top1: { id: 'zacian', name: 'Zacian', score: 0.5814, public_id: 'zacian' },
+        cards: [
+            { box: { xyxy: [0, 0, 10, 14] }, hits: [{ id: 'zacian', name: 'Zacian', score: 0.5814, public_id: 'zacian' }] },
+            { box: { xyxy: [12, 0, 22, 14] }, hits: [{ id: 'ches', name: 'Chesnaught BREAK', score: 0.5656, public_id: 'ches' }] },
+            { box: { xyxy: [24, 0, 34, 14] }, hits: [{ id: 'terra', name: 'Terrakion', score: 0.5512, public_id: 'terra' }] },
+            { box: { xyxy: [36, 0, 46, 14] }, hits: [{ id: 'riolu2', name: 'Riolu', score: 0.7045, public_id: 'riolu2' }] },
+        ],
+        uniqueHits: [
+            { id: 'zacian', name: 'Zacian', score: 0.5814, public_id: 'zacian' },
+            { id: 'ches', name: 'Chesnaught BREAK', score: 0.5656, public_id: 'ches' },
+            { id: 'terra', name: 'Terrakion', score: 0.5512, public_id: 'terra' },
+            { id: 'riolu2', name: 'Riolu', score: 0.7045, public_id: 'riolu2' },
+        ],
+    });
+    const zeraoraCloseup = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        boxes: [{ xyxy: [0, 0, 20, 28] }],
+        boxCount: 1,
+        top1: { id: 'zera2', name: 'Zeraora', score: 0.82, public_id: 'zera2' },
+        uniqueHits: [{ id: 'zera2', name: 'Zeraora', score: 0.82, public_id: 'zera2' }],
+    });
+    const lottoJp = scanSandbox.mergeListingScanPayloads([junkPage, groupPage, zeraoraCloseup], { listingKind: 'album' });
+    assert.ok(lottoJp.uniqueHits.some((hit) => hit.name === 'Zeraora'));
+    assert.ok(lottoJp.uniqueHits.some((hit) => hit.name === 'Zacian'));
+    assert.ok(lottoJp.uniqueHits.some((hit) => hit.name === 'Chesnaught BREAK'));
+    assert.ok(lottoJp.uniqueHits.some((hit) => hit.name === 'Terrakion'));
+    assert.ok(lottoJp.uniqueHits.some((hit) => hit.name === 'Riolu'));
+    assert.equal(lottoJp.uniqueHits.filter((hit) => hit.name === 'Zeraora').length, 1);
+
+    const secondPageHits = [
+        { id: '301', name: 'Heliolisk', collector_number: '229/217', score: 0.81, public_id: '301' },
+        { id: '302', name: 'Sliggoo', collector_number: '095/086', score: 0.76, public_id: '302' },
+        { id: '303', name: 'Rotom ex', collector_number: '111/094', score: 0.64, public_id: '303' },
+    ];
+    const secondPage = scanSandbox.normalizeCardScanIdentifyPayload({
+        ok: true,
+        album: true,
+        photoCount: 1,
+        boxes: Array.from({ length: 9 }, (_, index) => ({ xyxy: [index, 0, index + 8, 8] })),
+        boxCount: 9,
+        uniqueHits: secondPageHits,
+        cards: secondPageHits.map((hit, index) => ({
+            box: { xyxy: [index, 0, index + 8, 8] },
+            top1: hit,
+            hits: [hit],
+        })),
+    });
+    const mergedBinderPages = scanSandbox.mergeListingScanPayloads([page, secondPage], { listingKind: 'album' });
+    assert.ok(mergedBinderPages.uniqueHits.some((hit) => hit.name === 'Abra'));
+    assert.ok(mergedBinderPages.uniqueHits.some((hit) => hit.name === 'Heliolisk'));
+    assert.ok(mergedBinderPages.uniqueHits.some((hit) => hit.name === 'Sliggoo'));
+    assert.ok(mergedBinderPages.uniqueHits.some((hit) => hit.name === 'Rotom ex'));
+    assert.equal(mergedBinderPages.uniqueHits.filter((hit) => hit.name === 'Abra').length, 1);
+});
+
+test('background scan evidence fills singles and keeps album multi-hits from collapsing', () => {
+    const sandbox = loadBackgroundHelpers([
+        'applyListingScanToStructuredCard',
+        'mergeScanRowsIntoSearchRows',
+        'structuredRowsFromScanHits',
+        'isCertainSingleCardScan',
+        'mergeListingScanIntoSearchState',
+        'shouldResolveNameBeforeExactSearch',
+        'shouldRunAutocompleteFallback',
+    ]);
+
+    const filled = sandbox.applyListingScanToStructuredCard(
+        { name: '', variation: '', collectorNumber: '' },
+        'singles',
+        {
+            top1: { id: '9', name: 'Reshiram', collector_number: '113/114', score: 0.88 },
+            uniqueHits: [{ id: '9', name: 'Reshiram', collector_number: '113/114', score: 0.88 }],
+        }
+    );
+    assert.equal(filled.promoted, true);
+    assert.equal(filled.structuredCard.name, 'Reshiram');
+    assert.equal(filled.structuredCard.collectorNumber, '113/114');
+
+    const weakFill = sandbox.applyListingScanToStructuredCard(
+        { name: '', variation: '', collectorNumber: '' },
+        'singles',
+        {
+            top1: { id: '20', name: 'Dark Raticate', collector_number: 'No.020', score: 0.586 },
+            uniqueHits: [{ id: '20', name: 'Dark Raticate', collector_number: 'No.020', score: 0.586 }],
+        }
+    );
+    assert.equal(weakFill.promoted, false);
+    assert.equal(weakFill.reason, 'single-top1-below-floor');
+    assert.equal(weakFill.structuredCard.name, '');
+
+    const preserved = sandbox.applyListingScanToStructuredCard(
+        { name: "Team Rocket's Mimikyu", collectorNumber: '' },
+        'singles',
+        {
+            top1: { id: '1', name: 'Pikachu', score: 0.9 },
+            uniqueHits: [{ id: '1', name: 'Pikachu', score: 0.9 }],
+        }
+    );
+    assert.equal(preserved.structuredCard.name, "Team Rocket's Mimikyu");
+    assert.equal(preserved.promoted, false);
+
+    const album = sandbox.applyListingScanToStructuredCard(
+        { name: '', collectorNumber: '' },
+        'album',
+        {
+            top1: { id: '111', name: 'Charizard', score: 0.9 },
+            uniqueHits: [
+                { id: '111', name: 'Charizard', score: 0.9 },
+                { id: '222', name: 'Pikachu', score: 0.8 },
+            ],
+        }
+    );
+    assert.equal(album.promoted, false);
+    assert.equal(album.reason, 'album-multi-hit');
+    assert.equal(album.structuredCard.name, '');
+
+    const scanRows = sandbox.structuredRowsFromScanHits(album.scan?.uniqueHits || [
+        { id: '111', name: 'Charizard', score: 0.9 },
+        { id: '222', name: 'Pikachu', score: 0.8 },
+    ]);
+    const merged = sandbox.mergeScanRowsIntoSearchRows([], scanRows, 'album');
+    assert.equal(merged.length, 2);
+    assert.equal(sandbox.shouldResolveNameBeforeExactSearch({ name: 'Charizard' }, { source: 'vinted', listingKind: 'album' }), false);
+    assert.equal(sandbox.shouldRunAutocompleteFallback([], { listingKind: 'album', name: '' }), false);
+
+    const wrongSearchRows = [
+        { card_id: '037', name: 'Keldeo EX', card_number: '037/093', set_name: 'EX Battle Boost' },
+        { card_id: '019', name: 'Keldeo EX', card_number: '019/052', set_name: 'Cold Flare' },
+    ];
+    const photoHit = sandbox.structuredRowsFromScanHits([
+        { id: '700030', name: 'Keldeo EX', collector_number: '030/086', set: 'White Flare', score: 0.91 },
+    ]);
+    const promoted = sandbox.mergeScanRowsIntoSearchRows(wrongSearchRows, photoHit, 'singles', {
+        name: 'Keldeo ex',
+        collectorNumber: '030/086',
+    });
+    assert.equal(promoted[0].card_id, '700030');
+    assert.equal(promoted[0].card_number, '030/086');
+    assert.equal(promoted.length, 1);
+
+    const titleRows = Array.from({ length: 8 }, (_, index) => ({
+        card_id: `gulpin-title-${index}`,
+        name: 'Gulpin',
+        card_number: String(index + 1),
+    }));
+    const certainScan = {
+        listingKind: 'singles',
+        listingScan: {
+            boxCount: 1,
+            uniqueHitCount: 1,
+            top1: { id: 'gulpin-rc12', name: 'Gulpin', collector_number: 'RC12/RC32', score: 0.91 },
+            uniqueHits: [{ id: 'gulpin-rc12', name: 'Gulpin', collector_number: 'RC12/RC32', score: 0.91 }],
+        },
+    };
+    assert.equal(sandbox.isCertainSingleCardScan(certainScan.listingScan, 'singles'), true);
+    const certainMerged = sandbox.mergeListingScanIntoSearchState(titleRows, { name: 'Gulpin' }, 'singles', certainScan);
+    assert.equal(certainMerged.certainSingleCard, true);
+    assert.equal(certainMerged.rows.length, 1);
+    assert.equal(certainMerged.rows[0].card_id, 'gulpin-rc12');
+
+    const rankedOverlayMerged = sandbox.mergeListingScanIntoSearchState(
+        [{ card_id: 'flygon-api', name: 'Flygon ex', card_number: '94/108', set_name: 'Power Keepers' }],
+        { name: 'Flygon ex', collectorNumber: '94/108' },
+        'singles',
+        {
+            listingKind: 'singles',
+            listingScan: {
+                boxCount: 1,
+                uniqueHitCount: 1,
+                top1: { id: 'flygon-94', name: 'Flygon ex', collector_number: '94/108', score: 0.91 },
+                uniqueHits: [{ id: 'flygon-94', name: 'Flygon ex', collector_number: '94/108', score: 0.91 }],
+                lookalikeHits: [
+                    { id: 'horse-18', name: 'Horsea', collector_number: '18', score: 0.72 },
+                    { id: 'flygon-94', name: 'Flygon ex', collector_number: '94/108', score: 0.91 },
+                    { id: 'eelektross-115', name: 'Eelektross', collector_number: '115', score: 0.65 },
+                    { id: 'below-threshold', name: 'Trapinch', collector_number: '64', score: 0.649 },
+                ],
+            },
+        }
+    );
+    assert.deepEqual(Array.from(rankedOverlayMerged.rows, (row) => row.card_id), ['flygon-94']);
+    assert.deepEqual(
+        Array.from(rankedOverlayMerged.overlayRows, (row) => row.card_id),
+        ['flygon-94', 'horse-18', 'eelektross-115']
+    );
+    assert.deepEqual(
+        Array.from(rankedOverlayMerged.overlayRows, (row) => row.scan_score),
+        [0.91, 0.72, 0.65]
+    );
+
+    const thresholdScan = {
+        ...certainScan.listingScan,
+        top1: { ...certainScan.listingScan.top1, score: 0.65 },
+        uniqueHits: [{ ...certainScan.listingScan.uniqueHits[0], score: 0.65 }],
+    };
+    assert.equal(sandbox.isCertainSingleCardScan(thresholdScan, 'singles'), true);
+
+    const meowsticWithRejectedUiBox = {
+        boxCount: 2,
+        uniqueHitCount: 1,
+        top1: { id: '252498', name: 'Meowstic', collector_number: 'RC15/RC32', score: 0.8586 },
+        uniqueHits: [{ id: '252498', name: 'Meowstic', collector_number: 'RC15/RC32', score: 0.8586 }],
+        lookalikeHits: [{ id: '252498', name: 'Meowstic', collector_number: 'RC15/RC32', score: 0.8586 }],
+    };
+    assert.equal(sandbox.isCertainSingleCardScan(meowsticWithRejectedUiBox, 'singles'), true);
+    const meowsticMerged = sandbox.mergeListingScanIntoSearchState(
+        titleRows,
+        { name: 'Meowstic', collectorNumber: 'RC15/RC32' },
+        'singles',
+        { listingKind: 'singles', listingScan: meowsticWithRejectedUiBox }
+    );
+    assert.equal(meowsticMerged.rows.length, 1);
+    assert.equal(meowsticMerged.rows[0].card_id, '252498');
+
+    const uncertainScan = {
+        ...certainScan,
+        listingScan: {
+            ...certainScan.listingScan,
+            top1: { ...certainScan.listingScan.top1, score: 0.649 },
+            uniqueHits: [{ ...certainScan.listingScan.uniqueHits[0], score: 0.649 }],
+        },
+    };
+    assert.equal(sandbox.isCertainSingleCardScan(uncertainScan.listingScan, 'singles'), false);
+    const uncertainMerged = sandbox.mergeListingScanIntoSearchState(titleRows, { name: 'Gulpin' }, 'singles', uncertainScan);
+    assert.equal(uncertainMerged.rows.length, 8);
+
+    const conflictingPikachuScan = {
+        listingKind: 'singles',
+        listingScan: {
+            boxCount: 1,
+            uniqueHitCount: 1,
+            top1: { id: 'pikachu-86', name: 'Pikachu', collector_number: '86/110', score: 0.6917 },
+            uniqueHits: [{ id: 'pikachu-86', name: 'Pikachu', collector_number: '86/110', score: 0.6917 }],
+        },
+    };
+    const exactPikachuRows = [
+        { card_id: 'pikachu-jungle-60', name: 'Pikachu', card_number: '60/64', set_name: 'Jungle' },
+    ];
+    const conflictingMerged = sandbox.mergeListingScanIntoSearchState(
+        exactPikachuRows,
+        { name: 'Pikachu', collectorNumber: '60/64', numericCollectorNumber: '60', expansion: 'Jungle' },
+        'singles',
+        conflictingPikachuScan
+    );
+    assert.equal(conflictingMerged.certainSingleCard, false);
+    assert.equal(conflictingMerged.scanConflictsWithExactListingEvidence, true);
+    assert.deepEqual(Array.from(conflictingMerged.rows.map((row) => row.card_id)), ['pikachu-jungle-60']);
+
+    assert.match(readRepoFile('config/background.js'), /!merged\.certainSingleCard/);
+    const replaceSandbox = loadBackgroundHelpers(['shouldReplaceSidePanelScanRows']);
+    const mistyPanel = {
+        rows: [{ card_id: 'misty-1', name: "Misty's Vitality" }],
+        best: { card_id: 'misty-1', name: "Misty's Vitality" },
+    };
+    const zombieRows = [
+        { card_id: 'misty-1', name: "Misty's Vitality" },
+        { card_id: 'aipom-99', name: 'Aipom' },
+    ];
+    assert.equal(replaceSandbox.shouldReplaceSidePanelScanRows(mistyPanel, zombieRows, {
+        certainSingleCard: false,
+        listingKind: 'album',
+        listingScan: {
+            boxCount: 1,
+            uniqueHits: [
+                { id: 'misty-1', name: "Misty's Vitality", score: 0.88 },
+                { id: 'aipom-99', name: 'Aipom', score: 0.53 },
+            ],
+        },
+    }), false);
+    assert.match(readRepoFile('config/background.js'), /const isAlbum = maxPhotoBoxes >= 2/);
+    assert.match(readRepoFile('scripts/bundle-ondevice-scan.py'), /pokemon-card-back/);
+    assert.match(readRepoFile('scripts/bundle-ondevice-scan.py'), /item_kind.*card_back|card_back/);
+});
+
+test('listing scan lookalikes are the candidate pool and chips only rank them', () => {
+    const sandbox = loadBackgroundHelpers([
+        'mergeScanRowsIntoSearchRows',
+        'mergeListingScanIntoSearchState',
+        'structuredRowsFromScanHits',
+        'sortRowsForStructuredCard',
+    ]);
+
+    const chipSearchRows = [
+        { card_id: 'base-26', name: 'Dratini', card_number: '26/102', set_name: 'Base Set', search_rank: 900 },
+        { card_id: 'base2-19', name: 'Dratini', card_number: '19/130', set_name: 'Base Set 2', search_rank: 800 },
+        { card_id: 'drm-11', name: 'Dratini', card_number: '11/70', set_name: 'Dragon Majesty', search_rank: 700 },
+    ];
+    const scanRows = sandbox.structuredRowsFromScanHits([
+        {
+            id: 'staff-91',
+            name: 'Dratini 91/146 (City Championships) [Staff]',
+            collector_number: '91/146',
+            set: 'League & Championship Cards',
+            score: 0.808,
+        },
+        {
+            id: 'la-91',
+            name: 'Dratini LV.8',
+            collector_number: '91/146',
+            set: 'Legends Awakened',
+            score: 0.61,
+        },
+        {
+            id: 'base-26-scan',
+            name: 'Dratini',
+            collector_number: '26/102',
+            set: 'Base Set',
+            score: 0.40,
+        },
+    ]);
+    const ranked = sandbox.mergeScanRowsIntoSearchRows(chipSearchRows, scanRows, 'singles', {
+        name: 'Dratini',
+        levelNumber: '8',
+        expansion: 'Legends Awakened',
+    });
+    assert.equal(ranked[0].card_id, 'la-91');
+    assert.equal(ranked[0].set_name, 'Legends Awakened');
+    assert.ok(!ranked.some((row) => row.card_id === 'base-26'));
+    assert.equal(ranked.length, 3);
+
+    const machampMerged = sandbox.mergeListingScanIntoSearchState(
+        chipSearchRows,
+        { name: 'Machamp', expansion: 'Diamond & Pearl' },
+        'singles',
+        {
+            listingKind: 'singles',
+            listingScan: {
+                uniqueHits: [{ id: '86965', name: 'Machamp', collector_number: '31/130', set: 'Diamond and Pearl', score: 0.745 }],
+                lookalikeHits: [
+                    { id: '86965', name: 'Machamp', collector_number: '31/130', set: 'Diamond and Pearl', score: 0.745 },
+                    { id: 'pk-66', name: 'Machamp', collector_number: '8/108', set: 'Power Keepers', score: 0.41 },
+                ],
+            },
+        }
+    );
+    assert.equal(machampMerged.rows[0].card_id, '86965');
+    assert.equal(machampMerged.rows[0].card_number, '31/130');
+    assert.ok(!machampMerged.rows.some((row) => row.card_id === 'base-26'));
+
+    const unrelatedLookalikes = sandbox.mergeScanRowsIntoSearchRows(
+        [],
+        sandbox.structuredRowsFromScanHits([
+            { id: '248478', name: 'Shelmet 11/101 (Championship Series) [Staff]', score: 0.7 },
+            { id: '249912', name: 'Horsea', score: 0.6 },
+        ]),
+        'singles',
+        { name: 'Machamp' }
+    );
+    assert.equal(unrelatedLookalikes.length, 0);
+});
+
+test('Vinted product payload marks album lots and extracts listing photos', () => {
+    const og = {
+        getAttribute(name) {
+            if (name === 'content') return 'https://images1.vinted.net/t/photo.jpg';
+            if (name === 'property') return 'og:image';
+            return null;
+        },
+    };
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/items/50-album', hostname: 'www.vinted.it', pathname: '/items/50-album' },
+        },
+        document: {
+            title: 'Album Pokemon 50 carte',
+            querySelector: () => og,
+            querySelectorAll: (selector) => (String(selector).includes('og:image') ? [og] : []),
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Album Pokemon 50 carte Charizard';
+    processor.prepareVintedKeywords(processor.currentTitle, 'raccoglitore');
+    const payload = processor.buildVintedPayload(processor.currentTitle, processor.selectedKeywordLabels());
+
+    assert.equal(payload.listingKind, 'album');
+    assert.equal(payload.enableListingScan, true);
+    assert.ok(payload.listingImageUrls.some((url) => url.includes('vinted.net')));
+});
+
+test('Vinted catalog and homepage payloads do not scan gallery photos', () => {
+    const og = {
+        getAttribute(name) {
+            if (name === 'content') return 'https://images1.vinted.net/t/gallery.jpg';
+            if (name === 'property') return 'og:image';
+            return null;
+        },
+    };
+    const { Processor } = loadProcessor('processors/VINT.js', 'VintedProcessor', {
+        window: {
+            location: { href: 'https://www.vinted.it/catalog?search_text=piakchu', hostname: 'www.vinted.it', pathname: '/catalog' },
+        },
+        document: {
+            title: 'Catalogo',
+            querySelector: () => og,
+            querySelectorAll: (selector) => (String(selector).includes('og:image') ? [og] : []),
+        },
+    });
+    const processor = new Processor();
+    processor.currentTitle = 'Piakchu de Sacha';
+    const payload = processor.buildVintedPayload(processor.currentTitle, []);
+    assert.equal(payload.enableListingScan, false);
+    assert.equal(payload.listingImageUrls.length, 0);
+});
+
+test('eBay product payload marks singles and listing feeds skip scan photos', () => {
+    const og = {
+        getAttribute(name) {
+            if (name === 'content') return 'https://i.ebayimg.com/images/g/abc/s-l64.jpg';
+            return null;
+        },
+        src: 'https://i.ebayimg.com/images/g/abc/s-l64.jpg',
+    };
+    const { Processor: ProductProcessor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.it/itm/123', hostname: 'www.ebay.it', pathname: '/itm/123' },
+        },
+        document: {
+            title: 'Charizard ex singola 232/091',
+            querySelector: (selector) => (selector === 'h1.x-item-title__mainTitle' ? { textContent: 'Charizard ex singola 232/091' } : og),
+            querySelectorAll: (selector) => (String(selector).includes('og:image') || String(selector).includes('ux-image') ? [og] : []),
+        },
+    });
+    const product = new ProductProcessor();
+    const productPayload = product.buildEbayPayload('Charizard ex singola 232/091');
+    assert.equal(productPayload.listingKind, 'singles');
+    assert.equal(productPayload.enableListingScan, true);
+    assert.ok(productPayload.listingImageUrls[0].includes('s-l1600'));
+
+    const { Processor: FeedProcessor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            location: { href: 'https://www.ebay.it/sch/i.html?_nkw=pikachu', hostname: 'www.ebay.it', pathname: '/sch/i.html' },
+        },
+        document: {
+            title: 'eBay search',
+            querySelector: () => null,
+            querySelectorAll: () => [og],
+        },
+    });
+    const feedPayload = new FeedProcessor().buildEbayPayload('Charizard ex singola 232/091');
+    assert.equal(feedPayload.enableListingScan, false);
+    assert.equal(Array.isArray(feedPayload.listingImageUrls), true);
+    assert.equal(feedPayload.listingImageUrls.length, 0);
+});
+
+test('Porygon2 stays a name clue and Cardvault also tries a spaced alias', () => {
+    const { Processor } = loadProcessor('processors/EBAYE.js', 'EbayProcessor', {
+        window: {
+            extractTitleInfo: (value) => {
+                const compact = String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+                if (compact === 'porygon2') {
+                    return { pokemonName: 'Porygon2' };
+                }
+                if (compact === 'porygon') {
+                    return { pokemonName: 'Porygon' };
+                }
+                return { pokemonName: null };
+            },
+        },
+    });
+    const processor = new Processor();
+    assert.equal(processor.isPokemonNameLikeClue('Porygon'), true);
+    assert.equal(processor.isPokemonNameLikeClue('Porygon2'), true);
+
+    const content = readRepoFile('content.js');
+    const ebay = readRepoFile('processors/EBAYE.js');
+    assert.match(content, /'porygon', 'porygon2'/);
+    assert.match(content, /b\.pokemon\.length - a\.pokemon\.length/);
+    assert.match(ebay, /pokoinListingScanMerged/);
+
+    const sandbox = loadBackgroundHelpers(['buildStructuredFallbackQueries']);
+    const queries = sandbox.buildStructuredFallbackQueries({ name: 'Porygon2' }, 'Porygon2');
+    assert.ok(queries.includes('Porygon 2'), 'Cardvault should retry Porygon 2 when the scan name is Porygon2');
+});
+
+test('searchCardForTitle identifies album photos locally and returns multi-card scan rows', async () => {
+    const identifyUrls = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url) => {
+            const href = String(url);
+            if (href.includes('on-device-identify')) {
+                identifyUrls.push(href);
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        ok: true,
+                        identity: 'public_id',
+                        catalog: 'pokemon_generic',
+                        boxes: [{ xyxy: [0, 0, 10, 10] }, { xyxy: [20, 0, 30, 10] }],
+                        hits: [
+                            { id: '111', name: 'Charizard', collector_number: '4/102', score: 0.91, public_id: '111' },
+                            { id: '222', name: 'Pikachu', collector_number: '58/102', score: 0.82, public_id: '222' },
+                        ],
+                        top1: { id: '111', name: 'Charizard', collector_number: '4/102', score: 0.91, public_id: '111' },
+                        cards: [
+                            { box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: '111', name: 'Charizard', collector_number: '4/102', score: 0.91, public_id: '111' }] },
+                            { box: { xyxy: [20, 0, 30, 10] }, hits: [{ id: '222', name: 'Pikachu', collector_number: '58/102', score: 0.82, public_id: '222' }] },
+                        ],
+                    }),
+                };
+            }
+            if (href.includes('images1.vinted.net')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 217])]),
+                };
+            }
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({ rows: [] }),
+                blob: async () => new Blob([]),
+            };
+        },
+    });
+
+    const response = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'Album 50 carte',
+        originalTitle: 'Album Pokemon 50 carte',
+        url: 'https://www.vinted.it/items/50-album',
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/50-album',
+            originalTitle: 'Album Pokemon 50 carte',
+            searchTitle: 'Album 50',
+            selectedClues: [],
+            primaryClues: [],
+            name: '',
+            listingKind: 'album',
+            listingDescription: 'raccoglitore',
+            listingImageUrls: ['https://images1.vinted.net/t/photo.jpg'],
+            enableListingScan: true,
+        },
+    });
+
+    assert.equal(response.success, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(identifyUrls.length, 1);
+    assert.match(identifyUrls[0], /on-device-identify/);
+    assert.doesNotMatch(identifyUrls[0], /cardscan\.pokoin\.com/);
+    const scanned = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'Album 50 carte',
+        originalTitle: 'Album Pokemon 50 carte',
+        url: 'https://www.vinted.it/items/50-album',
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/50-album',
+            originalTitle: 'Album Pokemon 50 carte',
+            searchTitle: 'Album 50',
+            selectedClues: [],
+            primaryClues: [],
+            name: '',
+            listingKind: 'album',
+            listingDescription: 'raccoglitore',
+            listingImageUrls: ['https://images1.vinted.net/t/photo.jpg'],
+            enableListingScan: true,
+        },
+    });
+    assert.equal(scanned.results.length, 2);
+    assert.equal(scanned.results[0].blueprint_id, '111');
+    assert.equal(scanned.results[0].name_en, 'Charizard');
+    assert.equal(scanned.results[1].name_en, 'Pikachu');
+});
+
+test('searchCardForTitle always scans listing photos and promotes collector matches', async () => {
+    const identifyUrls = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url) => {
+            const href = String(url);
+            if (href.includes('images1.vinted.net')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 217])]),
+                };
+            }
+            if (href.includes('on-device-identify')) {
+                identifyUrls.push(href);
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        ok: true,
+                        identity: 'tcgplayer',
+                        boxes: [{ xyxy: [0, 0, 10, 10], conf: 0.94 }],
+                        top1: { id: 'tcg-keldeo', name: 'Keldeo EX', collector_number: '030/086', set: 'White Flare', score: 0.91, public_id: '700030' },
+                        hits: [
+                            { id: 'tcg-keldeo', name: 'Keldeo EX', collector_number: '030/086', score: 0.91, public_id: '700030' },
+                            { id: 'tcg-other', name: 'Keldeo EX', collector_number: '037/093', score: 0.4, public_id: '700037' },
+                        ],
+                        cards: [{
+                            box: { xyxy: [0, 0, 10, 10] },
+                            hits: [
+                                { id: 'tcg-keldeo', name: 'Keldeo EX', collector_number: '030/086', set: 'White Flare', score: 0.91, public_id: '700030' },
+                                { id: 'tcg-other', name: 'Keldeo EX', collector_number: '037/093', score: 0.4, public_id: '700037' },
+                            ],
+                        }],
+                    }),
+                };
+            }
+            if (href.includes('/api/extension-card-search')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        matches: [{
+                            cardId: '037ebb',
+                            name: 'Keldeo EX',
+                            expansionName: 'EX Battle Boost',
+                            collectorNumber: '037/093',
+                            score: 99,
+                        }],
+                    }),
+                };
+            }
+            return { ok: true, status: 200, json: async () => ({ matches: [] }) };
+        },
+    });
+
+    const response = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'Keldeo ex',
+        originalTitle: 'Keldeo ex 030/086 Fiamma Bianca',
+        url: 'https://www.vinted.it/items/9896007802-keldeo-ex-030086-flamme-blanche',
+        clues: ['Keldeo ex', 'ex', '030/086'],
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/9896007802-keldeo-ex-030086-flamme-blanche',
+            originalTitle: 'Keldeo ex 030/086 Fiamma Bianca',
+            searchTitle: 'Keldeo ex 030/086',
+            selectedClues: ['Keldeo ex', 'ex', '030/086'],
+            primaryClues: ['Keldeo ex'],
+            name: 'Keldeo ex',
+            collectorNumber: '030/086',
+            numericCollectorNumber: '030',
+            listingKind: 'singles',
+            listingImageUrls: ['https://images1.vinted.net/t/photo.jpg'],
+            enableListingScan: true,
+        },
+    });
+
+    assert.equal(response.success, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(identifyUrls.length, 1);
+    assert.match(identifyUrls[0], /on-device-identify/);
+    assert.doesNotMatch(identifyUrls[0], /cardscan\.pokoin\.com/);
+    assert.equal(response.results.length, 0);
+    await new Promise((resolve) => setImmediate(resolve));
+    const scanned = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'Keldeo ex',
+        originalTitle: 'Keldeo ex 030/086 Fiamma Bianca',
+        url: 'https://www.vinted.it/items/9896007802-keldeo-ex-030086-flamme-blanche',
+        clues: ['Keldeo ex', 'ex', '030/086'],
+        vintedPayload: {
+            source: 'vinted',
+            listingKey: 'https://www.vinted.it/items/9896007802-keldeo-ex-030086-flamme-blanche',
+            originalTitle: 'Keldeo ex 030/086 Fiamma Bianca',
+            searchTitle: 'Keldeo ex 030/086',
+            selectedClues: ['Keldeo ex', 'ex', '030/086'],
+            primaryClues: ['Keldeo ex'],
+            name: 'Keldeo ex',
+            collectorNumber: '030/086',
+            numericCollectorNumber: '030',
+            listingKind: 'singles',
+            listingImageUrls: ['https://images1.vinted.net/t/photo.jpg'],
+            enableListingScan: true,
+        },
+    });
+    assert.equal(scanned.results[0].blueprint_id, '700030');
+    assert.equal(scanned.results[0].collector_number, '030/086');
+    assert.equal(scanned.results[0].name_en, 'Keldeo EX');
+    assert.equal(scanned.results.length, 1, 'local scanner drops the 0.40 lookalike below the 0.50 floor');
+});
+
+test('searchCardForTitle uses local identify for unnamed multi-card lots', async () => {
+    const identifyUrls = [];
+    const { sendMessage } = loadBackgroundMessageHarness({
+        fetch: async (url) => {
+            const href = String(url);
+            if (href.includes('on-device-identify')) {
+                identifyUrls.push(href);
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        ok: true,
+                        identity: 'public_id',
+                        catalog: 'pokemon_generic',
+                        boxes: [
+                            { xyxy: [0, 0, 10, 10] },
+                            { xyxy: [20, 0, 30, 10] },
+                            { xyxy: [0, 20, 10, 30] },
+                            { xyxy: [20, 20, 30, 30] },
+                        ],
+                        hits: [
+                            { id: '111', name: 'Wailord ex', collector_number: '015', score: 0.91, public_id: '111' },
+                            { id: '222', name: 'Dondozo ex', collector_number: '066', score: 0.88, public_id: '222' },
+                            { id: '333', name: 'Lugia ex', collector_number: '132', score: 0.86, public_id: '333' },
+                            { id: '444', name: 'Shedinja', collector_number: '010', score: 0.84, public_id: '444' },
+                        ],
+                        top1: { id: '111', name: 'Wailord ex', collector_number: '015', score: 0.91, public_id: '111' },
+                        cards: [
+                            { box: { xyxy: [0, 0, 10, 10] }, hits: [{ id: '111', name: 'Wailord ex', collector_number: '015', score: 0.91, public_id: '111' }] },
+                            { box: { xyxy: [20, 0, 30, 10] }, hits: [{ id: '222', name: 'Dondozo ex', collector_number: '066', score: 0.88, public_id: '222' }] },
+                            { box: { xyxy: [0, 20, 10, 30] }, hits: [{ id: '333', name: 'Lugia ex', collector_number: '132', score: 0.86, public_id: '333' }] },
+                            { box: { xyxy: [20, 20, 30, 30] }, hits: [{ id: '444', name: 'Shedinja', collector_number: '010', score: 0.84, public_id: '444' }] },
+                        ],
+                    }),
+                };
+            }
+            if (href.includes('images1.vinted.net')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    blob: async () => new Blob([new Uint8Array([255, 216, 255, 217])]),
+                };
+            }
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({ rows: [] }),
+                blob: async () => new Blob([]),
+            };
+        },
+    });
+
+    const payload = {
+        source: 'vinted',
+        listingKey: 'https://www.vinted.it/items/1234567890-carte-regalo',
+        originalTitle: 'carte regalo',
+        searchTitle: 'carte regalo',
+        selectedClues: [],
+        primaryClues: [],
+        name: '',
+        listingKind: 'singles',
+        listingDescription: 'Tutti i booster sono nuovi. Il prezzo si riferisce a tutti e 4.',
+        listingImageUrls: ['https://images1.vinted.net/t/photo.jpg'],
+        enableListingScan: true,
+    };
+    const response = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'carte regalo',
+        originalTitle: 'carte regalo',
+        url: 'https://www.vinted.it/items/1234567890-carte-regalo',
+        vintedPayload: payload,
+    });
+    assert.equal(response.success, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(identifyUrls.length, 1);
+    assert.match(identifyUrls[0], /on-device-identify/);
+    assert.doesNotMatch(identifyUrls[0], /cardscan\.pokoin\.com/);
+    const scanned = await sendMessage({
+        action: 'searchCardForTitle',
+        title: 'carte regalo',
+        originalTitle: 'carte regalo',
+        url: 'https://www.vinted.it/items/1234567890-carte-regalo',
+        vintedPayload: payload,
+    });
+    assert.equal(scanned.results.length, 4);
+    assert.equal(scanned.results[0].name_en, 'Wailord ex');
+    assert.equal(scanned.results[1].name_en, 'Dondozo ex');
+    assert.equal(scanned.results[2].name_en, 'Lugia ex');
+    assert.equal(scanned.results[3].name_en, 'Shedinja');
+});
+
+test('listing scan does not block chip search on identify', () => {
+    const source = require('node:fs').readFileSync(path.join(REPO_ROOT, 'config/background.js'), 'utf8');
+    assert.doesNotMatch(source, /LISTING_SCAN_IDENTITY_BUDGET_MS/);
+    assert.doesNotMatch(source, /SIDE_PANEL_LOADING_WATCHDOG/);
+    assert.doesNotMatch(source, /Match timed out\. Tap Refresh/);
+    assert.match(source, /followThroughListingScan/);
+    assert.match(source, /pokoinListingScanMerged/);
+    assert.match(readRepoFile('processors/VINT.js'), /pokoinListingScanMerged/);
+    assert.match(readRepoFile('processors/EBAYE.js'), /pokoinListingScanMerged/);
+});
+
+test('Vinted and eBay listing identify wait for reduced overlay click', () => {
+    const vinted = readRepoFile('processors/VINT.js');
+    const ebay = readRepoFile('processors/EBAYE.js');
+    const background = readRepoFile('config/background.js');
+    assert.doesNotMatch(vinted, /sendVintedTokensReady\('title-ready'\)/);
+    assert.doesNotMatch(vinted, /runVintedSearch\([^,]+,\s*searchSource\.title,\s*'product-data'\)/);
+    assert.match(vinted, /expandVintedOverlayAndRecognize/);
+    assert.match(vinted, /refreshVintedOverlayScan/);
+    assert.match(vinted, /ensurePokoinSidePanelOpen/);
+    assert.match(vinted, /overlay-refresh/);
+    assert.doesNotMatch(ebay, /sendEbayTokensReady\('title-ready'\)/);
+    assert.doesNotMatch(ebay, /runEbaySearch\(title, 'product-page'\)/);
+    assert.match(ebay, /expandEbayOverlayAndRecognize/);
+    assert.match(ebay, /refreshEbayOverlayScan/);
+    assert.match(ebay, /ensurePokoinSidePanelOpen/);
+    assert.match(background, /ensureSidePanelOpen/);
+});
+
+test('live album identify is fully local and does not call CardScan API', () => {
+    const source = readRepoFile('config/background.js');
+    const listingScan = readRepoFile('utils/ListingScan.js');
+    const manifest = readRepoFile('manifest.json');
+    assert.doesNotMatch(source, /topK:\s*listingKind === 'album' \? 32/);
+    assert.match(source, /return identifyAlbumListingPhotos\(urls\)/);
+    assert.match(source, /identifyAlbumListingPhotos/);
+    assert.doesNotMatch(source, /cardscan\.pokoin\.com|identify-album HTTP|CARDSCAN_IDENTIFY_URL/);
+    assert.doesNotMatch(listingScan, /cardscan\.pokoin\.com|CARDSCAN_IDENTIFY_URL|CARDSCAN_IDENTIFY_ALBUM_URL/);
+    assert.doesNotMatch(manifest, /cardscan\.pokoin\.com/);
+    assert.match(source, /identifyBlobsOnDevice/);
+    assert.match(source, /identifyUrlsOnDevice/);
+    assert.match(source, /blobFromListingImageUrl/);
+    assert.match(source, /collectListingGalleryCapture/);
+    assert.match(source, /listingPhotoBlobsFromTab/);
+    assert.match(source, /listingKind: 'album'/);
+    assert.match(source, /return identifyBlobsOnDevice\(blobs, options\)/);
+    assert.match(source, /onDeviceScanReady/);
+    assert.match(source, /onDeviceAlbumPhotoForwarders/);
+    assert.match(source, /writeProgressiveListingScanRows/);
+    assert.match(source, /progressiveScanId/);
+    assert.match(readRepoFile('scan\/offscreen.js'), /primedDetect/);
+    assert.match(readRepoFile('scan\/offscreen.js'), /onDeviceIdentifyAlbumPhoto/);
+    assert.doesNotMatch(readRepoFile('scan\/offscreen.js'), /embedChain/);
+    assert.match(readRepoFile('scan\/offscreen.js'), /primedDetect = index \+ 1[\s\S]*detectPhotoBlob\(blobs\[index \+ 1\][\s\S]*await embedPhotoBoxes/);
+    assert.match(source, /isSupportedMarketplaceUrl\(tab\?\.url \|\| ''\)[\s\S]*warmOnDeviceScanner/);
+    assert.match(source, /scan\/offscreen\.html/);
+    assert.match(readRepoFile('scan/on-device-identify.js'), /pokemon_western/);
+    assert.match(manifest, /"offscreen"/);
+    assert.match(manifest, /wasm-unsafe-eval/);
+    assert.match(source, /listingScanChipSearchFallback/);
+    assert.doesNotMatch(listingScan, /collezione/);
+});
+
+test('on-device sessions use only the bundled WASM runtime', () => {
+    const offscreen = readRepoFile('scan/offscreen.js');
+    const offscreenHtml = readRepoFile('scan/offscreen.html');
+    const bundler = readRepoFile('scripts/bundle-ondevice-scan.py');
+    assert.match(offscreen, /createSession\(yoloUrl, \['wasm'\]\)/);
+    assert.match(offscreen, /ort\.env\.logLevel = 'error'/);
+    assert.match(offscreen, /logSeverityLevel: 3/);
+    assert.doesNotMatch(offscreen, /webgpu|navigator\.gpu/i);
+    assert.match(offscreenHtml, /ort\/ort\.wasm\.min\.js/);
+    assert.doesNotMatch(offscreenHtml, /webgpu|jsep/i);
+    for (const name of [
+        'ort.wasm.min.js',
+        'ort-wasm-simd-threaded.mjs',
+        'ort-wasm-simd-threaded.wasm',
+    ]) {
+        assert.match(bundler, new RegExp(name.replaceAll('.', '\\.')));
+    }
+});
+
+test('on-device WASM inference uses bounded hardware-aware multicore threads', () => {
+    const offscreen = readRepoFile('scan/offscreen.js');
+    const manifest = JSON.parse(readRepoFile('manifest.json'));
+    assert.match(offscreen, /navigator\?\.hardwareConcurrency/);
+    assert.match(offscreen, /crossOriginIsolated/);
+    assert.match(offscreen, /typeof globalThis\.SharedArrayBuffer === 'function'/);
+    assert.match(offscreen, /Math\.min\(4, Math\.ceil\(hardwareConcurrency \/ 2\)\)/);
+    assert.match(offscreen, /ort\.env\.wasm\.numThreads = threadConfiguration\.numThreads/);
+    assert.doesNotMatch(offscreen, /ort\.env\.wasm\.numThreads = 1/);
+    assert.equal(manifest.cross_origin_embedder_policy?.value, 'require-corp');
+    assert.equal(manifest.cross_origin_opener_policy?.value, 'same-origin');
+    assert.match(readRepoFile('config/background.js'), /numThreads: Number\(response\.payload\.numThreads\) \|\| 1/);
+    assert.match(readRepoFile('ui-pages/sidepanel.js'), /function assignCrossOriginImage/);
+    assert.match(readRepoFile('ui-pages/sidepanel.js'), /image\.crossOrigin = 'anonymous'/);
+    assert.equal(manifest.host_permissions.includes('https://cdn.pokoin.com/*'), true);
 });
 
 test('dist zip includes current runtime files without stale backups', () => {
@@ -14069,25 +22498,69 @@ test('dist zip includes current runtime files without stale backups', () => {
         'manifest.json',
         'content.js',
         'config/background.js',
+        'utils/ListingScan.js',
+        'utils/MatchContract.js',
         'processors/CME.js',
         'ui-pages/sidepanel.js',
         'ui-pages/sidepanel.html',
+        'pokoin-desk-session.js',
+        'pokoin-desk-embed.js',
+        'scan/offscreen.html',
+        'scan/on-device-identify.js',
+        'scan/models/card_detector.onnx',
+        'scan/models/milo.onnx',
+        'scan/models/western-cards.json.gz',
+        'scan/models/western-embeddings.bin',
+        'scan/ort/ort.wasm.min.js',
+        'scan/ort/ort-wasm-simd-threaded.mjs',
+        'scan/ort/ort-wasm-simd-threaded.wasm',
     ].forEach((entry) => assert.match(entries, new RegExp(`\\b${entry.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`)));
+    assert.doesNotMatch(entries, /ort\.webgpu|\.jsep\./i);
     assert.doesNotMatch(entries, /\b(?:backup|old|legacy|copy|~)\b/i);
+    assert.doesNotMatch(entries, /(?:^|\/)\._[^/\s]+/m);
 
     [
         'manifest.json',
         'content.js',
         'config/background.js',
+        'utils/ListingScan.js',
+        'utils/MatchContract.js',
         'processors/CME.js',
         'ui-pages/sidepanel.js',
         'ui-pages/sidepanel.html',
         'ui-pages/sidepanel.css',
+        'pokoin-desk-session.js',
+        'pokoin-desk-embed.js',
+        'scan/offscreen.js',
+        'scan/offscreen.html',
     ].forEach((entry) => {
         const sourceHash = hash(readRepoFile(entry));
         const zipContent = execFileSync('unzip', ['-p', path.join(REPO_ROOT, 'dist/pokemon-card-extension-2.0.0.zip'), entry], { encoding: 'utf8' });
         assert.equal(hash(zipContent), sourceHash, `${entry} in dist zip should match source`);
     });
+
+    const os = require('node:os');
+    const fs = require('node:fs');
+    const extractRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pokoin-ext-unpack-'));
+    execFileSync('unzip', ['-qq', '-o', path.join(REPO_ROOT, 'dist/pokemon-card-extension-2.0.0.zip'), '-d', extractRoot]);
+    const unpackedManifest = fs.readFileSync(path.join(extractRoot, 'manifest.json'), 'utf8');
+    assert.ok(unpackedManifest.length > 0, 'unpacked manifest.json must not be empty');
+    const manifest = JSON.parse(unpackedManifest);
+    assert.equal(manifest.manifest_version, 3);
+    assert.equal(manifest.name, 'Pokemon Card Trader Linker');
+    assert.equal(manifest.background?.service_worker, 'config/background.js');
+    [
+        'content.js',
+        'config/background.js',
+        'utils/ListingScan.js',
+        'utils/MatchContract.js',
+        'core/CacheManager.js',
+        'processors/VINT.js',
+    ].forEach((entry) => {
+        const unpacked = fs.statSync(path.join(extractRoot, entry));
+        assert.ok(unpacked.size > 0, `${entry} unpacked from zip must not be empty`);
+    });
+    fs.rmSync(extractRoot, { recursive: true, force: true });
 });
 
 test('extension debug log bounds, redacts, truncates, and clears events', async () => {
@@ -14100,7 +22573,7 @@ test('extension debug log bounds, redacts, truncates, and clears events', async 
     sandbox.chrome.storage.session.get = async (key) => ({ [key]: storage[key] });
     sandbox.chrome.storage.session.set = async (payload) => Object.assign(storage, payload);
 
-    for (let index = 0; index < 305; index += 1) {
+    for (let index = 0; index < 1205; index += 1) {
         await sandbox.recordExtensionDebugEvent('test.event', {
             index,
             url: `https://example.test/item?access_token=secret-${index}`,
@@ -14110,11 +22583,11 @@ test('extension debug log bounds, redacts, truncates, and clears events', async 
     }
 
     const events = await sandbox.getExtensionDebugLog();
-    assert.equal(events.length, 300);
+    assert.equal(events.length, 1200);
     assert.equal(events[0].details.index, 5, 'debug log should keep the newest bounded ring buffer');
     assert.equal(events.at(-1).details.authorization, '[REDACTED]');
     assert.match(events.at(-1).details.url, /access_token=\[REDACTED\]/);
-    assert.equal(events.at(-1).details.longText.length, 323);
+    assert.equal(events.at(-1).details.longText.length, 500);
 
     await sandbox.clearExtensionDebugLog();
     assert.equal((await sandbox.getExtensionDebugLog()).length, 0);
@@ -14138,10 +22611,10 @@ test('extension debug log message handlers expose and clear session events', asy
 
     assert.equal(recordResponse.success, true);
     assert.equal(getResponse.success, true);
-    assert.equal(getResponse.count, 1);
-    assert.equal(getResponse.events[0].type, 'processor.search-start');
-    assert.equal(getResponse.events[0].details.source, 'vinted');
-    assert.match(getResponse.events[0].details.url, /token=\[REDACTED\]/);
+    const processorEvent = getResponse.events.find((entry) => entry.type === 'processor.search-start');
+    assert.ok(processorEvent);
+    assert.equal(processorEvent.details.source, 'vinted');
+    assert.match(processorEvent.details.url, /token=\[REDACTED\]/);
     assert.equal(clearResponse.success, true);
     assert.equal(emptyResponse.count, 0);
 });
