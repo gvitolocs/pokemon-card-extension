@@ -9,6 +9,11 @@ Pokoin production already had:
 - `https://pokoin.com/extension/auth-bridge`
 - `POST /api/cardmarket-scrape-observation` with CORS for `POST` and `OPTIONS`
 
+The React SPA later dropped that route, so live Vercel returned **404 NOT_FOUND**
+until `/extension/auth-bridge` was added again (`market/src/pages/ExtensionAuthBridge.jsx`,
+`vercel.json` rewrite to `/market/index.html`). The page posts `pokoin-auth-token`
+with `token.accessToken`.
+
 The extension still expected `data.token.token` and omitted a top-level Cardmarket URL. Pokoin sends `data.token.accessToken` and requires `url`, `cardmarketUrl`, or `pageUrl`. Until those two mismatches were fixed, the only observation row was a deploy smoke test (`Hydreigon` / `114322` / `source = deploy-smoke-test`).
 
 ## What The Extension Does Now

@@ -18,9 +18,11 @@ The live product is a Manifest V3 matching engine. Marketplace processors send s
 - `processors/`: site-specific overlays and parsers (`VINT`, `EBAYE`, `CME`, `PromoFilter`)
 - `pokoin-auth-bridge.js`: Firebase token bridge on `https://pokoin.com/extension/auth-bridge`
 - `ui-pages/sidepanel.html`: embedded Pokoin marketplace page
-- `content.js`: orchestration and leftover compatibility path; Cardmarket/Vinted product pages belong to their processors
-- `core/`, `data/`, `ui/`, `utils/`: shared helpers still loaded by the content-script bundle
-- `ui-pages/popup.html` and `settings.html`: older manual surfaces, not the overlay workflow
+- `content.js`: leftover compatibility path; live `searchCardInDatabase` sends `searchCardForTitle`. Dead page-origin fetch helpers are listed in `docs/LEFTOVERS.md`.
+- `utils/ListingScan.js`: album vs singles classification and bundled identify payload helpers. Vinted/eBay photos are downloaded by the extension and scanned locally by the packaged YOLO + Milo WASM engine; they are never sent to CardScan.
+- `utils/MatchContract.js`: Lecture 14 match stages between overlay, background, and side panel. Tokens are not a match; identify lookalikes are the candidate pool and selected chips rank them; chip-search is fallback when scan is empty or disabled.
+- `core/`, `data/`, `ui/`, leftover `utils/UrlGenerator.js`: still listed in `manifest.json`; those classes are not constructed. See `docs/LEFTOVERS.md`.
+- `ui-pages/popup.html` and `settings.html`: leftover manual surfaces, not in the MV3 action
 
 ## Installation
 
@@ -101,6 +103,8 @@ Technical documentation lives in `docs/`:
 - `docs/README.md`: docs index
 - `docs/EXTENSION_WORKFLOW.md`: overlay, side-panel, and matching rules
 - `docs/EXTENSION_AGENT_HANDOFF.md`: runtime, APIs, and remaining work
+- `docs/CURRENT_PIPELINE.md`: Load unpacked, identify, album vs singles
+- `docs/CARDTRADER_MODEL.md`: **target** — JP expansion → western release of that same card; each printing keeps its own page
 - `docs/INSTALLATION.md`: setup steps
 - `docs/MODULAR_STRUCTURE.md`: module overview
 - `docs/API_INTEGRATION.md`: API and auth behavior

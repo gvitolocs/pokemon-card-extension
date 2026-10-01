@@ -331,11 +331,16 @@ function pokoinIconUrl() {
     return chrome.runtime.getURL('assets/pokoin-512.png');
 }
 
+function pokoinExtensionVersionSuffix() {
+    const version = (typeof chrome !== 'undefined' && chrome.runtime?.getManifest?.()?.version) || '';
+    return version ? ` v${version}` : '';
+}
+
 function setPokoinButtonLabel(button, matchCount = null) {
     const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
     button.innerHTML = `
         <img src="${pokoinIconUrl()}" alt="" aria-hidden="true">
-        <span>Pokoin.com${suffix}</span>
+        <span>Pokoin.com${pokoinExtensionVersionSuffix()}${suffix}</span>
     `;
     if (window.location?.hostname?.includes('cardmarket')) {
         applyPokoinButtonStyles(button, {
@@ -406,7 +411,9 @@ function extractCardTraderBlueprintId(pathname = window.location.pathname) {
 }
 
 function cardTraderDirectTitle() {
-    return (document.querySelector('.py-3.text-center.text-sm-left h2, h1, h2')?.textContent || document.title)
+    return (document.querySelector('h2.d-inline.text-condensed')?.textContent ||
+        document.querySelector('.py-3.text-center.text-sm-left h2, h1, h2')?.textContent ||
+        document.title)
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -421,9 +428,9 @@ function patchCardTraderCardPage() {
         return;
     }
 
-    const titleBlock = document.querySelector('.py-3.text-center.text-sm-left');
-    const titleElement = titleBlock?.querySelector('h2');
-    if (!titleBlock || !titleElement) {
+    const titleElement = document.querySelector('h2.d-inline.text-condensed') ||
+        document.querySelector('.py-3.text-center.text-sm-left')?.querySelector('h2');
+    if (!titleElement) {
         setTimeout(patchCardTraderCardPage, 500);
         return;
     }
@@ -970,9 +977,16 @@ function processNewListings(container) {
 
 // Find all listings on the page
 function findListings() {
+    const hostname = window.location.hostname;
+    if (
+        hostname.includes('vinted')
+        && typeof isVintedItemListingUrl === 'function'
+        && !isVintedItemListingUrl(window.location.href)
+    ) {
+        return [];
+    }
     const selectors = getListingSelectors();
     const listings = [];
-    const hostname = window.location.hostname;
     
     selectors.forEach(selector => {
         const elements = document.querySelectorAll(selector);
@@ -1016,9 +1030,16 @@ function findListings() {
 
 // Find listings in a specific container
 function findListingsInContainer(container) {
+    const hostname = window.location.hostname;
+    if (
+        hostname.includes('vinted')
+        && typeof isVintedItemListingUrl === 'function'
+        && !isVintedItemListingUrl(window.location.href)
+    ) {
+        return [];
+    }
     const selectors = getListingSelectors();
     const listings = [];
-    const hostname = window.location.hostname;
     
     selectors.forEach(selector => {
         const elements = container.querySelectorAll ? container.querySelectorAll(selector) : [];
@@ -1431,7 +1452,8 @@ function inserisciLinkContainer(listingElement, button) {
     return false;
 }
 
-// Gestisci la search dal popup
+// Leftover popup handlers. content.js never registers a runtime message listener.
+// Inventory: docs/LEFTOVERS.md
 async function handlePopupSearch(titleInfo, sendResponse) {
     try {
         console.log('🔍 [CardTrader] Search richiesta dal popup:', titleInfo);
@@ -1846,6 +1868,8 @@ function extractTitleInfo(title) {
         'porygon-z': 'porygon-z',
         'porygon z': 'porygon-z',
         'porygonz': 'porygon-z',
+        'porygon 2': 'porygon2',
+        'porygon-2': 'porygon2',
         'ho-oh': 'ho-oh',
         'ho oh': 'ho-oh',
         'hooh': 'ho-oh',
@@ -1940,7 +1964,7 @@ function extractTitleInfo(title) {
         'qwilfish', 'scizor', 'shuckle', 'heracross', 'sneasel', 'teddiursa', 'ursaring',
         'slugma', 'magcargo', 'swinub', 'piloswine', 'corsola', 'remoraid', 'octillery',
         'delibird', 'mantine', 'skarmory', 'houndour', 'houndoom', 'kingdra',
-        'phanpy', 'donphan', 'porygon2', 'stantler', 'smeargle', 'tyrogue', 'hitmontop',
+        'phanpy', 'donphan', 'porygon', 'porygon2', 'stantler', 'smeargle', 'tyrogue', 'hitmontop',
         'smoochum', 'elekid', 'magby', 'miltank', 'blissey', 'raikou', 'entei', 'suicune',
         'larvitar', 'pupitar', 'tyranitar', 'lugia', 'ho-oh', 'celebi',
         
@@ -2096,7 +2120,7 @@ function extractTitleInfo(title) {
         }
     
     // Sort by position in title (earlier = higher priority)
-    foundPokemon.sort((a, b) => a.index - b.index);
+    foundPokemon.sort((a, b) => a.index - b.index || b.pokemon.length - a.pokemon.length);
     
     if (foundPokemon.length > 0) {
         // If we have multiple Pokemon, try to identify the main one
@@ -2876,15 +2900,35 @@ function noteContentSearchFallback(error) {
 
 // Search cards in database
 async function searchCardInDatabase(titleInfo, originalTitle = '') {
+    if (typeof chrome?.runtime?.sendMessage !== 'function') {
+        noteContentSearchFallback(new TypeError('Failed to fetch'));
+        return [];
+    }
+
     try {
-        const enrichedTitleInfo = await enrichTitleInfoWithCardvaultName(titleInfo, originalTitle);
-        return await searchPokoinCardApi(enrichedTitleInfo, originalTitle);
+        const title = String(originalTitle || titleInfo?.originalTitle || '').trim();
+        const response = await chrome.runtime.sendMessage({
+            action: 'searchCardForTitle',
+            title,
+            originalTitle: title,
+            marketplacePayload: {
+                source: 'content',
+                originalTitle: title,
+                searchTitle: title,
+                name: titleInfo?.pokemonName || titleInfo?.name || '',
+            },
+            url: typeof window !== 'undefined' ? (window.location?.href || '') : '',
+        });
+        return response?.success && Array.isArray(response.results) ? response.results : [];
     } catch (error) {
         noteContentSearchFallback(error);
         return [];
     }
 }
 
+// Leftover page-origin Cardvault fetch path. Nothing calls these after
+// searchCardInDatabase started sending searchCardForTitle.
+// Inventory: docs/LEFTOVERS.md
 function structuredPayloadFromTitleInfo(titleInfo = {}, originalTitle = '') {
     const title = String(originalTitle || titleInfo.originalTitle || '').replace(/\bvastro\b/gi, 'vstar');
     const promoNumber = title.match(/\b(?:BW|XY|SM|SWSH|SVP)\s?\d+[a-z]?\b/i)?.[0]?.replace(/\s+/g, '');
@@ -3213,7 +3257,8 @@ async function searchPokoinAutocomplete(titleInfo, originalTitle) {
     return Array.isArray(rows) ? rows.map(legacyResultFromAutocompleteRow) : [];
 }
 
-// Estrai la rarity dall'URL of immagine
+// Leftover local scorer helpers. scoreAndValidateResults is never called.
+// Inventory: docs/LEFTOVERS.md
 function extractRarityFromImageUrl(imageUrl) {
     if (!imageUrl) return null;
     

@@ -10,13 +10,9 @@
 
 ## Verify Installation
 
-1. Confirm the extension icon appears in the Chrome toolbar.
-2. Open the popup.
-3. Run a quick manual title test, for example:
-
-```text
-Glaceon ex Special Illustration Rare #150 Terastal Festival
-```
+1. Confirm the extension icon appears in the Chrome toolbar. The MV3 action has no popup; it opens the side panel.
+2. Open a supported marketplace listing (Vinted, eBay, Cardmarket, or CardTrader).
+3. Confirm a Pokoin button appears and opens the Chrome side panel.
 
 ## Functional Checks
 
@@ -26,14 +22,19 @@ Glaceon ex Special Illustration Rare #150 Terastal Festival
 2. Browse Pokemon card listings.
 3. Verify Pokoin buttons appear on supported listing or card pages.
 
-### Manual Check
+### Overlay check
 
-1. Open the popup.
-2. Paste a listing title.
-3. Generate or save a Pokoin marketplace link.
-4. Confirm link output and click behavior.
+1. Open a Vinted or eBay product listing.
+2. Confirm the top-left overlay shows the Pokoin button and clue chips.
+3. Click the button and confirm the Chrome side panel loads a Pokoin card page.
+
+`ui-pages/popup.html` is leftover and is not opened by the toolbar action. See `docs/LEFTOVERS.md`.
 
 ## Troubleshooting
+
+### Overlay still shows an old version (v2.0.7)
+
+Chrome is using a previously **Load unpacked** folder (usually `~/Desktop/pokoin-extension`) and the service worker was not Reloaded. The Mac repo path is `/Users/giuseppe/mnt/nezopt/Projects/pokemon-card-extension`. Remove the extension, Load unpacked on that repo folder, then confirm `chrome://extensions` and the overlay both say the current `manifest.json` version. Full notes: `docs/DESKTOP_RELOAD.md`.
 
 ### Extension Does Not Load
 

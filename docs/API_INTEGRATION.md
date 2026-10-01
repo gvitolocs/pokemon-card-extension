@@ -16,16 +16,19 @@ The active extension resolves cards through Pokoin/Cardvault endpoints hosted at
 
 - Owns the reliable marketplace search path
 - Calls `/api/extension-card-search` for structured matching
-- Calls `/api/searchbar-token-predict` for lightweight card-name token identification before heavier resolver work
-- Uses `/api/marketplace-autocomplete` as the Cardvault name-index resolver for ambiguous or misspelled names when token prediction is empty or low-confidence, then as the broader fallback candidate source when needed
-- Enriches candidate prices through `/api/marketplace-blueprint-price?blueprintId=:id`
+- Calls `/api/searchbar-token-predict` for lightweight card-name token identification before heavier resolver work, unless selected chips already carry that composite name
+- Uses `/api/marketplace-autocomplete` as the Cardvault name-index resolver for ambiguous or misspelled names when token prediction is empty, skipped, or low-confidence, then as the broader fallback candidate source when exact collector+name rows are still insufficient
+- Persists resolved search/name/token LRU maps in `chrome.storage.session.pokoinSearchLruCache`
+- Enriches candidate prices through `/api/marketplace-card-last-median?cardIds=` first (last-day median sold PKN per leftover), then `/api/marketplace-blueprint-price?blueprintId=:id` as listing-floor fallback. The side-panel header sums those visible leftover-tile prices next to `N cards` in PKN gold.
+- On Vinted/eBay product pages, fetches listing photos and POSTs multipart `file` to cardscan. **Every listing insertion** POSTs `https://cardscan.pokoin.com/identify-album?live=1&top_k=1` then falls back to `/identify?live=1&album=1&top_k=1` (Milo vs `pokemon_generic`, up to 24 YOLO boxes). Camera `/identify?catalog=pokemon_generic&top_k=8` is unused for marketplace photos. Empty 1x1 JPEGs without `catalog` return `ok`, `identity: tcgplayer`, empty `boxes`/`hits`, and `top1: null`. With `catalog=pokemon_generic` the same empty image is `identity: public_id`. Desk ids are `public_id`. TCGPlayer `id` values are not doubled. Leftover `ct_id`/`blueprint_id` values are doubled to marketplace ids.
 - Builds the canonical side-panel state
 - Sends authenticated Cardmarket scrape observations to `/api/cardmarket-scrape-observation`
 
 ### `content.js` and processors
 
 - Title extraction and normalization
-- Compatibility adapters such as `searchCardInDatabase`
+- Compatibility adapter `searchCardInDatabase` sends `searchCardForTitle` to the background worker and does not fetch Pokoin APIs from the page
+- Dead page-origin fetch helpers (`searchPokoinCardApi`, `searchPokoinAutocomplete`, `enrichTitleInfoWithCardvaultName`) remain in `content.js` unused; see `docs/LEFTOVERS.md`
 - Marketplace-specific button wiring and side-panel messages
 - Legacy-shaped result objects (`blueprint_id`, `name_en`, `expansion_name_en`) for older processor call sites
 
@@ -34,11 +37,11 @@ The active extension resolves cards through Pokoin/Cardvault endpoints hosted at
 1. CardTrader card pages with `/cards/:id` use that URL blueprint id directly as the Pokoin card id.
 2. Other marketplace pages send title and structured clues to the background service worker.
 3. Structured exact search runs first through `/api/extension-card-search` when selected chips or page metadata include strong name/variation/collector/expansion evidence.
-4. If the exact path is weak or empty, the background first calls `/api/searchbar-token-predict` with likely name phrases. High-confidence predictions that extend the scraped fragment are retried through `/api/extension-card-search`.
-5. If token prediction is empty, low-confidence, or unavailable, the background calls `/api/marketplace-autocomplete` with likely name phrases to recover backend canonical names from Cardvault's name index. Results are cached by normalized query, language, source, and selected clue signature.
+4. If the exact path is weak or empty, the background first calls `/api/searchbar-token-predict` with likely name phrases. High-confidence predictions that extend the scraped fragment are retried through `/api/extension-card-search`. This hop is skipped when a selected multi-word clue already compact-equals the structured name.
+5. If token prediction is empty, low-confidence, skipped, or unavailable, the background calls `/api/marketplace-autocomplete` with likely name phrases to recover backend canonical names from Cardvault's name index. Results are cached by normalized query, language, source, and selected clue signature, and resolved LRU entries persist in session storage.
 6. Standalone context tokens such as `holo`, `delta`, `illustration`, level text, expansion names, condition words, and collector numbers are not sent as primary name resolver queries.
 7. After canonicalization, `/api/extension-card-search` is retried with the canonical name while preserving collector, variation, rarity, and expansion constraints.
-8. Autocomplete is used as the broader fallback candidate source only after structured rows remain insufficient.
+8. Autocomplete is used as the broader fallback candidate source only after structured rows remain insufficient. Exact collector+name (and expansion when present) skips that fill, including Mega Charizard cases that previously padded to eight rows.
 9. Successful matches preserve backend-provided `canonicalUrl` / `marketplaceUrl` / canonical path fields and prefer those URLs in the side panel, falling back to `https://pokoin.com/marketplace/en/cards/:id` only when no canonical URL is supplied.
 10. Candidate rows preserve `previewImageUrl`/`preview_image_url` and the side panel uses that thumbnail before falling back to full image or expansion logo.
 
@@ -65,7 +68,7 @@ Automatic Cardmarket navigation/search observations use `promoteVerifiedLink: fa
 
 Some function names still carry old integration language:
 
-- `searchCardInDatabase` now calls Pokoin/Cardvault APIs and returns legacy-shaped rows for processor compatibility.
+- `searchCardInDatabase` now sends `searchCardForTitle` to the background worker and returns legacy-shaped rows for processor compatibility.
 - `generateCardTraderLink` should be treated as a compatibility name for generating Pokoin marketplace card URLs.
 - `blueprint_id` remains in processor-facing result objects because several call sites still expect it.
 

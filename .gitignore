@@ -4,9 +4,15 @@
 
 .DS_Store
 
-# Cursor canvas artifacts live outside the repo, but ignore local copies too.
-canvases/
-*.canvas.tsx
+node_modules/
+package-lock.json
+scripts/out/
+
+scan/models/*.onnx
+scan/models/*.bin
+scan/models/*.json.gz
+scan/ort/*.wasm
+
 
 # Codevira cache (gitignored; rebuilt by `codevira sync`)
 .codevira-cache/

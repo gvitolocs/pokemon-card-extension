@@ -1,8 +1,27 @@
 // Background script for Pokemon Card Trader Linker
+if (typeof classifyMarketplaceListingKind !== 'function' && typeof importScripts === 'function') {
+    try {
+        importScripts((typeof chrome !== 'undefined' && chrome.runtime?.getURL)
+            ? chrome.runtime.getURL('utils/ListingScan.js')
+            : '../utils/ListingScan.js');
+        importScripts((typeof chrome !== 'undefined' && chrome.runtime?.getURL)
+            ? chrome.runtime.getURL('utils/MatchContract.js')
+            : '../utils/MatchContract.js');
+        if (typeof printLangsForCardId !== 'function') {
+            importScripts((typeof chrome !== 'undefined' && chrome.runtime?.getURL)
+                ? chrome.runtime.getURL('utils/PrintLangs.js')
+                : '../utils/PrintLangs.js');
+        }
+    } catch (listingScanImportError) {
+        console.warn('Unable to import listing scan helpers', listingScanImportError);
+    }
+}
 const EXTENSION_VERSION = (chrome.runtime?.getManifest?.() || {}).version || '2.0.0';
-const EXTENSION_BUILD_MARKER = `${EXTENSION_VERSION}-runtime-divergence-guard`;
+const EXTENSION_BUILD_MARKER = `${EXTENSION_VERSION}-cardvault-400-compact`;
 const EXTENSION_RUNTIME_STORAGE_KEY = 'pokoinExtensionRuntime';
 const CARDVAULT_API_BASE_URL = 'https://pokoin.com';
+const POKOIN_API_ORIGIN = 'https://api.pokoin.com';
+const POKOIN_API_ORIGINS = [POKOIN_API_ORIGIN, CARDVAULT_API_BASE_URL];
 const POKOIN_AUTH_ORIGIN = 'https://pokoin.com';
 const POKOIN_AUTH_BRIDGE_PATH = '/extension/auth-bridge';
 const POKOIN_AUTH_BRIDGE_URL = `${POKOIN_AUTH_ORIGIN}${POKOIN_AUTH_BRIDGE_PATH}`;
@@ -10,18 +29,186 @@ const POKOIN_AUTH_STORAGE_KEY = 'pokoinAuthSession';
 const POKOIN_AUTH_TOKEN_RESPONSE_TYPE = 'POKOIN_EXTENSION_AUTH_TOKEN_RESPONSE';
 const POKOIN_TOKEN_REFRESH_SKEW_MS = 60 * 1000;
 const POKOIN_FALLBACK_TOKEN_TTL_MS = 50 * 60 * 1000;
-const CARDMARKET_OBSERVATION_ENDPOINT = `${CARDVAULT_API_BASE_URL}/api/cardmarket-scrape-observation`;
+const CARDMARKET_OBSERVATION_ENDPOINT = `${POKOIN_API_ORIGIN}/api/cardmarket-scrape-observation`;
 const MAX_PENDING_CARDMARKET_OBSERVATIONS = 20;
 const CARDVAULT_FETCH_TIMEOUT_MS = 6000;
+const LISTING_IMAGE_FETCH_TIMEOUT_MS = 8000;
 const CARDVAULT_FETCH_RETRY_DELAY_MS = 250;
 const VINTED_TOKEN_READY_TIMEOUT_MS = 6000;
 const RECENT_SEARCH_CACHE_LIMIT = 20;
 const CARDVAULT_NAME_RESOLUTION_CACHE_LIMIT = 50;
 const SEARCHBAR_TOKEN_PREDICT_MIN_CONFIDENCE = 70;
 const CARDVAULT_TOKEN_PREDICTION_CACHE_LIMIT = 50;
+const SEARCH_CACHE_STORAGE_KEY = 'pokoinSearchLruCache';
+const SEARCH_CACHE_PERSIST_DEBOUNCE_MS = 50;
+const LISTING_IDENTIFY_CACHE_LIMIT = 30;
+const POKOIN_VERSION_SET_CACHE_LIMIT = 500;
+const SINGLE_CARD_EMBED_MIN_SCORE = 0.65;
+const VIEWPORT_RECOGNIZED_MIN_SCORE = 0.50;
+const listingIdentifyCache = new Map();
+const pokoinVersionSetCache = new Map();
+let onDeviceWarmPromise = null;
+let printLangsIndex = typeof emptyPrintLangsIndex === 'function' ? emptyPrintLangsIndex() : { ids: {}, img: {} };
+
+async function hydratePrintLangsIndex() {
+    if (typeof fetch !== 'function' || typeof chrome === 'undefined' || !chrome.runtime?.getURL) {
+        return printLangsIndex;
+    }
+    try {
+        const response = await fetch(chrome.runtime.getURL('data/print-langs.json'));
+        if (!response.ok) {
+            return printLangsIndex;
+        }
+        const parsed = typeof parsePrintLangsIndex === 'function'
+            ? parsePrintLangsIndex(await response.json())
+            : await response.json();
+        if (parsed && parsed.ids) {
+            printLangsIndex = parsed;
+        }
+    } catch (error) {
+        console.warn('Unable to load leftover print-lang index', error);
+    }
+    return printLangsIndex;
+}
+
+const printLangsReady = hydratePrintLangsIndex();
+
+function decorateRowPrintLangs(row) {
+    if (!row || typeof applyWesternEmbed !== 'function') {
+        return row;
+    }
+    return applyWesternEmbed(row, printLangsIndex);
+}
+
+function publicVersionSetCardId(row = {}) {
+    if (row?.source === 'cardtrader_url') {
+        return '';
+    }
+    const id = String(row?.card_id || row?.cardId || '').trim();
+    if (!/^\d+$/.test(id)) {
+        return '';
+    }
+    try {
+        return BigInt(id) > 0n && BigInt(id) % 2n === 0n ? id : '';
+    } catch (_) {
+        return '';
+    }
+}
+
+function versionPrintingImageUrl(printing = {}) {
+    return absolutePokoinUrl(
+        printing.tileImageUrl
+        || printing.tile_image_url
+        || printing.homepageImageUrl
+        || printing.homepage_image_url
+        || printing.imageUrl
+        || printing.image_url
+        || printing.previewImageUrl
+        || printing.preview_image_url
+        || '',
+    );
+}
+
+function printLangsFromVersionSet(payload = {}, row = {}) {
+    const printings = Array.isArray(payload?.printings) ? payload.printings : [];
+    if (printings.length === 0) {
+        return null;
+    }
+    const ownId = publicVersionSetCardId(row);
+    const slots = { eur: null, jp: null, cn: null };
+    const nationalityKeys = {
+        western: 'eur',
+        japanese: 'jp',
+        chinese: 'cn',
+    };
+    printings.forEach((printing) => {
+        const key = nationalityKeys[String(printing?.nationality || '').trim().toLowerCase()];
+        const id = String(printing?.card_id || printing?.id || '').trim();
+        const imageUrl = versionPrintingImageUrl(printing);
+        if (!key || !id || !imageUrl) {
+            return;
+        }
+        const pack = {
+            id,
+            image_url: imageUrl,
+            canonical_path: printing.canonicalPath || printing.canonical_path || '',
+        };
+        if (!slots[key] || id === ownId) {
+            slots[key] = pack;
+        }
+    });
+    if (!slots.eur && !slots.jp && !slots.cn) {
+        return null;
+    }
+    return {
+        ...slots,
+        versions: Number(payload.versionCount) || printings.length,
+        artwork_id: String(payload.version || ''),
+    };
+}
+
+async function fetchPokoinVersionSet(cardId) {
+    const stableCardId = String(cardId || '').trim();
+    if (!stableCardId) {
+        return null;
+    }
+    if (pokoinVersionSetCache.has(stableCardId)) {
+        return pokoinVersionSetCache.get(stableCardId);
+    }
+    const pending = fetchPokoinJsonFromOrigins(
+        `/api/marketplace-version-set?cardId=${encodeURIComponent(stableCardId)}`,
+        { allow404: true, timeoutMs: 2000 },
+    ).then((payload) => {
+        const value = Array.isArray(payload?.printings) ? payload : null;
+        pokoinVersionSetCache.set(stableCardId, value);
+        return value;
+    }).catch(() => {
+        pokoinVersionSetCache.delete(stableCardId);
+        return null;
+    });
+    pokoinVersionSetCache.set(stableCardId, pending);
+    while (pokoinVersionSetCache.size > POKOIN_VERSION_SET_CACHE_LIMIT) {
+        const first = pokoinVersionSetCache.keys().next().value;
+        pokoinVersionSetCache.delete(first);
+    }
+    return pending;
+}
+
+async function enrichRowsWithPokoinVersionSets(rows = []) {
+    return Promise.all((Array.isArray(rows) ? rows : []).map(async (row) => {
+        const cardId = publicVersionSetCardId(row);
+        if (!cardId) {
+            return row;
+        }
+        const payload = await fetchPokoinVersionSet(cardId);
+        const langs = printLangsFromVersionSet(payload, row);
+        if (!langs) {
+            return row;
+        }
+        row.print_langs = langs;
+        const westernImage = langs.eur?.image_url || '';
+        if (westernImage) {
+            row.image_url = westernImage;
+            row.preview_image_url = westernImage;
+            row.imageUrl = westernImage;
+            row.previewImageUrl = westernImage;
+        }
+        return row;
+    }));
+}
+
+function setPrintLangsIndex(index) {
+    printLangsIndex = typeof parsePrintLangsIndex === 'function'
+        ? parsePrintLangsIndex(index)
+        : (index || printLangsIndex);
+    return printLangsIndex;
+}
 const EXTENSION_DEBUG_LOG_STORAGE_KEY = 'pokoinExtensionDebugLog';
-const EXTENSION_DEBUG_LOG_LIMIT = 300;
-const EXTENSION_DEBUG_TEXT_LIMIT = 320;
+const SIDE_PANEL_OPEN_STATE_KEY = 'pokoinSidePanelOpenState';
+const SIDE_PANEL_PREFERRED_OPEN_KEY = 'pokoinSidePanelPreferredOpen';
+const EXTENSION_DEBUG_LOG_LIMIT = 1200;
+const EXTENSION_PERSISTENT_DEBUG_LOG_LIMIT = 300;
+const EXTENSION_DEBUG_TEXT_LIMIT = 500;
 
 let stats = {
     cardsProcessed: 0,
@@ -84,11 +271,1599 @@ function isSupportedMarketplaceUrl(url = '') {
     }
 }
 
+function listingImagePathKey(url = '') {
+    try {
+        const parsed = new URL(String(url || ''));
+        return `${parsed.hostname}${parsed.pathname.replace(/\/(?:t|f)(?:52|72|75|150|200|300|800)\//gi, '/f800/')}`;
+    } catch (_) {
+        return String(url || '').trim();
+    }
+}
+
+function distinctListingScanNames(scan = null) {
+    return new Set(
+        (Array.isArray(scan?.uniqueHits) ? scan.uniqueHits : [])
+            .map((hit) => String(hit?.name || '').trim().toLowerCase())
+            .filter(Boolean)
+    );
+}
+
+async function identifyAlbumListingPhotos(urls = [], {
+    force = false,
+    topK = 1,
+    listingKind = 'album',
+    tab = null,
+    scanId = '',
+    onPhoto = null,
+} = {}) {
+    if (typeof uniqueListingImageUrls !== 'function' || typeof normalizeCardScanIdentifyPayload !== 'function') {
+        return { ok: false, uniqueHits: [], boxCount: 0, uniqueHitCount: 0, top1: null, photoCount: 0 };
+    }
+    const images = uniqueListingImageUrls(urls, {});
+    const cacheKey = `album-batch|${listingKind}|${tab?.id || 'notab'}|${images.join('|')}`;
+    if (!force && listingIdentifyCache.has(cacheKey)) {
+        return listingIdentifyCache.get(cacheKey);
+    }
+    const local = await identifyUrlsOnDevice(images, {
+        topK,
+        listingKind,
+        tab,
+        purpose: 'listing',
+        scanId,
+        onPhoto,
+    });
+    if (local) {
+        rememberListingIdentifyCache(cacheKey, local);
+        return local;
+    }
+    return { ok: false, uniqueHits: [], boxCount: 0, uniqueHitCount: 0, top1: null, photoCount: images.length, onDevice: true };
+}
+
+function rememberListingIdentifyCache(cacheKey, result) {
+    if (!cacheKey || !(result?.ok || (result?.uniqueHits || []).length)) {
+        return;
+    }
+    listingIdentifyCache.set(cacheKey, result);
+    while (listingIdentifyCache.size > LISTING_IDENTIFY_CACHE_LIMIT) {
+        const first = listingIdentifyCache.keys().next().value;
+        listingIdentifyCache.delete(first);
+    }
+}
+
+async function identifyMarketplaceListingPhotos(urls = [], listingKind = 'unknown', {
+    force = false,
+    tab = null,
+    scanId = '',
+    onPhoto = null,
+} = {}) {
+    if (typeof uniqueListingImageUrls !== 'function' || typeof normalizeCardScanIdentifyPayload !== 'function') {
+        return { ok: false, uniqueHits: [], boxCount: 0, uniqueHitCount: 0, top1: null, photoCount: 0 };
+    }
+    // YOLO every gallery photo and union uniqueHits (Scan tab album merge).
+    // Title "singles" used to keep only the best top1 and drop the rest.
+    const scan = await identifyAlbumListingPhotos(urls, {
+        force,
+        topK: 8,
+        listingKind: 'album',
+        tab,
+        scanId,
+        onPhoto,
+    });
+    if (typeof collapseFrontBackListingScan !== 'function') {
+        return scan;
+    }
+    const collapsed = collapseFrontBackListingScan(scan, listingKind);
+    if (distinctListingScanNames(scan).size >= 2 && (collapsed.uniqueHits || []).length < 2) {
+        return scan;
+    }
+    return collapsed;
+}
+
+function identifyListingPhotosForKind(urls = [], listingKind = 'unknown') {
+    return identifyAlbumListingPhotos(urls);
+}
+
+async function blobFromDataUrl(dataUrl = '') {
+    const response = await fetch(String(dataUrl || ''));
+    if (!response.ok && response.status !== 0) {
+        throw new Error('Unable to read tab screenshot.');
+    }
+    return response.blob();
+}
+
+async function ensureOnDeviceOffscreen() {
+    if (typeof chrome === 'undefined' || typeof chrome.offscreen?.createDocument !== 'function') {
+        throw new Error('Offscreen documents are unavailable.');
+    }
+    const offscreenUrl = chrome.runtime.getURL('scan/offscreen.html');
+    const contexts = await chrome.runtime.getContexts?.({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [offscreenUrl],
+    }).catch(() => []);
+    if (Array.isArray(contexts) && contexts.length) {
+        return;
+    }
+    try {
+        await chrome.offscreen.createDocument({
+            url: 'scan/offscreen.html',
+            reasons: ['WORKERS', 'BLOBS'],
+            justification: 'Run bundled YOLO and Milo card recognition locally with WASM.',
+        });
+    } catch (error) {
+        if (!/already exists|single offscreen/i.test(String(error.message || error))) {
+            throw error;
+        }
+    }
+}
+
+async function warmOnDeviceScanner() {
+    if (onDeviceWarmPromise) {
+        return onDeviceWarmPromise;
+    }
+    onDeviceWarmPromise = (async () => {
+        await ensureOnDeviceOffscreen();
+        const response = await chrome.runtime.sendMessage({ action: 'onDeviceScanReady' });
+        if (!response?.success) {
+            throw new Error(response?.error || 'Unable to warm on-device scanner');
+        }
+        void recordExtensionDebugEvent('background.on-device-warm', {
+            provider: response.provider || 'wasm',
+            cards: Number(response.cards) || 0,
+        });
+        return response;
+    })().catch((error) => {
+        onDeviceWarmPromise = null;
+        void recordExtensionDebugEvent('background.on-device-warm-failure', {
+            error: error.message || String(error || ''),
+        });
+        return null;
+    });
+    return onDeviceWarmPromise;
+}
+
+function base64FromArrayBuffer(buffer) {
+    const bytes = new Uint8Array(buffer);
+    const chunks = [];
+    const chunkSize = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        chunks.push(String.fromCharCode(...bytes.subarray(index, index + chunkSize)));
+    }
+    return btoa(chunks.join(''));
+}
+
+async function serializedImageFromBlob(blob) {
+    return {
+        base64: base64FromArrayBuffer(await blob.arrayBuffer()),
+        type: blob.type || 'image/jpeg',
+    };
+}
+
+const LISTING_IMAGE_MAX_BYTES = 2.5 * 1024 * 1024;
+const LISTING_IMAGE_TIMEOUT_MS = 8000;
+
+async function blobFromListingImageUrl(imageUrl = '') {
+    const url = String(imageUrl || '').trim();
+    if (!/^https?:\/\//i.test(url)) {
+        throw new Error('Unsupported listing image URL');
+    }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), LISTING_IMAGE_TIMEOUT_MS);
+    try {
+        const response = await fetch(url, {
+            credentials: 'omit',
+            signal: controller.signal,
+        });
+        if (!response.ok) {
+            throw new Error(`listing image HTTP ${response.status}`);
+        }
+        const blob = await response.blob();
+        if (!blob.size || blob.size > LISTING_IMAGE_MAX_BYTES) {
+            throw new Error(blob.size ? 'listing image too large' : 'listing image empty');
+        }
+        return blob;
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+const onDeviceAlbumPhotoForwarders = new Map();
+
+chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+    if (request?.action !== 'onDeviceIdentifyAlbumPhoto') {
+        return undefined;
+    }
+    const forward = onDeviceAlbumPhotoForwarders.get(String(request.scanId || ''));
+    if (!forward) {
+        return undefined;
+    }
+    forward(request);
+    sendResponse({ ok: true });
+    return false;
+});
+
+async function identifyOnDeviceRequest(payload = {}, options = {}) {
+    const scanId = options.scanId || `scan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    if (typeof options.onPhoto === 'function') {
+        onDeviceAlbumPhotoForwarders.set(scanId, (message) => {
+            try {
+                options.onPhoto(message.photo, message.index, message.photoCount);
+            } catch (_) {}
+        });
+    }
+    try {
+        await ensureOnDeviceOffscreen();
+        const response = await chrome.runtime.sendMessage({
+            action: 'onDeviceIdentifyAlbum',
+            scanId,
+            ...payload,
+            live: options.live !== false,
+            topK: options.topK || 1,
+            boxLimit: options.boxLimit || 24,
+        });
+        if (!response?.success || !response.payload) {
+            throw new Error(response?.error || 'on-device identify failed');
+        }
+        const photos = Array.isArray(response.payload.photos)
+            ? response.payload.photos
+            : [response.payload];
+        const requestedListingKind = Object.prototype.hasOwnProperty.call(options, 'listingKind')
+            ? options.listingKind
+            : 'album';
+        const maxPhotoBoxes = photos.reduce((max, photo) => Math.max(
+            max,
+            Number(photo?.boxCount || photo?.boxes?.length || 0),
+        ), 0);
+        const merged = typeof mergeListingScanPayloads === 'function'
+            ? mergeListingScanPayloads(photos, {
+                listingKind: requestedListingKind,
+                ignoreBoxAlbum: Boolean(options.ignoreBoxAlbum),
+            })
+            : (photos[0] || { ok: false, uniqueHits: [] });
+        const isAlbum = maxPhotoBoxes >= 2;
+        const normalized = normalizeCardScanIdentifyPayload({
+            ...merged,
+            ok: true,
+            identity: 'public_id',
+            catalog: 'pokemon_western',
+            worker: response.payload.worker || 'on-device',
+            onDevice: true,
+            album: isAlbum,
+            photoCount: photos.length,
+            albumMerged: isAlbum && (photos.length > 1 || Number(merged.uniqueHitCount) >= 2),
+        });
+        void recordExtensionDebugEvent('background.on-device-scan', {
+            purpose: options.purpose || 'listing',
+            requestedListingKind,
+            worker: normalized.worker || 'on-device',
+            numThreads: Number(response.payload.numThreads) || 1,
+            hardwareConcurrency: Number(response.payload.hardwareConcurrency) || 1,
+            sharedMemory: Boolean(response.payload.sharedMemory),
+            crossOriginIsolated: Boolean(response.payload.crossOriginIsolated),
+            totalMs: Number(response.payload.total_ms) || 0,
+            photoCount: photos.length,
+            boxCount: Number(normalized.boxCount) || 0,
+            uniqueHitCount: Number(normalized.uniqueHitCount) || 0,
+            photoResults: photos.map((photo, index) => ({
+                index,
+                boxCount: Number(photo?.boxCount || photo?.boxes?.length) || 0,
+                uniqueHitCount: Number(photo?.uniqueHitCount || photo?.uniqueHits?.length) || 0,
+                hits: (photo?.uniqueHits || []).map((hit) => ({
+                    id: String(hit?.public_id || hit?.id || ''),
+                    name: hit?.name || '',
+                    collector: hit?.collector_number || '',
+                    score: Number(hit?.score) || 0,
+                })),
+                boxes: (photo?.cards || []).slice(0, 24).map((card, boxIndex) => ({
+                    boxIndex,
+                    detectorConfidence: Number(card?.box?.conf) || 0,
+                    orientation: Number(card?.orientation) || 0,
+                    orientationsTried: Number(card?.orientationsTried) || 0,
+                    top1: extensionDebugRowSummary(card?.top1 || {}),
+                    miloCandidates: (card?.hits || []).slice(0, 8).map(extensionDebugRowSummary),
+                })),
+            })),
+        });
+        return normalized;
+    } catch (error) {
+        void recordExtensionDebugEvent('background.on-device-scan-failure', {
+            error: error.message || String(error || ''),
+        });
+        if (options.throwOnError) {
+            throw error;
+        }
+        return null;
+    } finally {
+        onDeviceAlbumPhotoForwarders.delete(scanId);
+    }
+}
+
+async function identifyBlobsOnDevice(blobs = [], options = {}) {
+    const usable = (Array.isArray(blobs) ? blobs : []).filter((blob) => blob && Number(blob.size) > 0);
+    if (!usable.length) {
+        return null;
+    }
+    try {
+        const images = await Promise.all(usable.map((blob) => serializedImageFromBlob(blob)));
+        return identifyOnDeviceRequest({ images }, options);
+    } catch (error) {
+        void recordExtensionDebugEvent('background.on-device-scan-failure', {
+            error: error.message || String(error || ''),
+        });
+        if (options.throwOnError) {
+            throw error;
+        }
+        return null;
+    }
+}
+
+async function cropListingPhotoFromScreenshot(bitmap, image, pageWidth, pageHeight) {
+    const width = Math.max(1, Math.round(Number(pageWidth) || 1));
+    const height = Math.max(1, Math.round(Number(pageHeight) || 1));
+    const scaleX = bitmap.width / width;
+    const scaleY = bitmap.height / height;
+    const sx = Math.max(0, Math.round((Number(image.x) || 0) * scaleX));
+    const sy = Math.max(0, Math.round((Number(image.y) || 0) * scaleY));
+    const sw = Math.max(1, Math.round((Number(image.w) || 0) * scaleX));
+    const sh = Math.max(1, Math.round((Number(image.h) || 0) * scaleY));
+    if (sx >= bitmap.width || sy >= bitmap.height) {
+        return null;
+    }
+    const cropW = Math.min(sw, bitmap.width - sx);
+    const cropH = Math.min(sh, bitmap.height - sy);
+    if (cropW < 48 || cropH < 48 || typeof OffscreenCanvas !== 'function') {
+        return null;
+    }
+    const canvas = new OffscreenCanvas(cropW, cropH);
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(bitmap, sx, sy, cropW, cropH, 0, 0, cropW, cropH);
+    return canvas.convertToBlob({ type: 'image/jpeg', quality: 0.92 });
+}
+
+async function listingPhotoBlobsFromTab(tab = null, imageUrls = []) {
+    if (!tab?.id || typeof chrome.scripting?.executeScript !== 'function') {
+        return [];
+    }
+    let payload = {};
+    try {
+        payload = await injectListingGalleryCapture(tab, 'MAIN');
+    } catch (_) {
+        payload = {};
+    }
+    if (!Array.isArray(payload.images) || !payload.images.length) {
+        try {
+            payload = await injectListingGalleryCapture(tab, 'ISOLATED');
+        } catch (_) {
+            payload = {};
+        }
+    }
+    const gallery = Array.isArray(payload.images) ? payload.images : [];
+    const blobs = [];
+    const usedKeys = new Set();
+    const visible = gallery.filter((image) => image?.inViewport && Number(image.w) >= 48 && Number(image.h) >= 48);
+    if (visible.length && tab.windowId != null && typeof createImageBitmap === 'function') {
+        try {
+            const screenshot = await queuedVisibleTabCapture(tab.windowId, { format: 'jpeg', quality: 92 });
+            if (String(screenshot || '').startsWith('data:image/')) {
+                const shot = await blobFromDataUrl(screenshot);
+                const bitmap = await createImageBitmap(shot);
+                for (const image of visible) {
+                    const cropped = await cropListingPhotoFromScreenshot(
+                        bitmap,
+                        image,
+                        payload.width,
+                        payload.height,
+                    );
+                    if (cropped && Number(cropped.size) > 0) {
+                        blobs.push(cropped);
+                        usedKeys.add(listingImagePathKey(image.src));
+                    }
+                }
+                bitmap.close?.();
+            }
+        } catch (error) {
+            void recordExtensionDebugEvent('background.listing-gallery-crop-failure', {
+                tabId: tab.id,
+                error: error.message || String(error || ''),
+            });
+        }
+    }
+    const remaining = [
+        ...gallery.map((image) => image.src),
+        ...imageUrls,
+    ].filter((url) => {
+        const key = listingImagePathKey(url);
+        if (!key || usedKeys.has(key)) {
+            return false;
+        }
+        usedKeys.add(key);
+        return true;
+    });
+    const fetched = await Promise.all(remaining.map(async (imageUrl) => {
+        try {
+            return await blobFromListingImageUrl(imageUrl);
+        } catch (error) {
+            void recordExtensionDebugEvent('background.listing-image-fetch-failure', {
+                url: imageUrl,
+                error: error.message || String(error || ''),
+            });
+            return null;
+        }
+    }));
+    fetched.forEach((blob) => {
+        if (blob && Number(blob.size) > 0) {
+            blobs.push(blob);
+        }
+    });
+    if (blobs.length) {
+        void recordExtensionDebugEvent('background.listing-gallery-photos', {
+            tabId: tab.id,
+            cropped: visible.length,
+            fetched: blobs.length,
+            galleryCount: gallery.length,
+        });
+    }
+    return blobs;
+}
+
+async function identifyUrlsOnDevice(urls = [], options = {}) {
+    const imageUrls = typeof uniqueListingImageUrls === 'function'
+        ? uniqueListingImageUrls(urls, {})
+        : [...new Set((Array.isArray(urls) ? urls : []).map((url) => String(url || '').trim()).filter(Boolean))];
+    if (!imageUrls.length && !options.tab?.id) {
+        return null;
+    }
+    // Prefer cropped on-page listing photos (Scan tab precision) plus every
+    // remaining gallery URL. Offscreen cannot fetch CDNs under COEP.
+    let blobs = await listingPhotoBlobsFromTab(options.tab, imageUrls);
+    if (!blobs.length) {
+        blobs = (await Promise.all(imageUrls.map(async (imageUrl) => {
+            try {
+                return await blobFromListingImageUrl(imageUrl);
+            } catch (error) {
+                void recordExtensionDebugEvent('background.listing-image-fetch-failure', {
+                    url: imageUrl,
+                    error: error.message || String(error || ''),
+                });
+                return null;
+            }
+        }))).filter((blob) => blob && Number(blob.size) > 0);
+    }
+    if (!blobs.length) {
+        void recordExtensionDebugEvent('background.on-device-scan-failure', {
+            error: 'No readable listing images',
+            imageCount: imageUrls.length,
+        });
+        return null;
+    }
+    return identifyBlobsOnDevice(blobs, options);
+}
+
+async function postIdentifyAlbumBlobs(blobs = [], options = {}) {
+    const usable = (Array.isArray(blobs) ? blobs : []).filter((blob) => blob && Number(blob.size) > 0);
+    if (!usable.length || typeof normalizeCardScanIdentifyPayload !== 'function') {
+        return { ok: false, uniqueHits: [], boxCount: 0, uniqueHitCount: 0, top1: null, photoCount: 0 };
+    }
+    const local = await identifyBlobsOnDevice(usable, options);
+    if (local) {
+        return local;
+    }
+    return { ok: false, uniqueHits: [], boxCount: 0, uniqueHitCount: 0, top1: null, photoCount: usable.length, onDevice: true };
+}
+
+async function jpegThumbnailDataUrl(dataUrl, maxWidth = 224, maxHeight = 136) {
+    const source = String(dataUrl || '');
+    if (!source.startsWith('data:image/')) {
+        return '';
+    }
+    if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') {
+        return source;
+    }
+    try {
+        const blob = await blobFromDataUrl(source);
+        const bitmap = await createImageBitmap(blob);
+        const scale = Math.min(maxWidth / Math.max(bitmap.width, 1), maxHeight / Math.max(bitmap.height, 1), 1);
+        const width = Math.max(1, Math.round(bitmap.width * scale));
+        const height = Math.max(1, Math.round(bitmap.height * scale));
+        const canvas = new OffscreenCanvas(width, height);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap, 0, 0, width, height);
+        bitmap.close?.();
+        const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.7 });
+        const buffer = await out.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        const chunk = 0x8000;
+        for (let index = 0; index < bytes.length; index += chunk) {
+            binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+        }
+        return `data:image/jpeg;base64,${btoa(binary)}`;
+    } catch (_) {
+        return source;
+    }
+}
+
+function isCapturableTabUrl(url = '') {
+    return /^https?:\/\//i.test(String(url || ''));
+}
+
+function isScanSupportedTabUrl(url = '') {
+    try {
+        const host = new URL(String(url || '')).hostname.toLowerCase();
+        return host.includes('vinted')
+            || host.includes('ebay')
+            || /(^|\.)instagram\.com$/i.test(host)
+            || /(^|\.)facebook\.com$/i.test(host)
+            || /(^|\.)fb\.com$/i.test(host)
+            || host.includes('cardtrader.com')
+            || host.includes('cardmarket.com');
+    } catch (_) {
+        return false;
+    }
+}
+
+function isVisibleTabHostPermissionError(error) {
+    return /all_urls|activeTab|cannot access|host permission/i.test(
+        String(error?.message || chrome.runtime?.lastError?.message || '')
+    );
+}
+
+async function collectVisibleViewportCapture() {
+    const vw = Math.max(1, Math.round(Number(window.innerWidth) || Number(document.documentElement?.clientWidth) || 1));
+    const vh = Math.max(1, Math.round(Number(window.innerHeight) || Number(document.documentElement?.clientHeight) || 1));
+    const minEdge = 48;
+    const seen = new Set();
+    const images = [];
+    const nodes = typeof document !== 'undefined' && document.images
+        ? Array.from(document.images)
+        : [];
+
+    function isPokoinOwned(node) {
+        return Boolean(node?.closest?.(
+            '[data-pokemon-linker-button], [data-pokoin-extension-panel], [data-pokoin-vinted-panel], [data-pokoin-vinted-panel-host], [data-pokoin-candidate-preview]'
+        ));
+    }
+
+    async function dataUrlFromImage(node, src) {
+        const width = Math.max(1, Number(node.naturalWidth) || Math.round(node.getBoundingClientRect?.().width || 0));
+        const height = Math.max(1, Number(node.naturalHeight) || Math.round(node.getBoundingClientRect?.().height || 0));
+        if (width >= minEdge && height >= minEdge && node.complete !== false) {
+            try {
+                const scratch = document.createElement('canvas');
+                scratch.width = width;
+                scratch.height = height;
+                const paint = scratch.getContext('2d');
+                paint.drawImage(node, 0, 0, width, height);
+                return scratch.toDataURL('image/jpeg', 0.8);
+            } catch (_) {
+                // Isolated world / CORS taint: fall through to page fetch.
+            }
+        }
+        if (!src || src.startsWith('data:')) {
+            return src.startsWith('data:image/') ? src : '';
+        }
+        try {
+            const response = await fetch(src, { credentials: 'omit' });
+            if (!response.ok && response.status !== 0) {
+                return '';
+            }
+            const blob = await response.blob();
+            if (!blob || Number(blob.size) <= 0 || (blob.type && !String(blob.type).startsWith('image/'))) {
+                return '';
+            }
+            return await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(String(reader.result || ''));
+                reader.onerror = () => resolve('');
+                reader.readAsDataURL(blob);
+            });
+        } catch (_) {
+            return '';
+        }
+    }
+
+    for (const node of nodes) {
+        if (!node || typeof node.getBoundingClientRect !== 'function' || isPokoinOwned(node)) {
+            continue;
+        }
+        const rect = node.getBoundingClientRect();
+        if (rect.width < minEdge || rect.height < minEdge) {
+            continue;
+        }
+        if (rect.bottom <= 0 || rect.right <= 0 || rect.top >= vh || rect.left >= vw) {
+            continue;
+        }
+        const src = String(node.currentSrc || node.src || '').trim();
+        if (!src || seen.has(src) || /\.svg(?:[?#]|$)/i.test(src)) {
+            continue;
+        }
+        seen.add(src);
+        const dataUrl = String(src).startsWith('data:image/')
+            ? src
+            : await dataUrlFromImage(node, src);
+        images.push({
+            src,
+            dataUrl,
+            x: Math.round(rect.left),
+            y: Math.round(rect.top),
+            w: Math.round(rect.width),
+            h: Math.round(rect.height),
+        });
+    }
+    images.sort((left, right) => (right.w * right.h) - (left.w * left.h));
+    return {
+        width: vw,
+        height: vh,
+        images: images.slice(0, 24),
+    };
+}
+
+async function collectListingGalleryCapture() {
+    const vw = Math.max(1, Math.round(Number(window.innerWidth) || Number(document.documentElement?.clientWidth) || 1));
+    const vh = Math.max(1, Math.round(Number(window.innerHeight) || Number(document.documentElement?.clientHeight) || 1));
+    const minEdge = 48;
+    const seen = new Set();
+    const images = [];
+    const selectors = [
+        '[data-testid^="item-photo-"][data-testid$="--img"]',
+        '[data-testid^="item-photo-"] img',
+        'img.ux-image-carousel-item',
+        '#icImg',
+        '.ux-image-grid img',
+        '#image img',
+        '.card-image img',
+        'img.card-picture',
+        'img[itemprop="image"]',
+    ];
+    const nodes = [];
+    selectors.forEach((selector) => {
+        Array.from(document.querySelectorAll(selector) || []).forEach((node) => {
+            const img = node && String(node.tagName || '').toUpperCase() === 'IMG'
+                ? node
+                : node?.querySelector?.('img');
+            if (img && !nodes.includes(img)) {
+                nodes.push(img);
+            }
+        });
+    });
+    for (const node of nodes) {
+        const src = String(node.currentSrc || node.src || node.getAttribute?.('src') || '').trim();
+        if (!src || seen.has(src) || /\.svg(?:[?#]|$)/i.test(src) || src.startsWith('data:image/svg')) {
+            continue;
+        }
+        seen.add(src);
+        const rect = typeof node.getBoundingClientRect === 'function'
+            ? node.getBoundingClientRect()
+            : { left: 0, top: 0, width: 0, height: 0 };
+        const inViewport = rect.width >= minEdge
+            && rect.height >= minEdge
+            && rect.bottom > 0
+            && rect.right > 0
+            && rect.top < vh
+            && rect.left < vw;
+        images.push({
+            src,
+            x: Math.round(rect.left),
+            y: Math.round(rect.top),
+            w: Math.round(rect.width),
+            h: Math.round(rect.height),
+            inViewport,
+            naturalWidth: Math.round(Number(node.naturalWidth) || 0),
+            naturalHeight: Math.round(Number(node.naturalHeight) || 0),
+        });
+    }
+    return {
+        width: vw,
+        height: vh,
+        images: images.slice(0, 24),
+    };
+}
+
+async function jpegDataUrlFromBlob(blob) {
+    const buffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    const chunk = 0x8000;
+    for (let index = 0; index < bytes.length; index += chunk) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunk));
+    }
+    return `data:image/jpeg;base64,${btoa(binary)}`;
+}
+
+async function injectVisibleViewportCapture(tab, world) {
+    const injected = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world,
+        func: collectVisibleViewportCapture,
+    });
+    return injected?.[0]?.result || {};
+}
+
+async function injectListingGalleryCapture(tab, world) {
+    const injected = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        world,
+        func: collectListingGalleryCapture,
+    });
+    return injected?.[0]?.result || {};
+}
+
+async function jpegDataUrlFromVisibleImages(tab) {
+    if (!tab?.id || typeof chrome.scripting?.executeScript !== 'function') {
+        throw new Error('Unable to read photos on this page.');
+    }
+    let payload = {};
+    try {
+        // Page MAIN world can canvas/fetch same-origin CardTrader thumbs that
+        // taint the isolated-world canvas (chrome-extension origin).
+        payload = await injectVisibleViewportCapture(tab, 'MAIN');
+    } catch (_) {
+        payload = {};
+    }
+    const mainImages = Array.isArray(payload.images) ? payload.images : [];
+    const mainLocal = mainImages.filter((image) => String(image?.dataUrl || '').startsWith('data:image/'));
+    if (!mainLocal.length) {
+        try {
+            const isolated = await injectVisibleViewportCapture(tab, 'ISOLATED');
+            const isolatedImages = Array.isArray(isolated.images) ? isolated.images : [];
+            const isolatedLocal = isolatedImages.filter((image) => String(image?.dataUrl || '').startsWith('data:image/'));
+            if (isolatedLocal.length >= mainLocal.length) {
+                payload = isolated;
+            }
+        } catch (_) {
+            // Keep the MAIN-world payload, including HTTPS srcs for SW fetch.
+        }
+    }
+    const images = Array.isArray(payload.images) ? payload.images : [];
+    const withLocal = images.filter((image) => String(image?.dataUrl || '').startsWith('data:image/'));
+    if (withLocal.length === 1 && images.length <= 1) {
+        return withLocal[0].dataUrl;
+    }
+    if (withLocal.length && (typeof OffscreenCanvas !== 'function' || typeof createImageBitmap !== 'function')) {
+        return withLocal[0].dataUrl;
+    }
+    if (typeof OffscreenCanvas !== 'function' || typeof createImageBitmap !== 'function') {
+        throw new Error('Unable to capture visible cards on this page.');
+    }
+    const width = Math.max(1, Math.round(Number(payload.width) || 1));
+    const height = Math.max(1, Math.round(Number(payload.height) || 1));
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(0, 0, width, height);
+    let painted = 0;
+    for (const image of images) {
+        let blob = null;
+        if (String(image?.dataUrl || '').startsWith('data:image/')) {
+            blob = await blobFromDataUrl(image.dataUrl);
+        } else if (/^https?:\/\//i.test(String(image?.src || ''))) {
+            try {
+                const response = await fetch(String(image.src), { credentials: 'omit' });
+                if (response.ok || response.status === 0) {
+                    blob = await response.blob();
+                }
+            } catch (_) {
+                blob = null;
+            }
+        }
+        if (!blob || Number(blob.size) <= 0) {
+            continue;
+        }
+        try {
+            const bitmap = await createImageBitmap(blob);
+            ctx.drawImage(
+                bitmap,
+                Number(image.x) || 0,
+                Number(image.y) || 0,
+                Math.max(1, Number(image.w) || bitmap.width),
+                Math.max(1, Number(image.h) || bitmap.height),
+            );
+            bitmap.close?.();
+            painted += 1;
+        } catch (_) {
+            // Skip undecodable marketplace thumbs.
+        }
+    }
+    if (!painted) {
+        throw new Error('No visible card photos found on this page.');
+    }
+    const out = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.85 });
+    return jpegDataUrlFromBlob(out);
+}
+
+const VISIBLE_TAB_CAPTURE_MIN_INTERVAL_MS = 550;
+const VISIBLE_TAB_CAPTURE_QUOTA_RETRY_MS = 1100;
+let visibleTabCaptureQueue = Promise.resolve();
+let lastVisibleTabCaptureStartedAt = 0;
+
+function isVisibleTabCaptureQuotaError(error) {
+    return /MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND|captureVisibleTab.*quota/i.test(
+        String(error?.message || chrome.runtime?.lastError?.message || '')
+    );
+}
+
+async function queuedVisibleTabCapture(windowId, captureOptions) {
+    const capture = async () => {
+        const remaining = VISIBLE_TAB_CAPTURE_MIN_INTERVAL_MS - (Date.now() - lastVisibleTabCaptureStartedAt);
+        if (remaining > 0) {
+            await delay(remaining);
+        }
+        lastVisibleTabCaptureStartedAt = Date.now();
+        try {
+            return await chrome.tabs.captureVisibleTab(windowId, captureOptions);
+        } catch (error) {
+            if (!isVisibleTabCaptureQuotaError(error)) {
+                throw error;
+            }
+            // Chrome's quota can outlive a restarted MV3 worker, so the in-memory
+            // spacing above may not know about the previous capture. Let that
+            // rolling window expire, then retry this user action once.
+            await recordExtensionDebugEvent('background.visible-tab-capture-quota-retry', {
+                windowId,
+                retryDelayMs: VISIBLE_TAB_CAPTURE_QUOTA_RETRY_MS,
+            });
+            await delay(VISIBLE_TAB_CAPTURE_QUOTA_RETRY_MS);
+            lastVisibleTabCaptureStartedAt = Date.now();
+            return chrome.tabs.captureVisibleTab(windowId, captureOptions);
+        }
+    };
+    const queued = visibleTabCaptureQueue.then(capture, capture);
+    visibleTabCaptureQueue = queued.catch(() => undefined);
+    return queued;
+}
+
+async function captureActiveTabJpeg(options = {}) {
+    const tab = await getActiveTab();
+    if (!tab) {
+        throw new Error('No active tab found.');
+    }
+    if (!isCapturableTabUrl(tab.url) || !isScanSupportedTabUrl(tab.url)) {
+        throw new Error('Open a Vinted, eBay, Instagram, Facebook, CardTrader, or Cardmarket page to scan.');
+    }
+    const quality = Number(options.quality) > 0 ? Number(options.quality) : 85;
+    let dataUrl = '';
+    let captureMode = 'screenshot';
+    if (typeof chrome.tabs?.captureVisibleTab === 'function') {
+        try {
+            dataUrl = await queuedVisibleTabCapture(tab.windowId, { format: 'jpeg', quality });
+        } catch (error) {
+            const message = String(error?.message || chrome.runtime?.lastError?.message || '');
+            if (!isVisibleTabHostPermissionError(error)) {
+                throw new Error(message || 'Unable to capture the visible tab.');
+            }
+        }
+    }
+    if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+        try {
+            dataUrl = await jpegDataUrlFromVisibleImages(tab);
+            captureMode = 'visible-images';
+            await recordExtensionDebugEvent('background.visible-tab-image-capture', {
+                tabId: tab.id,
+                url: tab.url || '',
+                captureMode,
+            });
+        } catch (error) {
+            throw new Error(
+                error?.message && /No visible card photos/i.test(error.message)
+                    ? error.message
+                    : 'Click the Pokoin extension icon once to grant this tab, then click Scan tab again.',
+            );
+        }
+    }
+    if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+        throw new Error('Unable to capture the visible tab.');
+    }
+    return { tab, dataUrl, captureMode };
+}
+
+async function scanVisibleTabForCards() {
+    const { tab, dataUrl, captureMode } = await captureActiveTabJpeg();
+    const blob = await blobFromDataUrl(dataUrl);
+    // A viewport is a multi-card surface. Preserve every distinct recognized
+    // hit, then classify from those hits; raw YOLO boxes without a Milo match
+    // must not force album mode or collapse the recognized cards to top1.
+    const scan = await postIdentifyAlbumBlobs([blob], {
+        live: false,
+        topK: 8,
+        listingKind: 'album',
+        purpose: 'visible-tab',
+        throwOnError: true,
+    });
+    const uniqueHits = (Array.isArray(scan?.uniqueHits) ? scan.uniqueHits : [])
+        .filter((hit) => Number(hit?.score) > VIEWPORT_RECOGNIZED_MIN_SCORE)
+        .filter((hit) => !(typeof isIgnoredListingCard === 'function' && isIgnoredListingCard(hit)));
+    // A viewport includes page chrome and may include this extension's own preview.
+    // Keep every distinct Milo hit above the 0.50 unique floor. Do not collapse
+    // a two-card screenshot to top1 just because one neighbor is below 0.65.
+    const listingKind = uniqueHits.length >= 2 ? 'album' : 'singles';
+    const rows = structuredRowsFromScanHits(uniqueHits, listingKind);
+    const owner = createSidePanelRequestOwner(tab, 'tab-screenshot-scan');
+    const best = rows[0] || null;
+    const pageInfo = {
+        title: tab.title || '',
+        url: tab.url || '',
+        hostname: safeUrlHostname(tab.url),
+        vintedIdle: false,
+        viewportScan: true,
+        structuredCard: { listingKind },
+        marketplacePayload: {
+            source: 'viewport-scan',
+            listingKind,
+            listingImageUrls: [],
+        },
+    };
+    const viewportScanLog = await recordExtensionDebugEvent('background.viewport-scan', {
+        url: tab.url || '',
+        captureMode: captureMode || 'screenshot',
+        scanMode: 'all-recognized-visible-cards',
+        displayThreshold: VIEWPORT_RECOGNIZED_MIN_SCORE,
+        boxCount: Number(scan?.boxCount) || 0,
+        rawMiloHitCount: Array.isArray(scan?.uniqueHits) ? scan.uniqueHits.length : 0,
+        recognizedHitCount: uniqueHits.length,
+        rowCount: rows.length,
+        listingKind,
+        hits: uniqueHits.map((hit) => ({
+            id: String(hit?.public_id || hit?.id || ''),
+            name: hit?.name || '',
+            collector: hit?.collector_number || '',
+            score: Number(hit?.score) || 0,
+        })),
+    });
+    await setSidePanelState({
+        updatedAt: Date.now(),
+        pageInfo,
+        rows,
+        best,
+        blueprintId: String(best?.card_id || ''),
+        pokoinUrl: best ? sidePanelStatePokoinUrl(best) : '',
+        error: rows.length ? '' : 'No cards found in the visible tab.',
+        debug: {
+            matchStage: 'viewport-scan',
+            viewportScan: true,
+            pinnedPreviewRows: true,
+            pinnedVintedPreview: true,
+            openAllCards: rows.length >= 2,
+            selectedCandidateId: '',
+            rowCount: rows.length,
+            boxCount: Number(scan?.boxCount) || 0,
+            recognizedHitCount: uniqueHits.length,
+            scanMode: 'all-recognized-visible-cards',
+            captureMode: captureMode || 'screenshot',
+            viewportScanLogId: viewportScanLog.id,
+        },
+    }, owner);
+    if (rows.length) {
+        void schedulePriceEnrichment(rows, async (enrichedRows) => {
+            const { sidePanelState: latest } = await chrome.storage.session.get('sidePanelState');
+            if (tab.url && latest?.pageInfo?.url && !sameUrlWithoutHash(latest.pageInfo.url, tab.url)) {
+                return enrichedRows;
+            }
+            if (!latest?.debug?.viewportScan) {
+                return enrichedRows;
+            }
+            await setSidePanelState({
+                ...(latest || {}),
+                updatedAt: Date.now(),
+                rows: enrichedRows,
+                best: enrichedRows[0] || best,
+                blueprintId: String(enrichedRows[0]?.card_id || best?.card_id || ''),
+                pokoinUrl: sidePanelStatePokoinUrl(enrichedRows[0] || best || {}),
+                error: '',
+            });
+            return enrichedRows;
+        }, { limit: priceEnrichmentLimitForKind(listingKind) });
+    }
+    return {
+        screenshotDataUrl: await jpegThumbnailDataUrl(dataUrl),
+        rowCount: rows.length,
+        listingKind,
+        debugEventId: viewportScanLog.id,
+    };
+}
+
+function namesCompatibleForScan(requested = '', scanName = '') {
+    const left = compactSearchValue(requested);
+    const right = compactSearchValue(scanName);
+    if (!left || !right) {
+        return false;
+    }
+    return left === right || left.includes(right) || right.includes(left);
+}
+
+function applyListingScanToStructuredCard(structuredCard = {}, listingKind = 'unknown', scan = null) {
+    const next = { ...(structuredCard || {}), listingKind };
+    const top = scan?.top1 || null;
+    const uniqueHits = Array.isArray(scan?.uniqueHits) ? scan.uniqueHits : [];
+    if (!top) {
+        return { structuredCard: next, promoted: false, reason: 'no-top1' };
+    }
+    if (listingKind === 'album' && uniqueHits.length >= 2) {
+        return { structuredCard: next, promoted: false, reason: 'album-multi-hit' };
+    }
+    const requestedName = compactSearchValue(next.name || '');
+    const requestedCollector = compactSearchValue(next.collectorNumber || '');
+    const topScore = Number(top.score) || 0;
+    if (!requestedName && listingKind !== 'album' && top.name) {
+        if (topScore < SINGLE_CARD_EMBED_MIN_SCORE) {
+            return { structuredCard: next, promoted: false, reason: 'single-top1-below-floor' };
+        }
+        next.name = top.name;
+        next.searchName = searchNameWithVariation(top.name, next.variation || '');
+        if (!requestedCollector && top.collector_number) {
+            next.collectorNumber = top.collector_number;
+            next.printedCollectorNumber = top.collector_number;
+            next.numericCollectorNumber = String(top.collector_number).match(/\d{1,4}[a-z]?/i)?.[0] || next.numericCollectorNumber || '';
+        }
+        if (!next.expansion && top.set) {
+            next.expansion = top.set;
+        }
+        return { structuredCard: next, promoted: true, reason: 'single-top1-fill' };
+    }
+    if (requestedName && top.name && namesCompatibleForScan(next.name, top.name)) {
+        return { structuredCard: next, promoted: true, reason: 'single-top1-reinforce' };
+    }
+    return { structuredCard: next, promoted: false, reason: 'scan-conflicts-or-unneeded' };
+}
+
+function pokoinCdnPreviewUrl(cardId = '', name = '') {
+    const id = String(cardId || '').trim();
+    if (!id) {
+        return '';
+    }
+    const slug = String(name || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80);
+    return slug
+        ? `https://cdn.pokoin.com/previews/${encodeURIComponent(id)}_${slug}.jpg`
+        : `https://cdn.pokoin.com/previews/${encodeURIComponent(id)}.jpg`;
+}
+
+function structuredRowsFromScanHits(hits = [], listingKind = '') {
+    const rows = (Array.isArray(hits) ? hits : []).map((hit) => {
+        const cardId = hit.id || (typeof pokoinCardIdFromScanHit === 'function' ? pokoinCardIdFromScanHit(hit) : '');
+        if (!cardId) {
+            return null;
+        }
+        if (typeof isIgnoredListingCard === 'function' && isIgnoredListingCard(hit)) {
+            return null;
+        }
+        const marketplaceUrl = hit.pokoin_url || `https://pokoin.com/marketplace/en/cards/${encodeURIComponent(cardId)}`;
+        const previewUrl = hit.image_url || pokoinCdnPreviewUrl(cardId, hit.name);
+        return decorateRowPrintLangs({
+            card_id: String(cardId),
+            name: hit.name || '',
+            set_name: hit.set || '',
+            card_number: hit.collector_number || '',
+            source: 'on_device_identify',
+            scan_score: Number(hit.score) || 0,
+            search_rank: Math.round((Number(hit.score) || 0) * 1000),
+            canonicalUrl: marketplaceUrl,
+            marketplaceUrl,
+            image_url: previewUrl,
+            preview_image_url: previewUrl,
+        });
+    }).filter(Boolean);
+    if (listingKind === 'album' && typeof uniqueRowsByLeftoverTile === 'function') {
+        return uniqueRowsByLeftoverTile(rows, printLangsIndex);
+    }
+    return rows;
+}
+
+function scanRowMatchesListingEvidence(row = {}, structuredCard = {}) {
+    const requestedName = structuredCard?.name || '';
+    let requestedCollector = structuredCard?.collectorNumber ||
+        structuredCard?.printedCollectorNumber ||
+        structuredCard?.numericCollectorNumber ||
+        '';
+    if (
+        requestedCollector &&
+        structuredCard?.levelNumber &&
+        compactSearchValue(requestedCollector) === compactSearchValue(structuredCard.levelNumber)
+    ) {
+        requestedCollector = '';
+    }
+    if (requestedName && !namesCompatibleForScan(requestedName, row.name || '')) {
+        return false;
+    }
+    if (!requestedCollector) {
+        return Boolean(requestedName) || listingScanHasCollector(row);
+    }
+    return typeof collectorNumberMatches === 'function'
+        ? collectorNumberMatches(row.card_number || '', requestedCollector)
+        : compactSearchValue(row.card_number || '') === compactSearchValue(requestedCollector);
+}
+
+function listingScanHasCollector(row = {}) {
+    return Boolean(compactSearchValue(row.card_number || ''));
+}
+
+function scanHitsForSearchRows(listingScan = null, listingKind = '') {
+    if (!listingScan) {
+        return [];
+    }
+    const hits = listingKind === 'album'
+        ? (Array.isArray(listingScan.uniqueHits) ? listingScan.uniqueHits : [])
+        : (Array.isArray(listingScan.lookalikeHits) && listingScan.lookalikeHits.length
+            ? listingScan.lookalikeHits
+            : (Array.isArray(listingScan.uniqueHits) ? listingScan.uniqueHits : []));
+    return hits.filter((hit) => Number(hit?.score) >= SINGLE_CARD_EMBED_MIN_SCORE);
+}
+
+function isCertainSingleCardScan(listingScan = null, listingKind = '') {
+    if (!listingScan || listingKind === 'album') {
+        return false;
+    }
+    const uniqueHits = Array.isArray(listingScan.uniqueHits) ? listingScan.uniqueHits : [];
+    const top = listingScan.top1 || uniqueHits[0] || null;
+    return uniqueHits.length === 1 &&
+        Boolean(top) &&
+        Number(top.score) >= SINGLE_CARD_EMBED_MIN_SCORE;
+}
+
+function overlayScanRowsAtThreshold(listingScan = null, listingKind = '') {
+    const hits = scanHitsForSearchRows(listingScan, listingKind)
+        .filter((hit) => Number(hit?.score) >= SINGLE_CARD_EMBED_MIN_SCORE)
+        .sort((left, right) => Number(right?.score || 0) - Number(left?.score || 0));
+    return uniqueRowsById(structuredRowsFromScanHits(hits, listingKind))
+        .sort((left, right) => Number(right?.scan_score || 0) - Number(left?.scan_score || 0));
+}
+
+function mergeScanRowsIntoSearchRows(rows = [], scanRows = [], listingKind = '', structuredCard = {}) {
+    if (!Array.isArray(scanRows) || scanRows.length === 0) {
+        return Array.isArray(rows) ? rows : [];
+    }
+    if (listingKind === 'album') {
+        const uniqueScan = typeof uniqueRowsByLeftoverTile === 'function'
+            ? uniqueRowsByLeftoverTile(uniqueRowsById(scanRows), printLangsIndex)
+            : uniqueRowsById(scanRows);
+        const requestedName = compactSearchValue(structuredCard?.name || '');
+        if (!requestedName) {
+            return uniqueScan;
+        }
+        const compatible = uniqueScan.filter((row) => namesCompatibleForScan(structuredCard.name, row.name || ''));
+        // Chip search for a name with no matching uniqueHits (Koraidon vs Raikou
+        // lookalikes) keeps the search. A lot whose uniqueHits include that name
+        // plus other cards must not collapse to the auto-selected first title name.
+        if (compatible.length === 0) {
+            return Array.isArray(rows) ? rows : [];
+        }
+        if (uniqueScan.length >= 2 && compatible.length < uniqueScan.length) {
+            return uniqueScan;
+        }
+        return typeof uniqueRowsByLeftoverTile === 'function'
+            ? uniqueRowsByLeftoverTile(uniqueRowsById(compatible), printLangsIndex)
+            : uniqueRowsById(compatible);
+    }
+    const rankedScan = typeof sortRowsForStructuredCard === 'function'
+        ? sortRowsForStructuredCard(scanRows, structuredCard)
+        : scanRows;
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    if (
+        requestedName &&
+        !rankedScan.some((row) => namesCompatibleForScan(structuredCard.name, row.name || ''))
+    ) {
+        return Array.isArray(rows) ? rows : [];
+    }
+    return uniqueRowsById(rankedScan);
+}
+
+async function enrichStructuredCardWithListingScan(structuredCard = {}, marketplacePayload = null, originalTitle = '', options = {}) {
+    let listingKind = marketplacePayload?.listingKind || structuredCard?.listingKind || 'unknown';
+    let listingScan = null;
+    if (!(typeof shouldIdentifyListingPhotos === 'function' && shouldIdentifyListingPhotos(marketplacePayload))) {
+        return { structuredCard, listingKind, listingScan, promoted: false, reason: 'scan-disabled' };
+    }
+    const scanId = `listing-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    const scanStartedAt = Date.now();
+    void recordExtensionDebugEvent('background.listing-scan-start', {
+        scanId,
+        source: marketplacePayload?.source || '',
+        listingKey: marketplacePayload?.listingKey || '',
+        listingKind,
+        title: originalTitle || marketplacePayload?.originalTitle || '',
+        imageCount: marketplacePayload?.listingImageUrls?.length || 0,
+        selectedClues: marketplacePayload?.selectedClues || [],
+        primaryClues: marketplacePayload?.primaryClues || [],
+        structuredCard,
+        force: Boolean(options.force),
+    });
+    const scanContext = {
+        scanId,
+        tab: options.tab || null,
+        requestUrl: marketplacePayload?.listingKey || marketplacePayload?.url || options.tab?.url || '',
+        listingKind,
+        photos: [],
+    };
+    listingScan = await identifyMarketplaceListingPhotos(marketplacePayload.listingImageUrls, listingKind, {
+        force: Boolean(options.force),
+        tab: options.tab || null,
+        scanId,
+        onPhoto: (photo, index, photoCount) => {
+            void writeProgressiveListingScanRows(scanContext, photo, index, photoCount);
+        },
+    });
+    if (typeof classifyMarketplaceListingKind === 'function') {
+        listingKind = classifyMarketplaceListingKind({
+            title: originalTitle || marketplacePayload.originalTitle || '',
+            description: marketplacePayload.listingDescription || '',
+            photoCount: marketplacePayload.listingImageUrls.length,
+            boxCount: listingScan.boxCount,
+            uniqueHitCount: listingScan.uniqueHitCount,
+            textKind: marketplacePayload.listingKind,
+        }).kind;
+    }
+    if (distinctListingScanNames(listingScan).size >= 2) {
+        listingKind = 'album';
+    }
+    const applied = applyListingScanToStructuredCard(structuredCard, listingKind, listingScan);
+    void recordExtensionDebugEvent('background.listing-scan', {
+        scanId,
+        durationMs: Date.now() - scanStartedAt,
+        source: marketplacePayload?.source || '',
+        listingKind,
+        boxCount: listingScan.boxCount,
+        uniqueHitCount: listingScan.uniqueHitCount,
+        photoCount: listingScan.photoCount || 0,
+        hits: (listingScan.uniqueHits || []).map((hit) => ({
+            name: hit.name || '',
+            collector: hit.collector_number || '',
+            score: Number(hit.score) || 0,
+        })),
+        promoted: applied.promoted,
+        reason: applied.reason,
+    });
+    return {
+        scanId,
+        structuredCard: applied.structuredCard,
+        listingKind,
+        listingScan,
+        promoted: applied.promoted,
+        reason: applied.reason,
+    };
+}
+
+function startListingScanEnrichment(structuredCard = {}, marketplacePayload = null, originalTitle = '', options = {}) {
+    if (!(typeof shouldIdentifyListingPhotos === 'function' && shouldIdentifyListingPhotos(marketplacePayload))) {
+        return null;
+    }
+    return enrichStructuredCardWithListingScan(structuredCard, marketplacePayload, originalTitle, options);
+}
+
+async function writeProgressiveListingScanRows(scanContext = null, photo = null, index = 0, photoCount = 0) {
+    if (!scanContext?.scanId || !photo || typeof setSidePanelState !== 'function') {
+        return;
+    }
+    scanContext.photos[index] = photo;
+    const present = scanContext.photos.filter(Boolean);
+    const partialMerged = typeof mergeListingScanPayloads === 'function'
+        ? mergeListingScanPayloads(present, { listingKind: 'album' })
+        : null;
+    if (!partialMerged || typeof normalizeCardScanIdentifyPayload !== 'function' || typeof overlayScanRowsAtThreshold !== 'function') {
+        return;
+    }
+    const isAlbum = present.some((entry) => Number(entry?.boxCount || entry?.boxes?.length || 0) >= 2);
+    const partialScan = normalizeCardScanIdentifyPayload({
+        ...partialMerged,
+        ok: true,
+        identity: 'public_id',
+        catalog: 'pokemon_western',
+        onDevice: true,
+        album: isAlbum,
+        photoCount: present.length,
+        albumMerged: isAlbum && (present.length > 1 || Number(partialMerged.uniqueHitCount) >= 2),
+    });
+    const rows = overlayScanRowsAtThreshold(partialScan, scanContext.listingKind);
+    void recordExtensionDebugEvent('background.listing-scan-progress', {
+        scanId: scanContext.scanId,
+        photoIndex: index,
+        photoCount: Number(photoCount) || present.length,
+        photosMerged: present.length,
+        isAlbum,
+        boxCount: Number(partialScan.boxCount) || 0,
+        uniqueHitCount: Number(partialScan.uniqueHitCount) || 0,
+        rowCount: rows.length,
+        detectMs: Number(photo.detect_ms) || 0,
+        identifyMs: Number(photo.identify_ms) || 0,
+    });
+    if (!rows.length) {
+        return;
+    }
+    const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+    const currentUrl = sidePanelState?.pageInfo?.url || '';
+    const requestUrl = scanContext.requestUrl || scanContext.tab?.url || '';
+    if (currentUrl && requestUrl && !sameUrlWithoutHash(currentUrl, requestUrl)) {
+        return;
+    }
+    const existingDebug = sidePanelState?.debug || {};
+    if (!existingDebug.listingScanPending) {
+        return;
+    }
+    if (existingDebug.progressiveScanId && existingDebug.progressiveScanId !== scanContext.scanId) {
+        return;
+    }
+    const best = rows[0];
+    await setSidePanelState({
+        ...(sidePanelState || {}),
+        updatedAt: Date.now(),
+        rows,
+        best,
+        blueprintId: String(best.card_id || ''),
+        pokoinUrl: sidePanelStatePokoinUrl(best),
+        error: '',
+        debug: {
+            ...existingDebug,
+            progressiveScanId: scanContext.scanId,
+            progressivePhotoCount: present.length,
+            progressivePhotoTotal: Number(photoCount) || present.length,
+            rowCount: rows.length,
+        },
+    });
+}
+
+function mergeListingScanIntoSearchState(rows = [], structuredCard = {}, listingKind = '', scanEnrichment = null) {
+    const nextCard = { ...(structuredCard || {}), ...(scanEnrichment?.structuredCard || {}) };
+    const nextKind = scanEnrichment?.listingKind || listingKind;
+    const listingScan = scanEnrichment?.listingScan || null;
+    const overlayRows = listingScan
+        ? overlayScanRowsAtThreshold(listingScan, nextKind)
+        : [];
+    const thresholdCertainSingleCard = isCertainSingleCardScan(listingScan, nextKind);
+    const topScanRows = thresholdCertainSingleCard && listingScan?.top1
+        ? structuredRowsFromScanHits([listingScan.top1], nextKind)
+        : [];
+    const scanConflictsWithExactListingEvidence = thresholdCertainSingleCard &&
+        Boolean(nextCard?.name) &&
+        Boolean(nextCard?.collectorNumber || nextCard?.printedCollectorNumber || nextCard?.numericCollectorNumber) &&
+        topScanRows.length === 1 &&
+        !scanRowMatchesListingEvidence(topScanRows[0], nextCard);
+    const certainSingleCard = thresholdCertainSingleCard && !scanConflictsWithExactListingEvidence;
+    const scanHits = certainSingleCard && listingScan?.top1
+        ? [listingScan.top1]
+        : scanHitsForSearchRows(listingScan, nextKind);
+    const scanRows = listingScan
+        ? structuredRowsFromScanHits(scanHits, nextKind)
+        : [];
+    const mergedRows = mergeScanRowsIntoSearchRows(rows, scanRows, nextKind, nextCard);
+    const uncertainSingleCard = !certainSingleCard &&
+        nextKind !== 'album' &&
+        (listingScan?.uniqueHits || []).length === 1 &&
+        scanRows.length === 1;
+    const result = {
+        scanId: scanEnrichment?.scanId || '',
+        rows: certainSingleCard
+            ? uniqueRowsById(scanRows).slice(0, 1)
+            : (uncertainSingleCard && rows.length ? rows : mergedRows),
+        structuredCard: nextCard,
+        listingKind: nextKind,
+        listingScan,
+        overlayRows,
+        certainSingleCard,
+        scanConflictsWithExactListingEvidence,
+    };
+    void recordExtensionDebugEvent('background.listing-scan-merge', {
+        scanId: scanEnrichment?.scanId || '',
+        listingKind: nextKind,
+        structuredCard: nextCard,
+        certainSingleCard,
+        uncertainSingleCard,
+        scanConflictsWithExactListingEvidence,
+        top1: listingScan?.top1 || null,
+        inputRows: extensionDebugRowSummaries(rows),
+        scanRows: extensionDebugRowSummaries(scanRows),
+        overlayRows: extensionDebugRowSummaries(overlayRows),
+        outputRows: extensionDebugRowSummaries(result.rows),
+    });
+    return result;
+}
+
+function shouldDeferChipSearchForListingScan(listingScanPromise, structuredCard = {}, listingKind = '', options = {}) {
+    if (options.preferChipSearch) {
+        return false;
+    }
+    if (listingScanPromise) {
+        return true;
+    }
+    const kind = listingKind || structuredCard?.listingKind || '';
+    return kind === 'album' && !compactSearchValue(structuredCard?.name || '');
+}
+
+async function listingScanChipSearchFallback(merged = {}) {
+    if ((merged.rows || []).length > 0) {
+        return merged;
+    }
+    const listingKind = merged.listingKind || merged.structuredCard?.listingKind || '';
+    const requestedName = compactSearchValue(merged.structuredCard?.name || '');
+    if (listingKind === 'album' && !requestedName) {
+        return merged;
+    }
+    if (typeof searchExtensionCard !== 'function') {
+        return merged;
+    }
+    const startedAt = Date.now();
+    void recordExtensionDebugEvent('background.chip-fallback-start', {
+        listingKind,
+        structuredCard: merged.structuredCard || {},
+        priorRows: extensionDebugRowSummaries(merged.rows),
+    });
+    try {
+        const fallback = await searchExtensionCard(merged.structuredCard || {});
+        const ranked = typeof sortRowsForStructuredCard === 'function'
+            ? sortRowsForStructuredCard(fallback.rows || [], merged.structuredCard || {})
+            : (fallback.rows || []);
+        const result = {
+            ...merged,
+            rows: uniqueRowsById(ranked).slice(0, 8),
+            usedChipSearchFallback: true,
+        };
+        void recordExtensionDebugEvent('background.chip-fallback-complete', {
+            durationMs: Date.now() - startedAt,
+            inputRows: extensionDebugRowSummaries(fallback.rows),
+            outputRows: extensionDebugRowSummaries(result.rows),
+        });
+        return result;
+    } catch (error) {
+        void recordExtensionDebugEvent('background.chip-fallback-failed', {
+            durationMs: Date.now() - startedAt,
+            error: error.message || String(error || ''),
+        });
+        return {
+            ...merged,
+            usedChipSearchFallback: true,
+            chipSearchFallbackError: error.message || String(error || ''),
+        };
+    }
+}
+
+function shouldReplaceSidePanelScanRows(existingState = {}, incomingRows = [], merged = {}) {
+    const existing = Array.isArray(existingState?.rows) ? existingState.rows.length : 0;
+    const incoming = Array.isArray(incomingRows) ? incomingRows.length : 0;
+    if (incoming === 0) {
+        return false;
+    }
+    if (existing === 0) {
+        return true;
+    }
+    // Progressive rows published by this same in-flight scan are placeholders;
+    // the authoritative merged rows always replace them.
+    const progressiveScanId = String(existingState?.debug?.progressiveScanId || '');
+    if (progressiveScanId && merged?.scanId && progressiveScanId === String(merged.scanId)) {
+        return true;
+    }
+    if (merged.certainSingleCard) {
+        return true;
+    }
+    if (
+        existing >= incoming &&
+        existingState?.best?.card_id &&
+        namesCompatibleForScan(existingState.best.name || '', incomingRows[0]?.name || '')
+    ) {
+        return false;
+    }
+    if (
+        !merged.certainSingleCard &&
+        existing === 1 && incoming > 1 && Number(merged.listingScan?.boxCount || 0) < 2
+    ) {
+        const extraFloor = typeof CARDSCAN_ALBUM_EXTRA_MIN_SCORE === 'number'
+            ? CARDSCAN_ALBUM_EXTRA_MIN_SCORE
+            : 0.80;
+        const extras = Array.isArray(merged.listingScan?.uniqueHits)
+            ? merged.listingScan.uniqueHits.slice(1)
+            : [];
+        if (!extras.some((hit) => Number(hit?.score) >= extraFloor)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+async function commitOverlayScanRowsToSidePanel(tab, requestUrl, merged = {}) {
+    const rows = Array.isArray(merged?.rows) ? merged.rows : [];
+    if (rows.length === 0 || typeof setSidePanelState !== 'function') {
+        return;
+    }
+    const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+    const currentUrl = sidePanelState?.pageInfo?.url || '';
+    const targetUrl = requestUrl || tab?.url || '';
+    if (currentUrl && targetUrl && !sameUrlWithoutHash(currentUrl, targetUrl)) {
+        return;
+    }
+    if (!shouldReplaceSidePanelScanRows(sidePanelState, rows, merged)) {
+        return;
+    }
+    const best = rows[0];
+    await setSidePanelState({
+        updatedAt: Date.now(),
+        pageInfo: {
+            ...(sidePanelState?.pageInfo || {}),
+            url: targetUrl || currentUrl,
+            title: sidePanelState?.pageInfo?.title || tab?.title || '',
+            structuredCard: {
+                ...(sidePanelState?.pageInfo?.structuredCard || {}),
+                ...(merged.structuredCard || {}),
+                listingKind: merged.listingKind || sidePanelState?.pageInfo?.structuredCard?.listingKind || '',
+            },
+        },
+        rows,
+        best,
+        blueprintId: String(best.card_id || ''),
+        pokoinUrl: sidePanelStatePokoinUrl(best),
+        error: '',
+        debug: {
+            ...(sidePanelState?.debug || {}),
+            listingScanPending: false,
+            matchStage: 'scan-merge',
+            chipSearchCompleted: true,
+            progressiveScanId: '',
+            pinnedVintedPreview: true,
+            rowCount: rows.length,
+            bestId: String(best.card_id || ''),
+        },
+    });
+    void schedulePriceEnrichment(rows, async (enrichedRows) => {
+        return applyEnrichedPokoinPricesToSidePanel(enrichedRows, targetUrl);
+    }, { limit: priceEnrichmentLimitForKind(merged.listingKind) });
+}
+
+function followThroughListingScan(scanPromise, {
+    initialRows = [],
+    structuredCard = {},
+    listingKind = '',
+    debug = null,
+    onMerged = null,
+} = {}) {
+    if (!scanPromise) {
+        return;
+    }
+    void Promise.resolve(scanPromise).then(async (scanEnrichment) => {
+        let merged = mergeListingScanIntoSearchState(initialRows, structuredCard, listingKind, scanEnrichment);
+        if ((merged.rows || []).length === 0) {
+            merged = await listingScanChipSearchFallback(merged);
+        }
+        if (debug) {
+            debug.listingKind = merged.listingKind;
+            debug.listingScanHits = merged.listingScan?.lookalikeHits?.length
+                || merged.listingScan?.uniqueHitCount
+                || 0;
+            debug.listingScanPending = false;
+            debug.listingScanDeferred = '';
+            debug.usedChipSearchFallback = Boolean(merged.usedChipSearchFallback);
+            if (merged.chipSearchFallbackError) {
+                debug.chipSearchFallbackError = merged.chipSearchFallbackError;
+            }
+        }
+        if (typeof onMerged === 'function') {
+            await onMerged(merged);
+        }
+    }).catch(async (error) => {
+        if (debug) {
+            debug.listingScanPending = false;
+            debug.listingScanError = error.message || String(error || '');
+        }
+        void recordExtensionDebugEvent('background.listing-scan-failure', {
+            error: error.message || String(error || ''),
+        });
+        if (typeof onMerged !== 'function') {
+            return;
+        }
+        const fallback = await listingScanChipSearchFallback({
+            rows: initialRows,
+            structuredCard,
+            listingKind,
+        });
+        await onMerged(fallback);
+    });
+}
+
 function isTransientFetchError(error = {}) {
     const message = String(error?.message || error || '');
+    if (error?.name === 'AbortError' || /aborted/i.test(message)) {
+        return false;
+    }
     return error?.name === 'TypeError' ||
-        error?.name === 'AbortError' ||
-        /failed to fetch|network|timeout|aborted/i.test(message);
+        /failed to fetch|network|timeout/i.test(message);
 }
 
 function delay(ms) {
@@ -102,15 +1877,21 @@ async function cardvaultFetch(url, options = {}, retryOptions = {}) {
 
     for (let attempt = 1; attempt <= attempts; attempt += 1) {
         const startedAt = Date.now();
-        const controller = typeof AbortController !== 'undefined' && !options.signal
+        const controller = typeof AbortController !== 'undefined' && !options.signal && timeoutMs > 0
             ? new AbortController()
             : null;
         const timeoutId = controller
             ? setTimeout(() => controller.abort(), timeoutMs)
             : null;
         try {
+            const headers = {
+                accept: 'application/json',
+                'accept-language': 'en-US,en;q=0.9',
+                ...(options.headers || {}),
+            };
             const response = await fetch(url, {
                 ...options,
+                headers,
                 ...(controller ? { signal: controller.signal } : {}),
             });
             void recordExtensionDebugEvent('api.response', {
@@ -160,6 +1941,21 @@ function truncateExtensionDebugText(value = '', limit = EXTENSION_DEBUG_TEXT_LIM
     return text.length > limit ? `${text.slice(0, limit)}...` : text;
 }
 
+function extensionDebugRowSummary(row = {}) {
+    return {
+        id: String(row?.card_id || row?.id || ''),
+        name: row?.name || '',
+        collector: row?.collector_number || row?.collectorNumber || '',
+        set: row?.set_name || row?.setName || row?.expansion_name || '',
+        score: Number(row?.score ?? row?.similarity ?? row?.confidence) || 0,
+        source: row?.source || row?.match_source || '',
+    };
+}
+
+function extensionDebugRowSummaries(rows = [], limit = 40) {
+    return (Array.isArray(rows) ? rows : []).slice(0, limit).map(extensionDebugRowSummary);
+}
+
 function redactExtensionDebugText(value = '') {
     return truncateExtensionDebugText(String(value || '')
         .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
@@ -196,13 +1992,17 @@ function sanitizeExtensionDebugValue(value, depth = 0, key = '') {
 }
 
 async function persistExtensionDebugLog() {
-    try {
-        if (chrome.runtime?.id && chrome.storage?.session?.set) {
-            await chrome.storage.session.set({ [EXTENSION_DEBUG_LOG_STORAGE_KEY]: extensionDebugLog });
-        }
-    } catch (error) {
-        // Debug logging must never affect matching or side-panel writes.
+    if (!chrome.runtime?.id) return;
+    const writes = [];
+    if (chrome.storage?.session?.set) {
+        writes.push(chrome.storage.session.set({ [EXTENSION_DEBUG_LOG_STORAGE_KEY]: extensionDebugLog }));
     }
+    if (chrome.storage?.local?.set) {
+        writes.push(chrome.storage.local.set({
+            [EXTENSION_DEBUG_LOG_STORAGE_KEY]: extensionDebugLog.slice(-EXTENSION_PERSISTENT_DEBUG_LOG_LIMIT),
+        }));
+    }
+    await Promise.allSettled(writes);
 }
 
 async function recordExtensionDebugEvent(type, details = {}, options = {}) {
@@ -225,17 +2025,23 @@ async function recordExtensionDebugEvent(type, details = {}, options = {}) {
 }
 
 async function getExtensionDebugLog() {
-    try {
-        const storage = await chrome.storage.session.get(EXTENSION_DEBUG_LOG_STORAGE_KEY);
-        const storedLog = Array.isArray(storage?.[EXTENSION_DEBUG_LOG_STORAGE_KEY])
-            ? storage[EXTENSION_DEBUG_LOG_STORAGE_KEY].slice(-EXTENSION_DEBUG_LOG_LIMIT)
-            : [];
-        if (storedLog.length > extensionDebugLog.length) {
-            extensionDebugLog = storedLog;
+    const storedLogs = [];
+    for (const area of [chrome.storage?.local, chrome.storage?.session]) {
+        try {
+            if (!area?.get) continue;
+            const storage = await area.get(EXTENSION_DEBUG_LOG_STORAGE_KEY);
+            if (Array.isArray(storage?.[EXTENSION_DEBUG_LOG_STORAGE_KEY])) {
+                storedLogs.push(...storage[EXTENSION_DEBUG_LOG_STORAGE_KEY]);
+            }
+        } catch (_) {
+            // Continue with the other storage area and the in-memory buffer.
         }
-    } catch (error) {
-        // Return the in-memory buffer when session storage is unavailable.
     }
+    const byId = new Map([...storedLogs, ...extensionDebugLog].map((entry) => [entry?.id, entry]));
+    extensionDebugLog = [...byId.values()]
+        .filter(Boolean)
+        .sort((left, right) => String(left.timestamp || '').localeCompare(String(right.timestamp || '')))
+        .slice(-EXTENSION_DEBUG_LOG_LIMIT);
     return extensionDebugLog.slice(-EXTENSION_DEBUG_LOG_LIMIT);
 }
 
@@ -368,6 +2174,7 @@ async function extractTitleFromPage() {
             '.card-title',
         ],
         cardtrader: [
+            'h2.d-inline.text-condensed',
             '.py-3.text-center.text-sm-left h2',
             'h1',
             'h2',
@@ -627,6 +2434,7 @@ function normalizeExpansionAlias(value = '') {
             { pattern: /\bex\s+hidden\s+legends\b/i, name: 'EX Hidden Legends' },
             { pattern: /\bHL\s+EX\s+Hidden\s+Legends\b|\bEX\s+Hidden\s+Legends\b/i, name: 'HL EX Hidden Legends' },
             { pattern: /\btesori\s+misteriosi\b|\bmysterious\s+treasures\b/i, name: 'Mysterious Treasures' },
+            { pattern: /\bdiamante\s+e?\s*perla\b|\bdiamond\s*(?:and|&)\s*pearl\b/i, name: 'Diamond & Pearl' },
             { pattern: /\bselezione\s+drago\b|\bdragon\s+selection\b/i, name: 'Dragon Selection' },
             { pattern: /\bTR\s+Team\s+Rocket\b|\bTeam\s+Rocket\b/i, name: 'Team Rocket' },
         ];
@@ -996,7 +2804,12 @@ function normalizeMarketplacePayload(payload = null) {
         primaryClues,
         strictVariation: payload.source === 'vinted' && !payload.variation,
         searchName: searchNameWithVariation(primaryName, payload.variation || ''),
+        listingKind: payload.listingKind === 'album' || payload.listingKind === 'singles' ? payload.listingKind : 'unknown',
     };
+    const listingImageUrls = typeof uniqueListingImageUrls === 'function'
+        ? uniqueListingImageUrls(payload.listingImageUrls || [])
+        : [];
+    const listingKind = structuredCard.listingKind;
     return {
         ...payload,
         source: payload.source,
@@ -1006,6 +2819,21 @@ function normalizeMarketplacePayload(payload = null) {
         collectorNumber,
         numericCollectorNumber,
         levelNumber,
+        listingKind,
+        listingImageUrls,
+        listingDescription: String(payload.listingDescription || '').slice(0, 2000),
+        enableListingScan: Boolean(payload.enableListingScan)
+            && (
+                payload.source !== 'vinted'
+                || (typeof isVintedItemListingUrl === 'function'
+                    && isVintedItemListingUrl(payload.listingKey || payload.url || ''))
+            )
+            && (
+                payload.source !== 'cardmarket'
+                || (typeof isCardmarketSinglesProductUrl === 'function'
+                    && isCardmarketSinglesProductUrl(payload.listingKey || payload.url || ''))
+            ),
+        listingKindSignals: payload.listingKindSignals || null,
         structuredCard,
     };
 }
@@ -1020,6 +2848,16 @@ function recentSearchCacheGet(cache, key = '') {
     return value;
 }
 
+function isThenable(value) {
+    return Boolean(value) && (typeof value === 'object' || typeof value === 'function') && typeof value.then === 'function';
+}
+
+function isPersistedSearchCache(cache) {
+    return cache === backgroundSearchResultCache ||
+        cache === cardvaultNameResolutionCache ||
+        cache === cardvaultTokenPredictionCache;
+}
+
 function recentSearchCacheSet(cache, key = '', value = null, limit = RECENT_SEARCH_CACHE_LIMIT) {
     if (!key || !cache) {
         return value;
@@ -1031,6 +2869,9 @@ function recentSearchCacheSet(cache, key = '', value = null, limit = RECENT_SEAR
     while (cache.size > limit) {
         const oldestKey = cache.keys().next().value;
         cache.delete(oldestKey);
+    }
+    if (!searchLruHydrating && isPersistedSearchCache(cache) && !isThenable(value)) {
+        schedulePersistSearchCaches();
     }
     return value;
 }
@@ -1074,6 +2915,10 @@ function recentMarketplaceSearchIdentity({
         compactSearchValue(structuredCard.numericCollectorNumber || marketplacePayload?.numericCollectorNumber || ''),
         compactSearchValue(structuredCard.expansion || marketplacePayload?.expansion || ''),
         compactSearchValue(structuredCard.levelNumber || marketplacePayload?.levelNumber || ''),
+        compactSearchValue(marketplacePayload?.listingKind || structuredCard.listingKind || ''),
+        typeof uniqueListingImageUrls === 'function'
+            ? uniqueListingImageUrls(marketplacePayload?.listingImageUrls || []).join(',')
+            : '',
         compactSearchValue(previewSignature || ''),
         selectionRevision === '' || selectionRevision === null || selectionRevision === undefined
             ? ''
@@ -1479,7 +3324,29 @@ function acceptedSearchbarTokenPrediction(payload = {}, fragment = '') {
     }) || null;
 }
 
+function selectedCompositeAlreadyIsSearchName(structuredCard = {}, options = {}) {
+    const requestedName = compactSearchValue(structuredCard?.name || '');
+    if (!requestedName) {
+        return false;
+    }
+    const selectedClues = [
+        ...(Array.isArray(options.selectedClues) ? options.selectedClues : []),
+        ...(Array.isArray(options.primaryClues) ? options.primaryClues : []),
+        ...(Array.isArray(structuredCard?.selectedClues) ? structuredCard.selectedClues : []),
+        ...(Array.isArray(structuredCard?.primaryClues) ? structuredCard.primaryClues : []),
+    ];
+    return selectedClues.some((clue) => {
+        const compactClue = compactSearchValue(clue || '');
+        const wordCount = normalizeNameResolverTerm(clue).split(/\s+/).filter(Boolean).length;
+        return compactClue === requestedName && wordCount >= 2;
+    });
+}
+
 async function predictCardNameToken(searchTerm = '', options = {}) {
+    const structuredCard = options.structuredCard || {};
+    if (selectedCompositeAlreadyIsSearchName(structuredCard, options)) {
+        return { name: '', payload: null, skipped: true, reason: 'selected-composite-name' };
+    }
     const payload = searchbarTokenPredictPayload(searchTerm, options);
     if (!payload.query || !isLikelyCardNameResolverTerm(payload.query)) {
         return { name: '', payload: null, skipped: true };
@@ -1493,7 +3360,7 @@ async function predictCardNameToken(searchTerm = '', options = {}) {
         return cached;
     }
 
-    const requestPromise = cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/searchbar-token-predict`, {
+    const requestPromise = cardvaultFetch(`${POKOIN_API_ORIGIN}/api/searchbar-token-predict`, {
         method: 'POST',
         headers: {
             'content-type': 'application/json',
@@ -1547,7 +3414,7 @@ async function fetchCardvaultNameResolverRows(searchTerm = '', options = {}) {
         return cached;
     }
 
-    const requestPromise = cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+    const requestPromise = cardvaultFetch(`${POKOIN_API_ORIGIN}/api/marketplace-autocomplete`, {
         method: 'POST',
         headers: {
             'content-type': 'application/json',
@@ -1668,8 +3535,17 @@ async function resolveNameFromCardvaultTitle(title = '', structuredCard = null, 
         ...candidateNameTermsFromTitle(title, structuredCard, options),
     ])].filter(isLikelyCardNameResolverTerm)) {
         try {
-            const prediction = await predictCardNameToken(term, resolverOptions);
-            if (prediction.name && shouldUseResolvedCardName(prediction.name, structuredCard || {})) {
+            const prediction = await predictCardNameToken(term, {
+                ...resolverOptions,
+                structuredCard,
+                title,
+                selectedClues: options.selectedClues || structuredCard?.selectedClues,
+                primaryClues: options.primaryClues || structuredCard?.primaryClues,
+            });
+            if (prediction.skipped && prediction.reason === 'selected-composite-name') {
+                // Selected chips already carry the composite search name; skip
+                // token-predict and keep the heavier name-index hop only when needed.
+            } else if (prediction.name && shouldUseResolvedCardName(prediction.name, structuredCard || {})) {
                 const predictedStructuredCard = structuredCard
                     ? {
                         ...structuredCard,
@@ -1695,18 +3571,19 @@ async function resolveNameFromCardvaultTitle(title = '', structuredCard = null, 
                     attemptedTerms,
                     structuredCard: predictedStructuredCard,
                 };
+            } else if (!prediction.skipped) {
+                attemptedTerms.push({
+                    term,
+                    rowCount: 0,
+                    acceptedName: '',
+                    cached: false,
+                    source: 'searchbar-token-predict',
+                    predictionCount: prediction.predictionCount || 0,
+                    confidence: prediction.prediction?.confidence ?? null,
+                    error: prediction.error || '',
+                    searchContext: null,
+                });
             }
-            attemptedTerms.push({
-                term,
-                rowCount: 0,
-                acceptedName: '',
-                cached: false,
-                source: 'searchbar-token-predict',
-                predictionCount: prediction.predictionCount || 0,
-                confidence: prediction.prediction?.confidence ?? null,
-                error: prediction.error || '',
-                searchContext: null,
-            });
         } catch (predictionError) {
             attemptedTerms.push({
                 term,
@@ -1753,6 +3630,10 @@ async function resolveNameFromCardvaultTitle(title = '', structuredCard = null, 
 
 function shouldResolveNameBeforeExactSearch(structuredCard = {}, options = {}) {
     if (!['vinted', 'ebay'].includes(options.source || '')) {
+        return false;
+    }
+    if (typeof shouldSkipAlbumSpeciesCollapse === 'function' &&
+        shouldSkipAlbumSpeciesCollapse(options.listingKind || structuredCard?.listingKind || '')) {
         return false;
     }
     if (normalizeVariationValue(structuredCard?.variation || '')) {
@@ -1902,7 +3783,7 @@ async function searchCardvault(title, preferredName = '') {
         : buildCardvaultQueries(title);
 
     for (const searchTerm of [...new Set(queries.filter(Boolean))]) {
-        const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+        const response = await cardvaultFetch(`${POKOIN_API_ORIGIN}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
@@ -1916,7 +3797,11 @@ async function searchCardvault(title, preferredName = '') {
         });
 
         if (!response.ok) {
-            throw new Error(`Cardvault search failed with HTTP ${response.status}`);
+            attemptedQueries.push({
+                query: searchTerm,
+                error: response.status,
+            });
+            continue;
         }
 
         const payload = await response.json();
@@ -1942,6 +3827,8 @@ function buildStructuredFallbackQueries(structuredCard = {}, title = '') {
     const numericCollectorNumber = structuredCard.numericCollectorNumber || '';
     const expansion = structuredCard.expansion || '';
     const levelNumber = structuredCard.levelNumber || '';
+    const spacedDigitName = String(name || '').replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/(\d)([A-Za-z])/g, '$1 $2').replace(/\s+/g, ' ').trim();
+    const nameAliases = spacedDigitName && spacedDigitName !== name ? [spacedDigitName] : [];
     const variationTokens = requestedVariationTokens(structuredCard);
     const deltaAliases = variationTokens.some((token) => token === 'delta' || token === 'deltaspecies')
         ? ['Delta Species', 'delta']
@@ -1965,6 +3852,7 @@ function buildStructuredFallbackQueries(structuredCard = {}, title = '') {
         [name, levelNumber].filter(Boolean).join(' '),
         title,
         name,
+        ...nameAliases,
     ]
         .map((query) => removeMarketplaceSearchNoise(query).replace(/\s+/g, ' ').trim())
         .filter(Boolean);
@@ -1975,7 +3863,7 @@ async function searchCardvaultForStructuredCard(title = '', structuredCard = {})
     const queries = [...new Set(buildStructuredFallbackQueries(structuredCard, title))];
 
     for (const searchTerm of queries) {
-        const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-autocomplete`, {
+        const response = await cardvaultFetch(`${POKOIN_API_ORIGIN}/api/marketplace-autocomplete`, {
             method: 'POST',
             headers: {
                 'content-type': 'application/json',
@@ -1983,13 +3871,17 @@ async function searchCardvaultForStructuredCard(title = '', structuredCard = {})
             body: JSON.stringify({
                 search_term: searchTerm,
                 result_limit: 8,
-                pool_limit: 80,
+                pool_limit: 50,
                 search_language: 'en',
             }),
         });
 
         if (!response.ok) {
-            throw new Error(`Cardvault search failed with HTTP ${response.status}`);
+            attemptedQueries.push({
+                query: searchTerm,
+                error: response.status,
+            });
+            continue;
         }
 
         const payload = await response.json();
@@ -2020,7 +3912,7 @@ function rowFromExtensionMatch(match) {
     const cardId = match.cardId || match.card_id || match.blueprintId || match.blueprint_id || '';
     const imageUrl = match.imageUrl || match.image_url || match.cdnImageUrl || match.cdn_image_url || '';
     const previewImageUrl = match.previewImageUrl || match.preview_image_url || imageUrl;
-    return {
+    return decorateRowPrintLangs({
         card_id: cardId,
         name: match.name || match.name_en || match.pokemon_name || '',
         set_name: match.expansionName || match.expansion_name || match.expansion_name_en || match.setName || match.set_name || '',
@@ -2043,7 +3935,7 @@ function rowFromExtensionMatch(match) {
         marketplaceUrl: match.marketplaceUrl || match.marketplace_url || '',
         canonicalPath: match.canonicalPath || match.canonical_path || '',
         marketplacePath: match.marketplacePath || match.marketplace_path || '',
-    };
+    });
 }
 
 function absolutePokoinUrl(pathOrUrl = '') {
@@ -2083,12 +3975,97 @@ function imageFieldsFromRow(row = {}) {
     };
 }
 
+function pokoinPublicIdFromCardTraderId(cardTraderId = '') {
+    const clean = String(cardTraderId || '').trim();
+    if (!/^[1-9]\d*$/.test(clean)) {
+        return '';
+    }
+    try {
+        return String(BigInt(clean) * 2n);
+    } catch (error) {
+        return '';
+    }
+}
+
+function leftoverImageMatchesCardTraderId(image = '', blueprintId = '') {
+    const id = String(blueprintId || '').trim();
+    if (!/^[1-9]\d*$/.test(id)) {
+        return false;
+    }
+    return new RegExp(`(?:^|[/?])${id}_`).test(String(image || ''));
+}
+
+function cardTraderSlugQueryFromUrl(url = '') {
+    try {
+        const slug = new URL(url).pathname.match(/\/(?:[a-z]{2}\/)?cards\/\d+(?:-|\/)([^/?#]+)/i)?.[1] || '';
+        return decodeURIComponent(slug).replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+    } catch (error) {
+        return '';
+    }
+}
+
+const cardTraderPublicIdByBlueprint = new Map();
+
+/** Leftover JPEG `{ct_id}_` can collide with another card's public_id = ct_id*2
+ * (Magikarp Skyridge 127710 is public 255420, not Lombre 254420). */
+async function resolvePokoinPublicIdFromCardTrader({ blueprintId = '', url = '', title = '' } = {}) {
+    const fallback = pokoinPublicIdFromCardTraderId(blueprintId);
+    const cacheKey = String(blueprintId || '').trim();
+    if (cacheKey && cardTraderPublicIdByBlueprint.has(cacheKey)) {
+        return cardTraderPublicIdByBlueprint.get(cacheKey);
+    }
+    const query = cardTraderSlugQueryFromUrl(url) || String(title || '').trim();
+    if (!query) {
+        return fallback;
+    }
+    try {
+        const endpoint = `${POKOIN_API_ORIGIN}/api/marketplace-suggest?q=${encodeURIComponent(query)}`;
+        const response = await fetch(endpoint, { headers: { Accept: 'application/json' } });
+        if (!response.ok) {
+            return fallback;
+        }
+        const data = await response.json();
+        const printings = (Array.isArray(data?.groups) ? data.groups : [])
+            .flatMap((group) => group.printings || group.cards || []);
+        const leftoverHit = printings.find((row) => leftoverImageMatchesCardTraderId(
+            row.image || row.imageUrl || row.cdn_image_url || row.href || row.canonicalPath,
+            blueprintId,
+        ));
+        const leftoverId = String(leftoverHit?.id || leftoverHit?.card_id || '').trim();
+        if (/^[1-9]\d*$/.test(leftoverId)) {
+            if (cacheKey) {
+                cardTraderPublicIdByBlueprint.set(cacheKey, leftoverId);
+            }
+            return leftoverId;
+        }
+    } catch (error) {
+        /* keep ct_id * 2 */
+    }
+    return fallback;
+}
+
 function pokoinUrlForRow(row = {}) {
+    row = row && typeof row === 'object' ? row : {};
+    if (row.source === 'cardtrader_url') {
+        return cardTraderDirectPokoinUrl(row.card_id || row.blueprint_id || row.blueprintId || '');
+    }
+    const langs = row.print_langs || (typeof printLangsForCardId === 'function'
+        ? printLangsForCardId(row.card_id || row.cardId, printLangsIndex, row.name || row.name_en || '')
+        : null);
+    const westernId = langs?.eur?.id;
+    if (westernId) {
+        return typeof printLangDeskUrl === 'function'
+            ? printLangDeskUrl(westernId)
+            : `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(westernId)}`;
+    }
     const urls = canonicalUrlFieldsFromRow(row);
-    return urls.canonicalUrl ||
+    const fromFields = urls.canonicalUrl ||
         urls.marketplaceUrl ||
-        absolutePokoinUrl(urls.canonicalPath || urls.marketplacePath) ||
-        (row?.card_id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(row.card_id)}` : '');
+        absolutePokoinUrl(urls.canonicalPath || urls.marketplacePath);
+    if (fromFields) {
+        return fromFields;
+    }
+    return row?.card_id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(row.card_id)}` : '';
 }
 
 function rowMatchesStructuredName(row, structuredCard) {
@@ -2456,6 +4433,27 @@ function rarityMatchRank(row = {}, structuredCard = {}) {
     return 9;
 }
 
+function rowNameMatchRank(row = {}, structuredCard = {}) {
+    const requestedName = structuredCard?.name || '';
+    const requested = compactSearchValue(requestedName);
+    if (!requested) {
+        return 0;
+    }
+    const rowName = row?.name || row?.canonical_name || '';
+    const rowCompact = compactSearchValue(rowName);
+    if (!rowCompact) {
+        return 9;
+    }
+    if (requested === rowCompact || rowCompact.includes(requested)) {
+        return 0;
+    }
+    const tokens = compositeNameTokens(requestedName);
+    if (tokens.length >= 2 && rowHasAllNameTokens(row, tokens)) {
+        return 0;
+    }
+    return 9;
+}
+
 function sortRowsForStructuredCard(rows, structuredCard = {}) {
     const requestedExpansion = compactSetValue(structuredCard.expansion || '');
     const requestedName = compactSearchValue(structuredCard.name || '');
@@ -2472,6 +4470,12 @@ function sortRowsForStructuredCard(rows, structuredCard = {}) {
         const bVariationRank = variationMatchRank(b, structuredCard);
         if (aVariationRank !== bVariationRank) {
             return aVariationRank - bVariationRank;
+        }
+
+        const aNameRank = rowNameMatchRank(a, structuredCard);
+        const bNameRank = rowNameMatchRank(b, structuredCard);
+        if (aNameRank !== bNameRank) {
+            return aNameRank - bNameRank;
         }
 
         const aLevelRank = rowLevelRank(a, structuredCard);
@@ -2724,6 +4728,13 @@ function filterStrongExactRows(rows = [], structuredCard = {}) {
         if (prefixedExactRows.length > 0) {
             return prefixedExactRows;
         }
+        // A complete collector fraction (and especially collector + expansion)
+        // is stronger than a broad list of same-name cards. Keeping every Pikachu
+        // here discarded Vinted's explicit 60/64 identity and left six unrelated
+        // tiles in the panel.
+        if (exactRows.length > 0 && (requestedParts.hasSlash || structuredCard.expansion)) {
+            return exactRows;
+        }
         const hasNameMismatch = rows.some((row) => !rowMatchesExactStructuredName(row, structuredCard));
         if (!hasNameMismatch || !exactRowsHaveAllRequestedPrimary) {
             return rows;
@@ -2750,8 +4761,19 @@ function rowMatchesExactOrStructuredVariationName(row = {}, structuredCard = {})
 }
 
 function shouldRunAutocompleteFallback(rows = [], structuredCard = {}) {
+    if (typeof shouldSkipAlbumSpeciesCollapse === 'function' &&
+        shouldSkipAlbumSpeciesCollapse(structuredCard?.listingKind || '') &&
+        !compactSearchValue(structuredCard?.name || '')) {
+        return false;
+    }
     if (rows.length === 0) {
         return true;
+    }
+    if (
+        hasGoodEnoughExactRows(rows, structuredCard) &&
+        (hasExactStructuredIdentity(structuredCard) || hasStructuredCollectorIdentity(structuredCard))
+    ) {
+        return false;
     }
     if (structuredCard?.levelNumber && !rows.some((row) => rowLevelRank(row, structuredCard) === 0)) {
         return true;
@@ -2849,6 +4871,9 @@ function inferStructuredNameFromCollectorRows(structuredCard = {}, rows = []) {
 function uniqueRowsById(rows = []) {
     const seen = new Set();
     return rows.filter((row) => {
+        if (typeof isIgnoredListingCard === 'function' && isIgnoredListingCard(row)) {
+            return false;
+        }
         const id = String(row.card_id || '');
         if (!id || seen.has(id)) {
             return false;
@@ -2858,27 +4883,49 @@ function uniqueRowsById(rows = []) {
     });
 }
 
-async function searchExtensionCard(structuredCard) {
-    if (!structuredCard?.name && !structuredCard?.collectorNumber) {
-        return { rows: [], debug: { endpoint: '/api/extension-card-search', skipped: true } };
-    }
+function compactCardvaultJsonPayload(payload = {}) {
+    return Object.fromEntries(Object.entries(payload).filter(([, value]) => {
+        if (value == null || value === false) {
+            return false;
+        }
+        if (typeof value === 'string' && !value.trim()) {
+            return false;
+        }
+        if (Array.isArray(value) && value.length === 0) {
+            return false;
+        }
+        return true;
+    }));
+}
 
-    const payload = {
+function extensionCardSearchPayload(structuredCard = {}) {
+    const rarityAliases = Array.isArray(structuredCard.rarityAliases)
+        ? structuredCard.rarityAliases.map((value) => String(value || '').trim()).filter(Boolean)
+        : [];
+    const rarity = String(structuredCard.rarity || '').trim();
+    const officialRarity = /^illustration$/i.test(rarity) ? (rarityAliases[0] || '') : rarity;
+    return compactCardvaultJsonPayload({
         name: structuredCard.searchName || structuredCard.name,
         collectorNumber: collectorNumberForExtensionPayload(structuredCard),
         numericCollectorNumber: structuredCard.numericCollectorNumber,
         printedCollectorNumber: structuredCard.printedCollectorNumber,
         expansion: structuredCard.expansion,
-        rarity: structuredCard.rarity,
-        rarityAliases: structuredCard.rarityAliases,
+        rarity: officialRarity,
+        rarityAliases,
         variation: structuredCard.variation,
         levelNumber: structuredCard.levelNumber,
         editionHint: structuredCard.editionHint,
         language: 'en',
         limit: 8,
-    };
+    });
+}
 
-    const response = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
+async function searchExtensionCard(structuredCard) {
+    if (!structuredCard?.name && !structuredCard?.collectorNumber) {
+        return { rows: [], debug: { endpoint: '/api/extension-card-search', skipped: true } };
+    }
+
+    const postSearch = (payload) => cardvaultFetch(`${POKOIN_API_ORIGIN}/api/extension-card-search`, {
         method: 'POST',
         headers: {
             'content-type': 'application/json',
@@ -2886,19 +4933,66 @@ async function searchExtensionCard(structuredCard) {
         body: JSON.stringify(payload),
     });
 
+    let payload = extensionCardSearchPayload(structuredCard);
+    let response = await postSearch(payload);
+    if (response.status === 400 && payload.rarityAliases) {
+        const { rarityAliases, ...withoutAliases } = payload;
+        payload = withoutAliases;
+        response = await postSearch(payload);
+    }
+    if (response.status === 400 && payload.rarity) {
+        const { rarity, ...withoutRarity } = payload;
+        payload = withoutRarity;
+        response = await postSearch(payload);
+    }
+
     if (!response.ok) {
         void recordExtensionDebugEvent('api.extension-card-search.failure', {
             status: response.status,
             payload,
         });
-        throw new Error(`Extension card search failed with HTTP ${response.status}`);
+        return {
+            rows: [],
+            debug: {
+                endpoint: '/api/extension-card-search',
+                payload,
+                error: `HTTP ${response.status}`,
+            },
+        };
     }
 
-    const data = await response.json();
+    let data = await response.json();
+    let expansionRecovery = null;
+    if (
+        (!Array.isArray(data.matches) || data.matches.length === 0) &&
+        payload.expansion &&
+        (payload.collectorNumber || payload.numericCollectorNumber || payload.printedCollectorNumber)
+    ) {
+        const { expansion, ...withoutExpansion } = payload;
+        const recoveryResponse = await postSearch(withoutExpansion);
+        expansionRecovery = {
+            attempted: true,
+            omittedExpansion: expansion,
+            status: recoveryResponse.status,
+        };
+        if (recoveryResponse.ok) {
+            const recoveryData = await recoveryResponse.json();
+            expansionRecovery.matchCount = recoveryData.matches?.length || 0;
+            if (Array.isArray(recoveryData.matches) && recoveryData.matches.length > 0) {
+                data = recoveryData;
+                expansionRecovery.used = true;
+            }
+        }
+    }
     let matches = data.matches || [];
+    if (expansionRecovery?.used) {
+        matches = matches.filter((match) =>
+            expansionMatches(match?.expansionName || match?.set_name || '', structuredCard.expansion || '')
+        );
+    }
     if (structuredCard.editionHint && !structuredCard.expansion && structuredCard.name) {
         try {
-            const editionResponse = await cardvaultFetch(`${CARDVAULT_API_BASE_URL}/api/extension-card-search`, {
+            const editionResponse = await cardvaultFetch(`${POKOIN_API_ORIGIN}/api/extension-card-search`, {
                 method: 'POST',
                 headers: {
                     'content-type': 'application/json',
@@ -2936,11 +5030,13 @@ async function searchExtensionCard(structuredCard) {
             input: data.input || {},
             matchCount: data.matches?.length || 0,
             acceptedMatchCount: rows.length,
+            expansionRecovery,
         },
     };
 }
 
 function legacyResultFromRow(row) {
+    row = row && typeof row === 'object' ? row : {};
     const canonicalFields = canonicalUrlFieldsFromRow(row);
     const imageFields = imageFieldsFromRow(row);
     return {
@@ -2954,7 +5050,9 @@ function legacyResultFromRow(row) {
         preview_image_url: imageFields.preview_image_url,
         previewImageUrl: imageFields.preview_image_url,
         imageUrl: imageFields.image_url,
+        print_langs: row.print_langs || row.printLangs || null,
         source: row.source || 'background_card_search',
+        scan_score: Number(row.scan_score) || 0,
         search_score: row.search_rank,
         pokoin_price: row.pokoin_price || row.pokoinPrice || row.price_formatted || row.priceFormatted || '',
         ...canonicalFields,
@@ -2966,6 +5064,9 @@ function legacyResultFromRow(row) {
 }
 
 function selectedCandidateRowFromRequest(request = {}) {
+    if (request.openAllCards) {
+        return null;
+    }
     const selected = request.selectedCandidate || {};
     const cardId = request.selectedCandidateId || selected.card_id || selected.blueprint_id || selected.cardId || selected.blueprintId || '';
     if (!cardId) {
@@ -2973,58 +5074,94 @@ function selectedCandidateRowFromRequest(request = {}) {
     }
     const imageFields = imageFieldsFromRow(selected);
 
-    return {
+    return decorateRowPrintLangs({
         card_id: String(cardId),
         name: selected.name || selected.name_en || selected.pokemon_name || request.title || `Blueprint ${cardId}`,
         set_name: selected.set_name || selected.expansion_name_en || selected.expansionName || selected.expansion_name || '',
         card_number: selected.card_number || selected.collector_number || selected.collectorNumber || '',
         expansion_symbol_url: selected.expansion_symbol_url || selected.expansionSymbolUrl || selected.symbolImageUrl || '',
         ...imageFields,
+        print_langs: selected.print_langs || selected.printLangs || null,
         source: selected.source || 'selected_candidate',
         search_rank: selected.search_rank || selected.searchScore || selected.search_score || selected.relevanceScore || selected.score || 999999,
         pokoin_price: selected.pokoin_price || selected.pokoinPrice || selected.price_formatted || selected.priceFormatted || '',
         ...canonicalUrlFieldsFromRow(selected),
-    };
+    });
 }
 
 function sidePanelRowFromPreview(row = {}) {
+    row = row && typeof row === 'object' ? row : {};
     const cardId = row.card_id || row.blueprint_id || row.cardId || row.blueprintId || '';
     if (!cardId) {
         return null;
     }
-    return {
+    return decorateRowPrintLangs({
         card_id: String(cardId),
         name: row.name || row.name_en || row.pokemon_name || '',
         set_name: row.set_name || row.expansion_name_en || row.expansionName || row.expansion_name || '',
         card_number: row.card_number || row.collector_number || row.collectorNumber || '',
         expansion_symbol_url: row.expansion_symbol_url || row.expansionSymbolUrl || row.symbolImageUrl || '',
         ...imageFieldsFromRow(row),
+        print_langs: row.print_langs || row.printLangs || null,
         source: row.source || 'vinted_overlay_preview',
         search_rank: row.search_rank || row.searchScore || row.search_score || row.relevanceScore || row.score || '',
         pokoin_price: row.pokoin_price || row.pokoinPrice || row.price_formatted || row.priceFormatted || '',
+        print_lang_prices: row.print_lang_prices || null,
+        print_lang_price_pkn: row.print_lang_price_pkn || null,
         ...canonicalUrlFieldsFromRow(row),
-    };
+    });
 }
 
 function sidePanelStatePokoinUrl(row = {}) {
     return pokoinUrlForRow(row);
 }
 
-function cardTraderDirectPokoinUrl(blueprintId = '') {
-    const stableBlueprintId = String(blueprintId || '').trim();
-    return stableBlueprintId ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(stableBlueprintId)}` : '';
+function cardTraderDirectPokoinUrl(blueprintId = '', publicId = '') {
+    const id = String(publicId || pokoinPublicIdFromCardTraderId(blueprintId) || '').trim();
+    return id ? `${CARDVAULT_API_BASE_URL}/marketplace/en/cards/${encodeURIComponent(id)}` : '';
 }
 
 function previewRowsFromRequest(request = {}) {
     return (Array.isArray(request.previewRows) ? request.previewRows : [])
         .map(sidePanelRowFromPreview)
-        .filter(Boolean)
-        .slice(0, 8);
+        .filter(Boolean);
+}
+
+function overlayDeskFlags(canonical = {}) {
+    const openAllCards = Boolean(canonical.openAllCards);
+    const selectedCandidateId = openAllCards ? '' : String(canonical.selectedCandidateId || '');
+    return {
+        selectedCandidateId,
+        openAllCards,
+        openPokoinDesk: false,
+    };
+}
+
+function canonicalWithOverlayView(canonical = {}, request = {}, selectedCandidateRow = null, previewRows = []) {
+    const openAllCards = Boolean(request.openAllCards);
+    const rows = (Array.isArray(previewRows) && previewRows.length > 0)
+        ? previewRows
+        : (Array.isArray(canonical.previewRows) ? canonical.previewRows : []);
+    return {
+        ...canonical,
+        previewRows: rows,
+        selectedCandidateId: openAllCards
+            ? ''
+            : String(selectedCandidateRow?.card_id || request.selectedCandidateId || canonical.selectedCandidateId || ''),
+        openAllCards,
+    };
 }
 
 async function getActiveTab() {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    return tab || null;
+    const [focused] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+    if (focused && isCapturableTabUrl(focused.url)) {
+        return focused;
+    }
+    const [current] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (current && isCapturableTabUrl(current.url)) {
+        return current;
+    }
+    return focused || current || null;
 }
 
 function sameUrlWithoutHash(a = '', b = '') {
@@ -3207,6 +5344,18 @@ function isVintedUrl(url = '') {
     }
 }
 
+function isVintedIdlePageUrl(url = '') {
+    if (typeof isVintedQuietUrl === 'function') {
+        return isVintedQuietUrl(url);
+    }
+    try {
+        const parsed = new URL(String(url || ''));
+        return parsed.hostname.toLowerCase().includes('vinted') && !/(?:^|\/)items\/\d+/i.test(parsed.pathname);
+    } catch (_) {
+        return false;
+    }
+}
+
 function isEbayUrl(url = '') {
     try {
         return new URL(url).hostname.includes('ebay');
@@ -3284,7 +5433,66 @@ function shouldKeepExistingExactCardmarketState(existingState = {}, nextState = 
     return !isExactCardmarketState(nextState);
 }
 
+function isViewportScanState(state = {}) {
+    return Boolean(state?.debug?.viewportScan || state?.pageInfo?.viewportScan);
+}
+
+function shouldKeepExistingViewportScanState(existingState = {}, nextState = {}) {
+    if (!isViewportScanState(existingState)) {
+        return false;
+    }
+    if (isViewportScanState(nextState) || nextState?.debug?.priceEnriched) {
+        return false;
+    }
+    const existingUrl = existingState.pageInfo?.url || '';
+    const nextUrl = nextState.pageInfo?.url || '';
+    if (!existingUrl || !nextUrl || !sameUrlWithoutHash(existingUrl, nextUrl)) {
+        return false;
+    }
+    return true;
+}
+
+function listingImageCountFromMarketplaceState(state = {}) {
+    const payload = state?.pageInfo?.vintedPayload
+        || state?.pageInfo?.ebayPayload
+        || state?.pageInfo?.marketplacePayload
+        || {};
+    const urls = typeof uniqueListingImageUrls === 'function'
+        ? uniqueListingImageUrls(payload.listingImageUrls || [])
+        : (Array.isArray(payload.listingImageUrls) ? payload.listingImageUrls : []);
+    return urls.length;
+}
+
+function listingGalleryGrew(existingState = {}, nextState = {}) {
+    const existingUrl = existingState.pageInfo?.url || '';
+    const nextUrl = nextState.pageInfo?.url || '';
+    if (!existingUrl || !nextUrl || !sameUrlWithoutHash(existingUrl, nextUrl)) {
+        return false;
+    }
+    return listingImageCountFromMarketplaceState(nextState) > listingImageCountFromMarketplaceState(existingState);
+}
+
+function listingGalleryShrank(existingState = {}, nextState = {}) {
+    const existingUrl = existingState.pageInfo?.url || '';
+    const nextUrl = nextState.pageInfo?.url || '';
+    if (!existingUrl || !nextUrl || !sameUrlWithoutHash(existingUrl, nextUrl)) {
+        return false;
+    }
+    const existingCount = listingImageCountFromMarketplaceState(existingState);
+    const nextCount = listingImageCountFromMarketplaceState(nextState);
+    return existingCount > 0 && nextCount > 0 && nextCount < existingCount;
+}
+
 function shouldKeepExistingPinnedVintedState(existingState = {}, nextState = {}) {
+    if (nextState?.debug?.viewportScan || nextState?.pageInfo?.viewportScan) {
+        return false;
+    }
+    if (listingGalleryGrew(existingState, nextState)) {
+        return false;
+    }
+    if (listingGalleryShrank(existingState, nextState) && isPinnedVintedPreviewState(existingState)) {
+        return true;
+    }
     if (!isPinnedVintedPreviewState(existingState)) {
         return false;
     }
@@ -3334,6 +5542,16 @@ function markStaleSidePanelOwner(owner = null, reason = 'stale') {
         staleIgnoredCount: sidePanelStaleIgnoredCount,
     });
     console.log(`ℹ️ [Background] Ignored stale side panel request${owner?.requestId ? ` #${owner.requestId}` : ''}: ${reason}`);
+}
+
+function sidePanelOwnedByOtherTab(sidePanelState = {}, currentUrl = '', senderTab = {}) {
+    const sidePanelUrl = sidePanelState?.pageInfo?.url || '';
+    if (!sidePanelUrl || sameUrlWithoutHash(sidePanelUrl, currentUrl) || !isSupportedMarketplaceUrl(sidePanelUrl)) {
+        return false;
+    }
+    const ownerTabId = Number(sidePanelState?.debug?.sidePanelTabId);
+    const senderTabId = Number(senderTab?.id);
+    return Number.isFinite(ownerTabId) && Number.isFinite(senderTabId) && ownerTabId !== senderTabId;
 }
 
 function isSidePanelOwnerCurrent(owner = null, url = '') {
@@ -3401,10 +5619,15 @@ async function setSidePanelState(nextState = {}, owner = null) {
         markStaleSidePanelOwner(owner, 'write owner no longer current');
         return null;
     }
-    const state = {
-        ...nextState,
-        debug: sidePanelOwnerDebug(owner, nextState.debug || {}),
-    };
+    const state = typeof applyMatchContractToSidePanelState === 'function'
+        ? applyMatchContractToSidePanelState({
+            ...nextState,
+            debug: sidePanelOwnerDebug(owner, nextState.debug || {}),
+        })
+        : {
+            ...nextState,
+            debug: sidePanelOwnerDebug(owner, nextState.debug || {}),
+        };
     const { sidePanelState: currentState } = await chrome.storage.session.get('sidePanelState');
     if (owner && !isSidePanelOwnerCurrent(owner, state?.pageInfo?.url || owner.url || '')) {
         markStaleSidePanelOwner(owner, 'write owner changed during storage read');
@@ -3418,6 +5641,16 @@ async function setSidePanelState(nextState = {}, owner = null) {
             source: state.pageInfo?.marketplacePayload?.source || state.pageInfo?.hostname || '',
         });
         console.log('ℹ️ [Background] Kept exact Cardmarket state over weaker same-URL update');
+        return currentState;
+    }
+    if (shouldKeepExistingViewportScanState(currentState, state)) {
+        void recordExtensionDebugEvent('side-panel.write-suppressed', {
+            reason: 'kept viewport Scan tab rows',
+            requestId: owner?.requestId || null,
+            url: state.pageInfo?.url || owner?.url || '',
+            captureMode: currentState.debug?.captureMode || '',
+        });
+        console.log('ℹ️ [Background] Kept Scan tab viewport rows over listing identify on the same URL');
         return currentState;
     }
     if (shouldKeepExistingPinnedVintedState(currentState, state)) {
@@ -3447,6 +5680,7 @@ async function setSidePanelState(nextState = {}, owner = null) {
     if (
         currentState?.debug?.pinnedPreviewRows &&
         !state.debug?.pinnedPreviewRows &&
+        !state.debug?.viewportScan &&
         sameUrlWithoutHash(currentState.pageInfo?.url || '', state.pageInfo?.url || '')
     ) {
         void recordExtensionDebugEvent('side-panel.write-suppressed', {
@@ -3466,6 +5700,11 @@ async function setSidePanelState(nextState = {}, owner = null) {
         source: state.pageInfo?.marketplacePayload?.source || state.pageInfo?.hostname || '',
         rowCount: Array.isArray(state.rows) ? state.rows.length : 0,
         bestId: state.best?.card_id || state.blueprintId || '',
+        matchStage: state.debug?.matchStage || '',
+        listingScanPending: Boolean(state.debug?.listingScanPending),
+        provisionalRowCount: Number(state.debug?.provisionalRowCount) || 0,
+        previousRows: extensionDebugRowSummaries(currentState?.rows),
+        nextRows: extensionDebugRowSummaries(state.rows),
         previewSignature: state.pageInfo?.previewSignature || state.debug?.previewSignature || '',
         selectionRevision: state.pageInfo?.selectionRevision || state.debug?.selectionRevision || 0,
         loading: Boolean(state.loading),
@@ -3510,6 +5749,7 @@ function clearBackgroundSearchCachesForUrl(url = '') {
             ebayCanonicalApplyRecent.delete(key);
         }
     }
+    schedulePersistSearchCaches();
 }
 
 const sidePanelRefreshTimers = new Map();
@@ -3529,15 +5769,85 @@ const ebayCanonicalApplyRecent = new Map();
 const vintedCanonicalApplyInFlight = new Map();
 const vintedCanonicalApplyRecent = new Map();
 const vintedTokenWaitTimers = new Map();
+const openSidePanelTabIds = new Set();
+const openSidePanelWindowIds = new Set();
+const sidePanelLifecyclePorts = new Map();
+const vintedAutoAnalyzeInFlight = new Map();
+const lastAutoAnalyzedVintedUrlByTab = new Map();
 const cardvaultNameResolutionCache = new Map();
 const cardvaultTokenPredictionCache = new Map();
+let searchLruHydrating = false;
+let searchCachePersistTimer = null;
+let searchCacheHydrated = false;
 const pokoinPriceCache = new Map();
+const pokoinLastMedianCache = new Map();
+const pokoinPriceEnrichingRows = new WeakSet();
+const LAST_MEDIAN_BATCH = 40;
 const cardmarketObservationSignatures = new Set();
 const cardmarketObservationInFlight = new Map();
 let pendingCardmarketObservationWrite = Promise.resolve();
 let pokoinAuthBridgeInFlight = null;
 let pokoinAuthTokenRequestInFlight = null;
 let pokoinAuthBridgeTab = null;
+
+async function persistPokoinSidePanelOpenState() {
+    const preferredOpen = openSidePanelTabIds.size > 0
+        || openSidePanelWindowIds.size > 0
+        || sidePanelLifecyclePorts.size > 0;
+    const snapshot = {
+        tabIds: [...openSidePanelTabIds],
+        windowIds: [...openSidePanelWindowIds],
+        preferredOpen,
+        updatedAt: Date.now(),
+    };
+    try {
+        if (chrome.storage?.session?.set) {
+            await chrome.storage.session.set({
+                [SIDE_PANEL_OPEN_STATE_KEY]: snapshot,
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to persist side-panel session open state', error);
+    }
+    try {
+        if (chrome.storage?.local?.set) {
+            await chrome.storage.local.set({
+                [SIDE_PANEL_PREFERRED_OPEN_KEY]: preferredOpen,
+            });
+        }
+    } catch (error) {
+        console.warn('Unable to persist side-panel preferred open state', error);
+    }
+}
+
+async function hydratePokoinSidePanelOpenState() {
+    try {
+        if (chrome.storage?.session?.get) {
+            const stored = (await chrome.storage.session.get(SIDE_PANEL_OPEN_STATE_KEY))[SIDE_PANEL_OPEN_STATE_KEY] || {};
+            for (const tabId of Array.isArray(stored.tabIds) ? stored.tabIds : []) {
+                if (Number.isInteger(tabId)) openSidePanelTabIds.add(tabId);
+            }
+            for (const windowId of Array.isArray(stored.windowIds) ? stored.windowIds : []) {
+                if (Number.isInteger(windowId)) openSidePanelWindowIds.add(windowId);
+            }
+        }
+    } catch (error) {
+        console.warn('Unable to hydrate side-panel session open state', error);
+    }
+    try {
+        if (typeof chrome.storage?.local?.get === 'function') {
+            const localStored = await chrome.storage.local.get(SIDE_PANEL_PREFERRED_OPEN_KEY);
+            if (localStored?.[SIDE_PANEL_PREFERRED_OPEN_KEY] === true && openSidePanelTabIds.size === 0 && openSidePanelWindowIds.size === 0) {
+                // Preference only; live tab ids come from the side-panel port after reconnect.
+                void recordExtensionDebugEvent('side-panel.preferred-open-hydrated', { preferredOpen: true });
+            }
+        }
+    } catch (error) {
+        console.warn('Unable to hydrate side-panel preferred open state', error);
+    }
+}
+
+const sidePanelOpenStateReady = hydratePokoinSidePanelOpenState().catch(() => {});
 
 function runtimeDebugMetadata(extra = {}) {
     return {
@@ -3547,10 +5857,68 @@ function runtimeDebugMetadata(extra = {}) {
     };
 }
 
+function serializeSearchLruMap(cache) {
+    return [...cache.entries()].filter(([, value]) => !isThenable(value));
+}
+
+function restoreSearchLruMap(cache, entries, limit) {
+    if (!Array.isArray(entries) || !cache) {
+        return;
+    }
+    cache.clear();
+    for (const entry of entries) {
+        if (!Array.isArray(entry) || entry.length < 2 || isThenable(entry[1])) {
+            continue;
+        }
+        recentSearchCacheSet(cache, entry[0], entry[1], limit);
+    }
+}
+
+function schedulePersistSearchCaches() {
+    if (searchCachePersistTimer) {
+        return;
+    }
+    searchCachePersistTimer = setTimeout(() => {
+        searchCachePersistTimer = null;
+        void chrome.storage.session.set({
+            [SEARCH_CACHE_STORAGE_KEY]: {
+                buildMarker: EXTENSION_BUILD_MARKER,
+                savedAt: Date.now(),
+                searchResults: serializeSearchLruMap(backgroundSearchResultCache),
+                nameResolution: serializeSearchLruMap(cardvaultNameResolutionCache),
+                tokenPrediction: serializeSearchLruMap(cardvaultTokenPredictionCache),
+            },
+        }).catch(() => {});
+    }, SEARCH_CACHE_PERSIST_DEBOUNCE_MS);
+}
+
+async function hydrateSearchCachesFromSession() {
+    if (searchCacheHydrated) {
+        return;
+    }
+    searchCacheHydrated = true;
+    try {
+        const storage = await chrome.storage.session.get(SEARCH_CACHE_STORAGE_KEY);
+        const payload = storage?.[SEARCH_CACHE_STORAGE_KEY];
+        if (!payload || payload.buildMarker !== EXTENSION_BUILD_MARKER) {
+            return;
+        }
+        searchLruHydrating = true;
+        restoreSearchLruMap(backgroundSearchResultCache, payload.searchResults, RECENT_SEARCH_CACHE_LIMIT);
+        restoreSearchLruMap(cardvaultNameResolutionCache, payload.nameResolution, CARDVAULT_NAME_RESOLUTION_CACHE_LIMIT);
+        restoreSearchLruMap(cardvaultTokenPredictionCache, payload.tokenPrediction, CARDVAULT_TOKEN_PREDICTION_CACHE_LIMIT);
+    } catch (_error) {
+        // Session storage may be unavailable in tests or during worker shutdown.
+    } finally {
+        searchLruHydrating = false;
+    }
+}
+
 async function ensureRuntimeStorageCurrent() {
     const storage = await chrome.storage.session.get([EXTENSION_RUNTIME_STORAGE_KEY, 'sidePanelState']);
     const runtime = storage?.[EXTENSION_RUNTIME_STORAGE_KEY] || {};
     if (runtime.buildMarker === EXTENSION_BUILD_MARKER) {
+        await hydrateSearchCachesFromSession();
         return;
     }
     if (!runtime.buildMarker) {
@@ -3561,6 +5929,7 @@ async function ensureRuntimeStorageCurrent() {
                 initializedAt: Date.now(),
             },
         });
+        await hydrateSearchCachesFromSession();
         return;
     }
     backgroundSearchInFlight.clear();
@@ -3580,6 +5949,7 @@ async function ensureRuntimeStorageCurrent() {
     recentCardTraderDirectStateCache.clear();
     ebayCanonicalApplyInFlight.clear();
     ebayCanonicalApplyRecent.clear();
+    searchCacheHydrated = true;
     sidePanelCurrentOwner = null;
     sidePanelOwnersByTab.clear();
     await chrome.storage.session.set({
@@ -3588,6 +5958,7 @@ async function ensureRuntimeStorageCurrent() {
             buildMarker: EXTENSION_BUILD_MARKER,
             initializedAt: Date.now(),
         },
+        [SEARCH_CACHE_STORAGE_KEY]: null,
         sidePanelState: storage.sidePanelState
             ? {
                 updatedAt: Date.now(),
@@ -3609,6 +5980,20 @@ async function ensureRuntimeStorageCurrent() {
             }
             : storage.sidePanelState,
     });
+}
+
+function uidFromPokoinIdToken(token = '') {
+    const parts = String(token || '').split('.');
+    if (parts.length < 2) {
+        return '';
+    }
+    try {
+        const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+        const json = JSON.parse(atob(`${padded}${'='.repeat((4 - (padded.length % 4)) % 4)}`));
+        return String(json.user_id || json.sub || '').trim();
+    } catch (error) {
+        return '';
+    }
 }
 
 function normalizePokoinTokenExpiry(value, receivedAt = Date.now()) {
@@ -3638,10 +6023,12 @@ function validatePokoinAuthTokenMessage(message = {}) {
     if (!Number.isFinite(expiresAt) || expiresAt <= receivedAt) {
         return { valid: false, error: 'Expired Pokoin ID token.' };
     }
+    const uid = String(message.uid || uidFromPokoinIdToken(token) || '').trim();
     return {
         valid: true,
         session: {
             token,
+            uid,
             receivedAt,
             expiresAt,
             issuedAt: message.issuedAt || null,
@@ -3667,6 +6054,182 @@ async function getStoredPokoinAuthToken() {
         return '';
     }
     return session.token;
+}
+
+function publicCardIdFromDeskUrl(url = '') {
+    const match = String(url || '').match(/\/marketplace\/(?:[a-z]{2}\/)?cards\/(\d+)/i);
+    return match ? match[1] : '';
+}
+
+function cardtraderUrlFromPublicId(publicId = '') {
+    if (!/^[1-9]\d*$/.test(String(publicId))) {
+        return '';
+    }
+    try {
+        const value = BigInt(String(publicId));
+        if (value % 2n !== 0n) {
+            return '';
+        }
+        return `https://www.cardtrader.com/en/cards/${value / 2n}`;
+    } catch (error) {
+        return '';
+    }
+}
+
+function vintedSearchUrlFromCardName(name = '') {
+    const query = String(name || '').replace(/\s+/g, ' ').trim();
+    if (!query) {
+        return '';
+    }
+    return `https://www.vinted.it/catalog?search_text=${encodeURIComponent(query)}&catalog[]=4824`;
+}
+
+function isAllowedForegroundTabUrl(url = '') {
+    if (isVintedUrl(url)) {
+        try {
+            return new URL(url).protocol === 'https:';
+        } catch (error) {
+            return false;
+        }
+    }
+    try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'https:') {
+            return false;
+        }
+        const host = parsed.hostname.replace(/^www\./i, '').toLowerCase();
+        return host === 'cardtrader.com'
+            || host.endsWith('.cardtrader.com')
+            || host === 'cardmarket.com'
+            || host.endsWith('.cardmarket.com');
+    } catch (error) {
+        return false;
+    }
+}
+
+let lastForegroundTabOpen = { url: '', at: 0 };
+
+async function openForegroundTab(url = '') {
+    const href = String(url || '').trim();
+    if (!isAllowedForegroundTabUrl(href)) {
+        return { success: false, error: 'Blocked tab URL.' };
+    }
+    const now = Date.now();
+    if (href === lastForegroundTabOpen.url && now - lastForegroundTabOpen.at < 1000) {
+        return { success: true, duplicate: true };
+    }
+    lastForegroundTabOpen = { url: href, at: now };
+    const tab = await chrome.tabs.create({ url: href, active: true });
+    return { success: true, tabId: tab?.id || null };
+}
+
+async function resolveSilverMarketplaceUrl({ kind = '', publicId = '', cardName = '', url = '' } = {}) {
+    const direct = String(url || '').trim();
+    if (isAllowedForegroundTabUrl(direct)) {
+        return direct;
+    }
+    const id = String(publicId || publicCardIdFromDeskUrl(direct) || '').trim();
+    const type = String(kind || '').toLowerCase();
+    if (type === 'ct') {
+        const fromId = cardtraderUrlFromPublicId(id);
+        if (fromId) {
+            return fromId;
+        }
+        if (!id) {
+            return '';
+        }
+        const response = await fetch(`${POKOIN_API_ORIGIN}/api/cardtrader-redirect?id=${encodeURIComponent(id)}&format=json`, {
+            credentials: 'omit',
+            headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) {
+            return '';
+        }
+        const data = await response.json();
+        return String(data.url || data.redirect || data.href || '');
+    }
+    if (type === 'cm') {
+        if (!id) {
+            return '';
+        }
+        const response = await fetch(`${POKOIN_API_ORIGIN}/api/cardmarket-redirect?id=${encodeURIComponent(id)}`, {
+            credentials: 'omit',
+            redirect: 'follow',
+        });
+        const finalUrl = String(response.url || '');
+        if (/cardmarket\.com/i.test(finalUrl)) {
+            return finalUrl;
+        }
+        try {
+            const data = await response.json();
+            return String(data.url || data.redirect || data.href || '');
+        } catch (error) {
+            return '';
+        }
+    }
+    if (type === 'vt') {
+        return vintedSearchUrlFromCardName(cardName);
+    }
+    return '';
+}
+
+async function openSilverMarketplaceTab(request = {}) {
+    const resolved = await resolveSilverMarketplaceUrl(request);
+    return openForegroundTab(resolved);
+}
+
+async function getPokoinAuthSession() {
+    const storage = await chrome.storage.session.get(POKOIN_AUTH_STORAGE_KEY);
+    const session = storage?.[POKOIN_AUTH_STORAGE_KEY] || {};
+    const token = await getStoredPokoinAuthToken();
+    if (!token) {
+        return { token: '', uid: '', expiresAt: 0 };
+    }
+    return {
+        token,
+        uid: String(session.uid || uidFromPokoinIdToken(token) || '').trim(),
+        expiresAt: Number(session.expiresAt) || 0,
+    };
+}
+
+async function savePokoinWatchlist(cardId, watchlistAction = 'add') {
+    const id = String(cardId || '').trim();
+    if (!/^\d+$/.test(id)) {
+        return { success: false, error: 'Missing card id.' };
+    }
+    const action = watchlistAction === 'remove' ? 'remove' : 'add';
+    let token = await getStoredPokoinAuthToken();
+    if (!token) {
+        try {
+            await requestPokoinAuthToken();
+            token = await getStoredPokoinAuthToken();
+        } catch (_) {
+            token = '';
+        }
+    }
+    const headers = { 'content-type': 'application/json' };
+    if (token) {
+        headers.Authorization = `Bearer ${token}`;
+    }
+    const response = await fetch(`${POKOIN_API_ORIGIN}/api/marketplace-watchlist`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+            cardId: Number(id),
+            action,
+            source: 'pokemon-card-extension',
+        }),
+    });
+    if (!response.ok && response.status !== 204) {
+        return { success: false, status: response.status, error: `Watchlist HTTP ${response.status}` };
+    }
+    let payload = {};
+    try {
+        payload = typeof response.json === 'function' ? await response.json() : {};
+    } catch (_) {
+        payload = {};
+    }
+    return { success: true, action, cardId: id, ...payload };
 }
 
 function isPokoinAuthBridgeUrl(url = '') {
@@ -3970,11 +6533,230 @@ function formatPokoinPknPrice(value) {
     return `${new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(amount)} PKN`;
 }
 
+function parsePokoinPknAmount(label = '') {
+    if (/^out of stock$/i.test(String(label || '').trim())) {
+        return 0;
+    }
+    const text = String(label || '').replace(/,/g, '');
+    const match = text.match(/([0-9]+(?:\.[0-9]+)?)/);
+    const amount = match ? Number(match[1]) : 0;
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+}
+
+function rowHasPokoinPrices(row = {}) {
+    if (parsePokoinPknAmount(row?.pokoin_price || row?.pokoinPrice || row?.price_formatted || row?.priceFormatted || '') > 0) {
+        return true;
+    }
+    const labels = row?.print_lang_prices;
+    if (!labels || typeof labels !== 'object') {
+        return false;
+    }
+    return Object.values(labels).some((label) => parsePokoinPknAmount(label) > 0);
+}
+
+function mergePokoinPricesIntoRows(currentRows = [], enrichedRows = []) {
+    const byId = new Map((Array.isArray(enrichedRows) ? enrichedRows : [])
+        .filter((row) => row?.card_id || row?.cardId)
+        .map((row) => [String(row.card_id || row.cardId), row]));
+    return (Array.isArray(currentRows) ? currentRows : []).map((row) => {
+        const priced = byId.get(String(row?.card_id || row?.cardId || ''));
+        if (!priced || !rowHasPokoinPrices(priced)) {
+            return row;
+        }
+        return {
+            ...row,
+            pokoin_price: priced.pokoin_price || priced.pokoinPrice || row.pokoin_price,
+            pokoinPrice: priced.pokoin_price || priced.pokoinPrice || row.pokoinPrice,
+            print_lang_prices: priced.print_lang_prices || row.print_lang_prices,
+            print_lang_price_pkn: priced.print_lang_price_pkn || row.print_lang_price_pkn,
+        };
+    });
+}
+
+async function applyEnrichedPokoinPricesToSidePanel(enrichedRows = [], expectedUrl = '', extraDebug = {}) {
+    const { sidePanelState: current } = await chrome.storage.session.get('sidePanelState');
+    if (!current || !sameUrlWithoutHash(current.pageInfo?.url || '', expectedUrl)) {
+        return enrichedRows;
+    }
+    const rows = mergePokoinPricesIntoRows(current.rows || [], enrichedRows);
+    const bestId = String(current.best?.card_id || current.blueprintId || '');
+    const best = rows.find((row) => String(row.card_id) === bestId) || current.best;
+    await setSidePanelState({
+        ...current,
+        updatedAt: Date.now(),
+        rows,
+        best,
+        debug: {
+            ...(current.debug || {}),
+            ...extraDebug,
+            priceEnriched: true,
+        },
+    }, null);
+    return rows;
+}
+
 function extractPokoinListingPrice(payload = {}) {
     if (!payload || payload.price_pkn == null) {
         return '';
     }
     return formatPokoinPknPrice(payload.price_pkn);
+}
+
+function defaultPriceLangKey(row = {}) {
+    const langs = row.print_langs || {};
+    if (langs.eur?.id) {
+        return 'eur';
+    }
+    if (langs.cn?.id) {
+        return 'cn';
+    }
+    if (langs.jp?.id) {
+        return 'jp';
+    }
+    return '';
+}
+
+function priceIdsForRow(row = {}) {
+    const ids = [];
+    const seen = new Set();
+    const add = (value) => {
+        const id = String(value || '').trim();
+        if (!id || seen.has(id)) {
+            return;
+        }
+        seen.add(id);
+        ids.push(id);
+    };
+    const langs = row.print_langs || {};
+    if (row.source !== 'cardtrader_url') {
+        add(langs.eur?.id);
+        add(langs.jp?.id);
+        add(langs.cn?.id);
+    }
+    add(row.card_id || row.cardId);
+    return ids;
+}
+
+function extractLastMedian(payload, cardId) {
+    const wanted = String(cardId || '');
+    const list = Array.isArray(payload?.prices) ? payload.prices : [];
+    const row = list.find((entry) => String(entry?.card_id) === wanted)
+        || (String(payload?.card_id) === wanted ? payload : null);
+    const pkn = Number(row?.median_pkn);
+    if (!(pkn > 0)) {
+        return null;
+    }
+    return {
+        pkn,
+        label: formatPokoinPknPrice(pkn),
+        day: row.day || null,
+    };
+}
+
+function lastMedianFromSalesPayload(payload, cardId = '') {
+    const pkn = Number(payload?.series?.lastMedianPkn);
+    if (!(pkn > 0)) {
+        return null;
+    }
+    const days = Array.isArray(payload?.series?.days) ? payload.series.days : [];
+    const lastDay = days[days.length - 1]?.day || null;
+    return {
+        pkn,
+        label: formatPokoinPknPrice(pkn),
+        day: lastDay,
+        card_id: String(cardId || payload?.rows?.[0]?.cardId || ''),
+    };
+}
+
+async function fetchPokoinJsonFromOrigins(pathWithQuery, { allow404 = false, timeoutMs = 0 } = {}) {
+    let lastError = '';
+    for (const origin of POKOIN_API_ORIGINS) {
+        const url = `${origin}${pathWithQuery}`;
+        const startedAt = Date.now();
+        const controller = timeoutMs > 0 && typeof AbortController !== 'undefined'
+            ? new AbortController()
+            : null;
+        const timeoutId = controller
+            ? setTimeout(() => controller.abort(), timeoutMs)
+            : null;
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    accept: 'application/json',
+                    'accept-language': 'en-US,en;q=0.9',
+                },
+                ...(controller ? { signal: controller.signal } : {}),
+            });
+            void recordExtensionDebugEvent('api.response', {
+                endpoint: safeDebugEndpoint(url),
+                method: 'GET',
+                status: response.status,
+                ok: Boolean(response.ok),
+                durationMs: Date.now() - startedAt,
+            });
+            if (response.ok || (allow404 && response.status === 404)) {
+                const payload = await response.json().catch(() => null);
+                if (payload) {
+                    return payload;
+                }
+            }
+        } catch (error) {
+            lastError = error.message || String(error || '');
+            void recordExtensionDebugEvent('api.failure', {
+                endpoint: safeDebugEndpoint(url),
+                method: 'GET',
+                durationMs: Date.now() - startedAt,
+                error: lastError,
+            });
+        } finally {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+            }
+        }
+    }
+    return null;
+}
+
+async function fetchPokoinLastMedians(cardIds = []) {
+    const unique = [...new Set((cardIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+    const missing = unique.filter((id) => !pokoinLastMedianCache.has(id));
+    for (let index = 0; index < missing.length; index += LAST_MEDIAN_BATCH) {
+        const chunk = missing.slice(index, index + LAST_MEDIAN_BATCH);
+        const pending = (async () => {
+            const payload = await fetchPokoinJsonFromOrigins(
+                `/api/marketplace-card-last-median?cardIds=${encodeURIComponent(chunk.join(','))}`,
+            );
+            const found = new Map();
+            chunk.forEach((id) => {
+                found.set(id, extractLastMedian(payload, id));
+            });
+            if (!payload) {
+                await Promise.all(chunk.map(async (id) => {
+                    if (found.get(id)) {
+                        return;
+                    }
+                    const sales = await fetchPokoinJsonFromOrigins(
+                        `/api/marketplace-card-sales?cardId=${encodeURIComponent(id)}`,
+                    );
+                    found.set(id, lastMedianFromSalesPayload(sales, id));
+                }));
+            }
+            return found;
+        })();
+        chunk.forEach((id) => {
+            pokoinLastMedianCache.set(id, pending.then((found) => {
+                const value = found.get(id) || null;
+                pokoinLastMedianCache.set(id, value);
+                return value;
+            }));
+        });
+    }
+    const entries = await Promise.all(unique.map(async (id) => {
+        const cached = pokoinLastMedianCache.get(id);
+        const value = cached && typeof cached.then === 'function' ? await cached : cached;
+        return [id, value || null];
+    }));
+    return new Map(entries);
 }
 
 async function fetchPokoinListingPrice(cardId) {
@@ -3986,13 +6768,16 @@ async function fetchPokoinListingPrice(cardId) {
         return pokoinPriceCache.get(stableCardId);
     }
 
-    const pricePromise = fetch(`${CARDVAULT_API_BASE_URL}/api/marketplace-blueprint-price?blueprintId=${encodeURIComponent(stableCardId)}`, {
-        headers: {
-            accept: 'application/json',
-        },
-    })
-        .then((response) => response.ok || response.status === 404 ? response.json().catch(() => null) : null)
-        .then((payload) => payload ? extractPokoinListingPrice(payload) : '')
+    const pricePromise = fetchPokoinJsonFromOrigins(
+        `/api/marketplace-blueprint-price?blueprintId=${encodeURIComponent(stableCardId)}`,
+        { allow404: true },
+    )
+        .then((payload) => {
+            if (!payload) {
+                return '';
+            }
+            return extractPokoinListingPrice(payload) || 'Out of stock';
+        })
         .catch(() => '');
 
     pokoinPriceCache.set(stableCardId, pricePromise);
@@ -4001,29 +6786,86 @@ async function fetchPokoinListingPrice(cardId) {
     return price;
 }
 
+async function resolvePokoinPriceForId(cardId, medians = new Map()) {
+    const stableCardId = String(cardId || '').trim();
+    if (!stableCardId) {
+        return null;
+    }
+    const median = medians.get(stableCardId);
+    if (median?.label) {
+        return median;
+    }
+    const listing = await fetchPokoinListingPrice(stableCardId);
+    if (!listing) {
+        return null;
+    }
+    return {
+        label: listing,
+        pkn: parsePokoinPknAmount(listing),
+    };
+}
+
 async function enrichRowsWithPokoinPrices(rows = [], limit = 8) {
-    const rowsToEnrich = rows.slice(0, limit);
-    await Promise.all(rowsToEnrich.map(async (row) => {
-        if (!row?.card_id || row.pokoin_price || row.pokoinPrice) {
-            return;
-        }
-        const price = await fetchPokoinListingPrice(row.card_id);
-        if (price) {
-            row.pokoin_price = price;
-        }
-    }));
+    const rowsToEnrich = (Number(limit) > 0 ? rows.slice(0, limit) : rows)
+        .filter((row) => row && !rowHasPokoinPrices(row) && !pokoinPriceEnrichingRows.has(row));
+    rowsToEnrich.forEach((row) => pokoinPriceEnrichingRows.add(row));
+    try {
+        const medians = await fetchPokoinLastMedians(rowsToEnrich.flatMap((row) => priceIdsForRow(row)));
+        await Promise.all(rowsToEnrich.map(async (row) => {
+            const langs = row.print_langs || {};
+            const labels = {};
+            const amounts = {};
+            if (row.source !== 'cardtrader_url') {
+                for (const key of ['eur', 'jp', 'cn']) {
+                    const price = await resolvePokoinPriceForId(langs[key]?.id, medians);
+                    if (price?.label) {
+                        labels[key] = price.label;
+                        if (price.pkn > 0) {
+                            amounts[key] = price.pkn;
+                        }
+                    }
+                }
+            }
+            const fallback = await resolvePokoinPriceForId(row.card_id || row.cardId, medians);
+            const defaultKey = defaultPriceLangKey(row);
+            const displayed = (defaultKey && labels[defaultKey])
+                || labels.eur
+                || labels.cn
+                || labels.jp
+                || fallback?.label
+                || '';
+            row.print_lang_prices = labels;
+            row.print_lang_price_pkn = amounts;
+            if (displayed) {
+                row.pokoin_price = displayed;
+            }
+        }));
+    } finally {
+        rowsToEnrich.forEach((row) => pokoinPriceEnrichingRows.delete(row));
+    }
     return rows;
 }
 
 function rowsNeedPokoinPrices(rows = [], limit = 8) {
-    return rows.slice(0, limit).some((row) => row?.card_id && !row.pokoin_price && !row.pokoinPrice);
+    const rowsToCheck = Number(limit) > 0 ? rows.slice(0, limit) : rows;
+    return rowsToCheck.some((row) => {
+        if (!row || rowHasPokoinPrices(row) || pokoinPriceEnrichingRows.has(row)) {
+            return false;
+        }
+        return Boolean(row.card_id || row.cardId || row.print_langs?.eur?.id || row.print_langs?.jp?.id || row.print_langs?.cn?.id);
+    });
 }
 
-function schedulePriceEnrichment(rows = [], onComplete = null) {
-    if (!rowsNeedPokoinPrices(rows)) {
+function priceEnrichmentLimitForKind(listingKind = '') {
+    return 0;
+}
+
+function schedulePriceEnrichment(rows = [], onComplete = null, { limit } = {}) {
+    const priceLimit = limit == null ? 0 : limit;
+    if (!rowsNeedPokoinPrices(rows, priceLimit)) {
         return Promise.resolve(rows);
     }
-    return enrichRowsWithPokoinPrices(rows)
+    return enrichRowsWithPokoinPrices(rows, priceLimit)
         .then((enrichedRows) => {
             if (typeof onComplete === 'function') {
                 return onComplete(enrichedRows);
@@ -4138,7 +6980,8 @@ function ebayCanonicalFromRequest(request = {}, senderTab = {}) {
         previewSignature: request.previewSignature || '',
         previewSource: request.previewSource || 'ebay_overlay',
         previewRows,
-        selectedCandidateId: request.selectedCandidateId || '',
+        selectedCandidateId: request.openAllCards ? '' : (request.selectedCandidateId || ''),
+        openAllCards: Boolean(request.openAllCards),
         selectionRevision: Number(request.selectionRevision || ebayPayload?.selectionRevision || 0),
         updatedAt: Date.now(),
         source: 'ebay',
@@ -4178,7 +7021,7 @@ function latestRecentEbayCanonicalPreview(request = {}, tab = {}) {
 }
 
 function vintedCanonicalFromPinnedState(state = {}, tab = {}) {
-    if (!samePinnedVintedPreviewState(state, tab?.url || '')) {
+    if (!state || typeof state !== 'object' || !samePinnedVintedPreviewState(state, tab?.url || '')) {
         return null;
     }
     const pageInfo = state.pageInfo || {};
@@ -4224,7 +7067,8 @@ function vintedCanonicalFromRequest(request = {}, senderTab = {}) {
         previewSignature: request.previewSignature || '',
         previewSource: request.previewSource || 'vinted_overlay',
         previewRows,
-        selectedCandidateId: request.selectedCandidateId || '',
+        selectedCandidateId: request.openAllCards ? '' : (request.selectedCandidateId || ''),
+        openAllCards: Boolean(request.openAllCards),
         selectionRevision: Number(request.selectionRevision || vintedPayload?.selectionRevision || 0),
         updatedAt: Date.now(),
         source: 'vinted',
@@ -4251,7 +7095,64 @@ function rememberVintedCanonicalPreview(canonical = null, options = {}) {
 function latestVintedCanonicalPreview(tab = {}, state = null) {
     const cacheKey = vintedCanonicalCacheKey(tab?.id, tab?.url || '');
     return (cacheKey && latestVintedCanonicalByTabUrl.get(cacheKey)) ||
-        vintedCanonicalFromPinnedState(state, tab);
+        vintedCanonicalFromSidePanelState(state || {}, tab);
+}
+
+function hasScannableMarketplacePhotos(payload = null) {
+    return Boolean(
+        payload &&
+        typeof shouldIdentifyListingPhotos === 'function' &&
+        shouldIdentifyListingPhotos(payload)
+    );
+}
+
+function vintedCanonicalReadyForAnalysis(canonical = null) {
+    if (!canonical) return false;
+    if (canonical.previewRows?.length > 0) return true;
+    const payload = normalizeVintedPayload(canonical.vintedPayload);
+    if (!payload) return false;
+    return hasScannableMarketplacePhotos(payload) || Boolean(
+        compactSearchValue(payload.searchTitle || '') ||
+        compactSearchValue(payload.structuredCard?.name || '') ||
+        payload.selectedClues?.length ||
+        payload.primaryClues?.length
+    );
+}
+
+function shouldResolveSidePanelPage(pageInfo = {}, marketplacePayload = null) {
+    return !pageInfo?.unsupported && (Boolean(pageInfo?.title) || hasScannableMarketplacePhotos(marketplacePayload));
+}
+
+function vintedCanonicalFromSidePanelState(state = {}, tab = {}) {
+    if (!state || typeof state !== 'object') {
+        return null;
+    }
+    const pinned = vintedCanonicalFromPinnedState(state, tab);
+    if (pinned) {
+        return pinned;
+    }
+    const pageInfo = state.pageInfo || {};
+    const payload = normalizeVintedPayload(pageInfo.vintedPayload);
+    const url = pageInfo.url || tab?.url || '';
+    if (!payload || !url || (tab?.url && !sameUrlWithoutHash(url, tab.url))) {
+        return null;
+    }
+    return {
+        tabId: tab?.id || null,
+        url,
+        title: pageInfo.title || payload.searchTitle || tab?.title || '',
+        originalTitle: pageInfo.originalTitle || payload.originalTitle || tab?.title || '',
+        listingKey: payload.listingKey || stableSearchUrl(url),
+        clues: normalizeRequestClues(payload.selectedClues || pageInfo.selectedClues || pageInfo.clues),
+        primaryClues: normalizeRequestClues(payload.primaryClues || pageInfo.primaryClues),
+        vintedPayload: payload,
+        previewSignature: pageInfo.previewSignature || state.debug?.previewSignature || '',
+        previewSource: state.debug?.previewSource || 'vinted_overlay_tokens',
+        previewRows: [],
+        selectedCandidateId: pageInfo.selectedCandidateId || '',
+        updatedAt: state.updatedAt || Date.now(),
+        source: 'vinted',
+    };
 }
 
 function latestRecentVintedCanonicalPreview(request = {}, tab = {}) {
@@ -4267,10 +7168,299 @@ function latestRecentVintedCanonicalPreview(request = {}, tab = {}) {
     return cached;
 }
 
-async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-vinted-preview', owner = null) {
-    const state = {
+async function requestVintedOverlayMatch(tab = {}) {
+    if (!tab?.id || typeof chrome.tabs?.sendMessage !== 'function' || isVintedIdlePageUrl(tab?.url || '')) {
+        return false;
+    }
+    try {
+        await chrome.tabs.sendMessage(tab.id, {
+            action: 'pokoinRequestMatchTokens',
+            url: tab.url || '',
+        });
+        return true;
+    } catch (error) {
+        void recordExtensionDebugEvent('background.vinted-tokens-request-failed', {
+            tabId: tab.id,
+            error: error.message || String(error || ''),
+        });
+        return false;
+    }
+}
+
+async function requestCardmarketMatchTokens(tab = {}) {
+    if (
+        !tab?.id
+        || typeof chrome.tabs?.sendMessage !== 'function'
+        || typeof isCardmarketSinglesProductUrl !== 'function'
+        || !isCardmarketSinglesProductUrl(tab?.url || '')
+    ) {
+        return false;
+    }
+    try {
+        await chrome.tabs.sendMessage(tab.id, {
+            action: 'pokoinRequestMatchTokens',
+            url: tab.url || '',
+        });
+        return true;
+    } catch (error) {
+        void recordExtensionDebugEvent('background.cardmarket-tokens-request-failed', {
+            tabId: tab.id,
+            error: error.message || String(error || ''),
+        });
+        return false;
+    }
+}
+
+function markPokoinSidePanelOpened(info = {}) {
+    if (Number.isInteger(info.tabId)) {
+        const changed = !openSidePanelTabIds.has(info.tabId);
+        openSidePanelTabIds.add(info.tabId);
+        if (changed) void persistPokoinSidePanelOpenState();
+        return;
+    }
+    if (Number.isInteger(info.windowId)) {
+        const changed = !openSidePanelWindowIds.has(info.windowId);
+        openSidePanelWindowIds.add(info.windowId);
+        if (changed) void persistPokoinSidePanelOpenState();
+    }
+}
+
+function markPokoinSidePanelClosed(info = {}) {
+    if (Number.isInteger(info.tabId)) {
+        const tabId = info.tabId;
+        openSidePanelTabIds.delete(tabId);
+        lastAutoAnalyzedVintedUrlByTab.delete(tabId);
+        void persistPokoinSidePanelOpenState();
+        return;
+    }
+    if (Number.isInteger(info.windowId)) {
+        openSidePanelWindowIds.delete(info.windowId);
+        void persistPokoinSidePanelOpenState();
+    }
+}
+
+function hasLivePokoinSidePanelPortForTab(tab = {}) {
+    return [...sidePanelLifecyclePorts.values()].some((entry) => (
+        (Number.isInteger(tab?.id) && entry.tabId === tab.id)
+        || (Number.isInteger(tab?.windowId) && Number.isInteger(entry.windowId) && entry.windowId === tab.windowId)
+    ));
+}
+
+function isPokoinSidePanelOpenForTab(tab = {}) {
+    if (hasLivePokoinSidePanelPortForTab(tab)) {
+        return true;
+    }
+    return (Number.isInteger(tab?.id) && openSidePanelTabIds.has(tab.id)) ||
+        (Number.isInteger(tab?.windowId) && openSidePanelWindowIds.has(tab.windowId));
+}
+
+function forgetPokoinSidePanelLifecyclePort(port) {
+    const identity = sidePanelLifecyclePorts.get(port);
+    if (!identity) {
+        return;
+    }
+    sidePanelLifecyclePorts.delete(port);
+    const remaining = [...sidePanelLifecyclePorts.values()];
+    if (Number.isInteger(identity.tabId) && !remaining.some((entry) => entry.tabId === identity.tabId)) {
+        openSidePanelTabIds.delete(identity.tabId);
+        lastAutoAnalyzedVintedUrlByTab.delete(identity.tabId);
+    }
+    if (Number.isInteger(identity.windowId) && !remaining.some((entry) => entry.windowId === identity.windowId)) {
+        openSidePanelWindowIds.delete(identity.windowId);
+    }
+    void persistPokoinSidePanelOpenState();
+}
+
+function registerPokoinSidePanelLifecyclePort(port, identity = {}) {
+    const previous = sidePanelLifecyclePorts.get(port) || {};
+    const tabId = Number.isInteger(identity.tabId) ? identity.tabId : null;
+    const windowId = Number.isInteger(identity.windowId) ? identity.windowId : null;
+    const changed = previous.tabId !== tabId || previous.windowId !== windowId;
+    if (!changed) {
+        return false;
+    }
+    const otherPorts = [...sidePanelLifecyclePorts.entries()]
+        .filter(([candidate]) => candidate !== port)
+        .map(([, entry]) => entry);
+    if (Number.isInteger(previous.tabId) && !otherPorts.some((entry) => entry.tabId === previous.tabId)) {
+        openSidePanelTabIds.delete(previous.tabId);
+        lastAutoAnalyzedVintedUrlByTab.delete(previous.tabId);
+    }
+    if (Number.isInteger(previous.windowId) && !otherPorts.some((entry) => entry.windowId === previous.windowId)) {
+        openSidePanelWindowIds.delete(previous.windowId);
+    }
+    sidePanelLifecyclePorts.set(port, { tabId, windowId });
+    if (tabId != null) openSidePanelTabIds.add(tabId);
+    if (windowId != null) openSidePanelWindowIds.add(windowId);
+    void persistPokoinSidePanelOpenState();
+    return true;
+}
+
+async function autoAnalyzeOpenVintedSidePanel(tab = {}, reason = 'side-panel-open', options = {}) {
+    if (!tab?.id || !isVintedUrl(tab?.url || '') || isVintedIdlePageUrl(tab?.url || '')) {
+        return false;
+    }
+    if (!isPokoinSidePanelOpenForTab(tab)) {
+        return false;
+    }
+
+    const stableUrl = stableSearchUrl(tab.url || '');
+    const analysisKey = `${tab.id}|${stableUrl}`;
+    const force = Boolean(options.force);
+    if (vintedAutoAnalyzeInFlight.has(analysisKey)) {
+        return vintedAutoAnalyzeInFlight.get(analysisKey);
+    }
+    if (!force && lastAutoAnalyzedVintedUrlByTab.get(tab.id) === stableUrl) {
+        void recordExtensionDebugEvent('side-panel.auto-analysis-deduped', {
+            tabId: tab.id,
+            url: tab.url || '',
+            reason,
+        });
+        return false;
+    }
+    const analysisPromise = (async () => {
+        const owner = createSidePanelRequestOwner(tab, reason);
+        const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+        const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
+        void recordExtensionDebugEvent('side-panel.auto-analysis-started', {
+            tabId: tab.id,
+            windowId: tab.windowId ?? null,
+            url: tab.url || '',
+            reason,
+            hasCanonicalPayload: Boolean(canonical?.vintedPayload),
+            canonicalRowCount: canonical?.previewRows?.length || 0,
+        });
+        if (vintedCanonicalReadyForAnalysis(canonical)) {
+            return applyVintedCanonicalToSidePanel(tab, canonical, owner, {
+                reason,
+                forceRefresh: true,
+            });
+        }
+        return setVintedWaitingForPreviewState(tab, reason, owner, {
+            startRequest: true,
+            analysisTrigger: 'open-side-panel',
+        });
+    })().then((result) => {
+        const completed = Boolean(
+            result &&
+            !result.stale &&
+            (result.best || result.rows?.length || result.debug?.listingScanPending)
+        );
+        if (completed) {
+            lastAutoAnalyzedVintedUrlByTab.set(tab.id, stableUrl);
+        } else {
+            lastAutoAnalyzedVintedUrlByTab.delete(tab.id);
+        }
+        return result;
+    }, (error) => {
+        lastAutoAnalyzedVintedUrlByTab.delete(tab.id);
+        throw error;
+    }).finally(() => {
+        vintedAutoAnalyzeInFlight.delete(analysisKey);
+    });
+    vintedAutoAnalyzeInFlight.set(analysisKey, analysisPromise);
+    return analysisPromise;
+}
+
+async function autoAnalyzeOpenCardmarketSidePanel(tab = {}, reason = 'side-panel-open', options = {}) {
+    if (
+        !tab?.id
+        || !isCardmarketUrl(tab?.url || '')
+        || typeof isCardmarketSinglesProductUrl !== 'function'
+        || !isCardmarketSinglesProductUrl(tab?.url || '')
+    ) {
+        return false;
+    }
+    if (!isPokoinSidePanelOpenForTab(tab)) {
+        return false;
+    }
+
+    const stableUrl = stableSearchUrl(tab.url || '');
+    const force = Boolean(options.force);
+    if (!force && lastAutoAnalyzedVintedUrlByTab.get(tab.id) === stableUrl) {
+        void recordExtensionDebugEvent('side-panel.auto-analysis-deduped', {
+            tabId: tab.id,
+            url: tab.url || '',
+            reason,
+            source: 'cardmarket',
+        });
+        return false;
+    }
+
+    const owner = createSidePanelRequestOwner(tab, reason);
+    const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+    void recordExtensionDebugEvent('side-panel.auto-analysis-started', {
+        tabId: tab.id,
+        windowId: tab.windowId ?? null,
+        url: tab.url || '',
+        reason,
+        source: 'cardmarket',
+    });
+    await setSidePanelState({
+        ...(sidePanelState || {}),
         updatedAt: Date.now(),
         loading: true,
+        pageInfo: {
+            ...(sidePanelState?.pageInfo || {}),
+            title: tab.title || '',
+            url: tab.url || '',
+            hostname: safeUrlHostname(tab.url),
+        },
+        error: '',
+        debug: {
+            ...(sidePanelState?.debug || {}),
+            loading: true,
+            listingScanPending: true,
+            source: 'cardmarket',
+        },
+    }, owner);
+    const requested = await requestCardmarketMatchTokens(tab);
+    if (requested) {
+        lastAutoAnalyzedVintedUrlByTab.set(tab.id, stableUrl);
+    } else {
+        lastAutoAnalyzedVintedUrlByTab.delete(tab.id);
+    }
+    return requested;
+}
+
+async function setVintedIdlePageState(tab = {}, reason = 'vinted-idle-page', owner = null) {
+    const cacheKey = vintedCanonicalCacheKey(tab?.id, tab?.url || '');
+    if (cacheKey) {
+        clearTimeout(vintedTokenWaitTimers.get(cacheKey));
+        vintedTokenWaitTimers.delete(cacheKey);
+    }
+    return setSidePanelState({
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: '',
+            url: tab?.url || '',
+            hostname: safeUrlHostname(tab?.url),
+            vintedIdle: true,
+        },
+        rows: [],
+        best: null,
+        blueprintId: '',
+        pokoinUrl: '',
+        error: '',
+        debug: {
+            matchStage: (typeof MATCH_STAGE === 'object' && MATCH_STAGE.IDLE) || 'idle',
+            vintedIdle: true,
+            waitingForVintedPreview: false,
+            awaitingChipSearch: false,
+            refreshFailureReason: reason,
+        },
+    }, owner);
+}
+
+async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-vinted-preview', owner = null, options = {}) {
+    if (isVintedIdlePageUrl(tab?.url || '')) {
+        return setVintedIdlePageState(tab, reason, owner);
+    }
+    const startRequest = Boolean(options.startRequest);
+    const analysisTrigger = String(options.analysisTrigger || (startRequest ? 'manual' : ''));
+    const state = {
+        updatedAt: Date.now(),
+        loading: startRequest,
         pageInfo: {
             title: tab?.title || '',
             url: tab?.url || '',
@@ -4282,12 +7472,29 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
         pokoinUrl: '',
         error: '',
         debug: {
-            loading: true,
-            waitingForVintedPreview: true,
+            loading: startRequest,
+            waitingForVintedPreview: startRequest,
+            readyForUserAction: !startRequest,
+            userInitiatedAnalysis: startRequest && analysisTrigger === 'manual',
+            automaticPanelAnalysis: startRequest && analysisTrigger === 'open-side-panel',
+            analysisTrigger,
+            matchStage: startRequest
+                ? ((typeof MATCH_STAGE === 'object' && MATCH_STAGE.AWAITING_TOKENS) || 'awaiting-tokens')
+                : ((typeof MATCH_STAGE === 'object' && MATCH_STAGE.READY) || 'ready'),
             refreshFailureReason: reason,
         },
     };
     const writtenState = await setSidePanelState(state, owner);
+    void recordExtensionDebugEvent('background.vinted-analysis-gate', {
+        url: tab?.url || '',
+        reason,
+        startRequest,
+        analysisTrigger,
+        requestId: owner?.requestId || null,
+    });
+    if (!startRequest) {
+        return writtenState;
+    }
     const cacheKey = vintedCanonicalCacheKey(tab?.id, tab?.url || '');
     if (cacheKey && typeof setTimeout === 'function') {
         clearTimeout(vintedTokenWaitTimers.get(cacheKey));
@@ -4301,11 +7508,48 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
             if (canonical?.previewRows?.length > 0) {
                 return;
             }
-            if (canonical?.vintedPayload) {
+            if (vintedCanonicalReadyForAnalysis(canonical)) {
                 await applyVintedCanonicalToSidePanel(tab, canonical, owner, {
                     reason: `${reason}-token-ready-timeout`,
                     forceRefresh: true,
                 });
+                return;
+            }
+            if (canonical?.vintedPayload && await requestVintedOverlayMatch(tab)) {
+                const retryTimeoutId = setTimeout(async () => {
+                    vintedTokenWaitTimers.delete(cacheKey);
+                    const { sidePanelState: retryState } = await chrome.storage.session.get('sidePanelState');
+                    if (owner && !isSidePanelOwnerCurrent(owner, tab?.url || '')) return;
+                    const refreshedCanonical = latestVintedCanonicalPreview(tab, retryState);
+                    if (vintedCanonicalReadyForAnalysis(refreshedCanonical)) {
+                        await applyVintedCanonicalToSidePanel(tab, refreshedCanonical, owner, {
+                            reason: `${reason}-gallery-ready-retry`,
+                            forceRefresh: true,
+                        });
+                        return;
+                    }
+                    await setSidePanelState({
+                        updatedAt: Date.now(),
+                        loading: false,
+                        pageInfo: {
+                            title: tab?.title || '',
+                            url: tab?.url || '',
+                            hostname: safeUrlHostname(tab?.url),
+                        },
+                        rows: [],
+                        best: null,
+                        blueprintId: '',
+                        pokoinUrl: '',
+                        error: 'Could not read the listing photos yet. Wait for Vinted to finish loading and try again.',
+                        debug: {
+                            waitingForVintedPreview: true,
+                            vintedGalleryReadyTimeout: true,
+                            refreshFailureReason: reason,
+                        },
+                    }, owner);
+                }, 1200);
+                retryTimeoutId?.unref?.();
+                vintedTokenWaitTimers.set(cacheKey, retryTimeoutId);
                 return;
             }
             await setSidePanelState({
@@ -4320,7 +7564,7 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
                 best: null,
                 blueprintId: '',
                 pokoinUrl: '',
-                error: 'Waiting for Vinted listing details.',
+                error: 'Could not read this Vinted listing. Refresh the page and try again.',
                 debug: {
                     waitingForVintedPreview: true,
                     vintedTokenReadyTimeout: true,
@@ -4331,7 +7575,74 @@ async function setVintedWaitingForPreviewState(tab = {}, reason = 'waiting-for-v
         timeoutId?.unref?.();
         vintedTokenWaitTimers.set(cacheKey, timeoutId);
     }
+    void requestVintedOverlayMatch(tab);
     return writtenState;
+}
+
+async function writeVintedTokensStage(tab = {}, canonical = {}, owner = null) {
+    const payload = canonical?.vintedPayload || {};
+    const url = canonical?.url || payload.listingKey || tab?.url || '';
+    if (isVintedIdlePageUrl(url) || isVintedIdlePageUrl(tab?.url || '')) {
+        return setVintedIdlePageState({ ...tab, url: tab?.url || url }, 'vinted-tokens-on-idle-page', owner);
+    }
+    return setSidePanelState({
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: canonical?.title || payload.searchTitle || tab?.title || '',
+            url,
+            hostname: safeUrlHostname(url),
+            originalTitle: canonical?.originalTitle || payload.originalTitle || tab?.title || '',
+            clues: canonical?.clues || payload.selectedClues || [],
+            primaryClues: canonical?.primaryClues || payload.primaryClues || [],
+            selectedClues: payload.selectedClues || canonical?.clues || [],
+            structuredCard: payload.structuredCard,
+            vintedPayload: payload.source === 'vinted' ? payload : null,
+            marketplacePayload: payload,
+        },
+        rows: [],
+        best: null,
+        blueprintId: '',
+        pokoinUrl: '',
+        error: '',
+        debug: {
+            matchStage: (typeof MATCH_STAGE === 'object' && MATCH_STAGE.TOKENS) || 'tokens',
+            awaitingChipSearch: true,
+            waitingForVintedPreview: false,
+            tokensReady: true,
+            vintedTokenReadyDriven: true,
+        },
+    }, owner);
+}
+
+async function writeEbayTokensStage(tab = {}, canonical = {}, owner = null) {
+    const payload = canonical?.ebayPayload || {};
+    const url = canonical?.url || payload.listingKey || tab?.url || '';
+    return setSidePanelState({
+        updatedAt: Date.now(),
+        pageInfo: {
+            title: canonical?.title || payload.searchTitle || tab?.title || '',
+            url,
+            hostname: safeUrlHostname(url),
+            originalTitle: canonical?.originalTitle || payload.originalTitle || tab?.title || '',
+            clues: canonical?.clues || payload.selectedClues || [],
+            primaryClues: canonical?.primaryClues || payload.primaryClues || [],
+            selectedClues: payload.selectedClues || canonical?.clues || [],
+            structuredCard: payload.structuredCard,
+            ebayPayload: payload.source === 'ebay' ? payload : null,
+            marketplacePayload: payload,
+        },
+        rows: [],
+        best: null,
+        blueprintId: '',
+        pokoinUrl: '',
+        error: '',
+        debug: {
+            matchStage: (typeof MATCH_STAGE === 'object' && MATCH_STAGE.TOKENS) || 'tokens',
+            awaitingChipSearch: true,
+            tokensReady: true,
+            ebayTokenReadyDriven: true,
+        },
+    }, owner);
 }
 
 function vintedPreviewRowIds(rows = []) {
@@ -4352,7 +7663,14 @@ function isDuplicateVintedCanonicalState(state = {}, canonical = {}) {
     if (Number.isFinite(stateRevision) && Number.isFinite(canonicalRevision) && stateRevision !== canonicalRevision) {
         return false;
     }
-    if (canonical.selectedCandidateId && String(state.pageInfo?.selectedCandidateId || '') !== String(canonical.selectedCandidateId)) {
+    if (Boolean(canonical.openAllCards) !== Boolean(state.debug?.openAllCards)) {
+        return false;
+    }
+    const canonicalSelected = canonical.openAllCards ? '' : String(canonical.selectedCandidateId || '');
+    const stateSelected = state.debug?.openAllCards
+        ? ''
+        : String(state.pageInfo?.selectedCandidateId || state.debug?.selectedCandidateId || '');
+    if (canonicalSelected !== stateSelected) {
         return false;
     }
     const canonicalRows = vintedPreviewRowIds(canonical.previewRows);
@@ -4374,7 +7692,7 @@ function vintedCanonicalApplyKey(tab = {}, canonical = {}) {
         canonical?.selectionRevision || 0,
         canonical?.previewSource || '',
         vintedPreviewRowIds(canonical?.previewRows || []),
-        canonical?.selectedCandidateId || '',
+        canonical?.openAllCards ? 'all' : (canonical?.selectedCandidateId || ''),
     ].join('|');
 }
 
@@ -4390,7 +7708,7 @@ function ebayCanonicalApplyKey(tab = {}, canonical = {}) {
         canonical?.selectionRevision || 0,
         canonical?.previewSource || '',
         marketplacePreviewRowIds(canonical?.previewRows || []),
-        canonical?.selectedCandidateId || '',
+        canonical?.openAllCards ? 'all' : (canonical?.selectedCandidateId || ''),
     ].join('|');
 }
 
@@ -4408,7 +7726,14 @@ function isDuplicateEbayCanonicalState(state = {}, canonical = {}) {
     if (Number.isFinite(stateRevision) && Number.isFinite(canonicalRevision) && stateRevision !== canonicalRevision) {
         return false;
     }
-    if (canonical.selectedCandidateId && String(state.pageInfo?.selectedCandidateId || '') !== String(canonical.selectedCandidateId)) {
+    if (Boolean(canonical.openAllCards) !== Boolean(state.debug?.openAllCards)) {
+        return false;
+    }
+    const canonicalSelected = canonical.openAllCards ? '' : String(canonical.selectedCandidateId || '');
+    const stateSelected = state.debug?.openAllCards
+        ? ''
+        : String(state.pageInfo?.selectedCandidateId || state.debug?.selectedCandidateId || '');
+    if (canonicalSelected !== stateSelected) {
         return false;
     }
     const canonicalRows = marketplacePreviewRowIds(canonical.previewRows);
@@ -4429,13 +7754,16 @@ async function applyEbayCanonicalPreviewToSidePanel(tab = {}, canonical = {}, ow
         ? buildPrimaryClueSearchTitle('', requestClues, requestPrimaryClues)
         : ebayPayload?.searchTitle ||
         buildPrimaryClueSearchTitle(canonical.originalTitle || canonical.title || tab?.title || '', requestClues, requestPrimaryClues);
-    const requestStructuredCard = ebayPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || '');
+    const requestStructuredCard = {
+        ...(ebayPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || '') || {}),
+        ...(ebayPayload?.listingKind ? { listingKind: ebayPayload.listingKind } : {}),
+    };
     const previewRows = (Array.isArray(canonical.previewRows) ? canonical.previewRows : [])
         .map(sidePanelRowFromPreview)
-        .filter(Boolean)
-        .slice(0, 8);
-    const bestPreviewRow = canonical.selectedCandidateId
-        ? previewRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || previewRows[0] || null
+        .filter(Boolean);
+    const desk = overlayDeskFlags(canonical);
+    const bestPreviewRow = desk.selectedCandidateId
+        ? previewRows.find((row) => String(row.card_id) === String(desk.selectedCandidateId)) || previewRows[0] || null
         : previewRows[0] || null;
     const previewResult = {
         pageInfo: {
@@ -4450,7 +7778,7 @@ async function applyEbayCanonicalPreviewToSidePanel(tab = {}, canonical = {}, ow
             ebayPayload,
             marketplacePayload: ebayPayload,
             previewSignature: canonical.previewSignature || '',
-            selectedCandidateId: canonical.selectedCandidateId || '',
+            selectedCandidateId: desk.selectedCandidateId,
             selectionRevision: canonical.selectionRevision || 0,
         },
         rows: previewRows,
@@ -4471,7 +7799,9 @@ async function applyEbayCanonicalPreviewToSidePanel(tab = {}, canonical = {}, ow
             searched: false,
             rowCount: previewRows.length,
             bestId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
-            selectedCandidateId: canonical.selectedCandidateId || '',
+            selectedCandidateId: desk.selectedCandidateId,
+            openAllCards: desk.openAllCards,
+            openPokoinDesk: desk.openPokoinDesk,
             pinnedPreviewRows: previewRows.length > 0,
             pinnedEbayPreview: previewRows.length > 0,
             previewSignature: canonical.previewSignature || '',
@@ -4494,41 +7824,13 @@ async function applyEbayCanonicalPreviewToSidePanel(tab = {}, canonical = {}, ow
     }, owner);
     if (previewRows.length > 0) {
         void schedulePriceEnrichment(previewRows, async (enrichedRows) => {
-            if (owner && !isSidePanelOwnerCurrent(owner, canonical.url || tab?.url || '')) {
-                markStaleSidePanelOwner(owner, 'eBay preview price enrichment owner no longer current');
-                return enrichedRows;
-            }
-            const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
-            if (
-                !currentSidePanelState?.debug?.pinnedEbayPreview ||
-                !sameUrlWithoutHash(currentSidePanelState.pageInfo?.url || '', canonical.url || tab?.url || '') ||
-                String(currentSidePanelState.blueprintId || '') !== String(bestPreviewRow?.card_id || '')
-            ) {
-                return enrichedRows;
-            }
-            const enrichedBest = canonical.selectedCandidateId
-                ? enrichedRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || enrichedRows[0] || null
-                : enrichedRows[0] || null;
-            const enrichedCanonical = {
+            rememberEbayCanonicalPreview({
                 ...canonical,
                 previewRows: enrichedRows,
                 updatedAt: Date.now(),
-            };
-            rememberEbayCanonicalPreview(enrichedCanonical);
-            await setSidePanelState({
-                updatedAt: Date.now(),
-                ...previewResult,
-                rows: enrichedRows,
-                best: enrichedBest,
-                blueprintId: enrichedBest?.card_id ? String(enrichedBest.card_id) : '',
-                pokoinUrl: sidePanelStatePokoinUrl(enrichedBest),
-                debug: {
-                    ...previewResult.debug,
-                    priceEnriched: true,
-                },
-            }, owner);
-            return enrichedRows;
-        });
+            });
+            return applyEnrichedPokoinPricesToSidePanel(enrichedRows, canonical.url || tab?.url || '');
+        }, { limit: priceEnrichmentLimitForKind(ebayPayload?.listingKind || requestStructuredCard?.listingKind) });
     }
     return previewResult;
 }
@@ -4572,6 +7874,9 @@ async function applyEbayCanonicalToSidePanel(tab = {}, canonical = {}, owner = n
 }
 
 async function resolveVintedCanonicalTokensForSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    if (isVintedIdlePageUrl(tab?.url || '') || isVintedIdlePageUrl(canonical?.url || '')) {
+        return setVintedIdlePageState(tab, options.reason || 'vinted-idle-page', owner);
+    }
     const vintedPayload = normalizeVintedPayload(canonical.vintedPayload);
     if (!vintedPayload) {
         return applyVintedCanonicalPreviewToSidePanel(tab, canonical, owner, options);
@@ -4592,10 +7897,42 @@ async function resolveVintedCanonicalTokensForSidePanel(tab = {}, canonical = {}
         vintedPreviewSignature: canonical.previewSignature || '',
         vintedPreviewSource: canonical.previewSource || 'vinted_overlay_tokens',
         reason: options.reason || '',
+        forceRefresh: Boolean(options.forceRefresh),
+        skipListingScan: Boolean(options.skipListingScan),
+        forceListingScan: Boolean(options.forceListingScan),
+    });
+}
+
+async function resolveEbayCanonicalTokensForSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    const ebayPayload = normalizeEbayPayload(canonical.ebayPayload);
+    if (!ebayPayload) {
+        return applyEbayCanonicalToSidePanel(tab, canonical, owner, options);
+    }
+    const tokenTab = {
+        ...tab,
+        url: canonical.url || tab?.url || '',
+        title: canonical.title || ebayPayload.searchTitle || tab?.title || '',
+    };
+    return resolveActiveTabForSidePanel(tokenTab, {
+        expectedUrl: canonical.url || tab?.url || '',
+        originalTitle: canonical.originalTitle || ebayPayload.originalTitle || tab?.title || '',
+        clues: canonical.clues || ebayPayload.selectedClues,
+        primaryClues: canonical.primaryClues || ebayPayload.primaryClues,
+        ebayPayload,
+        marketplacePayload: ebayPayload,
+        owner,
+        ebayTokenReadyDriven: true,
+        reason: options.reason || '',
+        forceRefresh: Boolean(options.forceRefresh),
+        skipListingScan: Boolean(options.skipListingScan),
+        forceListingScan: Boolean(options.forceListingScan),
     });
 }
 
 async function applyVintedCanonicalToSidePanel(tab = {}, canonical = {}, owner = null, options = {}) {
+    if (isVintedIdlePageUrl(tab?.url || '') || isVintedIdlePageUrl(canonical?.url || '')) {
+        return setVintedIdlePageState(tab, options.reason || 'vinted-idle-page', owner);
+    }
     const applyKey = !options.forceRefresh && !options.skipInFlightGuard ? vintedCanonicalApplyKey(tab, canonical) : '';
     if (applyKey && vintedCanonicalApplyInFlight.has(applyKey)) {
         return vintedCanonicalApplyInFlight.get(applyKey);
@@ -4610,6 +7947,17 @@ async function applyVintedCanonicalToSidePanel(tab = {}, canonical = {}, owner =
     if (!options.forceRefresh) {
         const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
         if (isDuplicateVintedCanonicalState(sidePanelState, canonical)) {
+            const pricedRows = (Array.isArray(sidePanelState.rows) && sidePanelState.rows.length > 0)
+                ? sidePanelState.rows
+                : (Array.isArray(canonical.previewRows) ? canonical.previewRows : []);
+            void schedulePriceEnrichment(pricedRows, async (enrichedRows) => {
+                rememberVintedCanonicalPreview({
+                    ...canonical,
+                    previewRows: enrichedRows,
+                    updatedAt: Date.now(),
+                });
+                return applyEnrichedPokoinPricesToSidePanel(enrichedRows, canonical.url || tab?.url || '');
+            }, { limit: priceEnrichmentLimitForKind(canonical?.vintedPayload?.listingKind) });
             return sidePanelState;
         }
     }
@@ -4619,7 +7967,9 @@ async function applyVintedCanonicalToSidePanel(tab = {}, canonical = {}, owner =
     if (canonical?.vintedPayload) {
         return resolveVintedCanonicalTokensForSidePanel(tab, canonical, owner, options);
     }
-    return setVintedWaitingForPreviewState(tab, options.reason || 'awaiting-vinted-tokens', owner);
+    return setVintedWaitingForPreviewState(tab, options.reason || 'awaiting-vinted-tokens', owner, {
+        startRequest: Boolean(options.forceRefresh),
+    });
     })();
     if (applyKey) {
         vintedCanonicalApplyInFlight.set(applyKey, applyPromise.finally(() => {
@@ -4650,13 +8000,16 @@ async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, 
         ? buildPrimaryClueSearchTitle('', requestClues, requestPrimaryClues)
         : vintedPayload?.searchTitle ||
         buildPrimaryClueSearchTitle(canonical.originalTitle || canonical.title || tab?.title || '', requestClues, requestPrimaryClues);
-    const requestStructuredCard = vintedPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || '');
+    const requestStructuredCard = {
+        ...(vintedPayload?.structuredCard || scrapeStructuredCardFields(requestTitle || '') || {}),
+        ...(vintedPayload?.listingKind ? { listingKind: vintedPayload.listingKind } : {}),
+    };
     const previewRows = (Array.isArray(canonical.previewRows) ? canonical.previewRows : [])
         .map(sidePanelRowFromPreview)
-        .filter(Boolean)
-        .slice(0, 8);
-    const bestPreviewRow = canonical.selectedCandidateId
-        ? previewRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || previewRows[0] || null
+        .filter(Boolean);
+    const desk = overlayDeskFlags(canonical);
+    const bestPreviewRow = desk.selectedCandidateId
+        ? previewRows.find((row) => String(row.card_id) === String(desk.selectedCandidateId)) || previewRows[0] || null
         : previewRows[0] || null;
     const previewResult = {
         pageInfo: {
@@ -4670,7 +8023,7 @@ async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, 
             structuredCard: requestStructuredCard,
             vintedPayload,
             previewSignature: canonical.previewSignature || '',
-            selectedCandidateId: canonical.selectedCandidateId || '',
+            selectedCandidateId: desk.selectedCandidateId,
             selectionRevision: canonical.selectionRevision || 0,
         },
         rows: previewRows,
@@ -4691,7 +8044,9 @@ async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, 
             searched: false,
             rowCount: previewRows.length,
             bestId: bestPreviewRow?.card_id ? String(bestPreviewRow.card_id) : '',
-            selectedCandidateId: canonical.selectedCandidateId || '',
+            selectedCandidateId: desk.selectedCandidateId,
+            openAllCards: desk.openAllCards,
+            openPokoinDesk: desk.openPokoinDesk,
             pinnedPreviewRows: previewRows.length > 0,
             pinnedVintedPreview: previewRows.length > 0,
             previewSignature: canonical.previewSignature || '',
@@ -4713,41 +8068,13 @@ async function applyVintedCanonicalPreviewToSidePanel(tab = {}, canonical = {}, 
     }, owner);
     if (previewRows.length > 0) {
         void schedulePriceEnrichment(previewRows, async (enrichedRows) => {
-            if (owner && !isSidePanelOwnerCurrent(owner, canonical.url || tab?.url || '')) {
-                markStaleSidePanelOwner(owner, 'Vinted preview price enrichment owner no longer current');
-                return enrichedRows;
-            }
-            const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
-            if (
-                !currentSidePanelState?.debug?.pinnedVintedPreview ||
-                !sameUrlWithoutHash(currentSidePanelState.pageInfo?.url || '', canonical.url || tab?.url || '') ||
-                String(currentSidePanelState.blueprintId || '') !== String(bestPreviewRow?.card_id || '')
-            ) {
-                return enrichedRows;
-            }
-            const enrichedBest = canonical.selectedCandidateId
-                ? enrichedRows.find((row) => String(row.card_id) === String(canonical.selectedCandidateId)) || enrichedRows[0] || null
-                : enrichedRows[0] || null;
-            const enrichedCanonical = {
+            rememberVintedCanonicalPreview({
                 ...canonical,
                 previewRows: enrichedRows,
                 updatedAt: Date.now(),
-            };
-            rememberVintedCanonicalPreview(enrichedCanonical);
-            await setSidePanelState({
-                updatedAt: Date.now(),
-                ...previewResult,
-                rows: enrichedRows,
-                best: enrichedBest,
-                blueprintId: enrichedBest?.card_id ? String(enrichedBest.card_id) : '',
-                pokoinUrl: sidePanelStatePokoinUrl(enrichedBest),
-                debug: {
-                    ...previewResult.debug,
-                    priceEnriched: true,
-                },
-            }, owner);
-            return enrichedRows;
-        });
+            });
+            return applyEnrichedPokoinPricesToSidePanel(enrichedRows, canonical.url || tab?.url || '');
+        }, { limit: priceEnrichmentLimitForKind(vintedPayload?.listingKind || requestStructuredCard?.listingKind) });
     }
     return previewResult;
 }
@@ -4795,6 +8122,7 @@ function buildBackgroundRecentSearchKey({
 
 async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
     await ensureRuntimeStorageCurrent();
+    await sidePanelOpenStateReady;
     if (!tab?.id || !isSupportedMarketplaceUrl(tab.url)) {
         return;
     }
@@ -4802,15 +8130,31 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
     const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
     const currentStateUrl = sidePanelState?.pageInfo?.url || '';
     if (isVintedUrl(tab.url)) {
-        const owner = createSidePanelRequestOwner(tab, reason);
         clearTimeout(sidePanelRefreshTimers.get(tab.id));
         sidePanelRefreshTimers.delete(tab.id);
-        const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
-        if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
-            await applyVintedCanonicalToSidePanel(tab, canonical, owner, { reason });
+        if (isVintedIdlePageUrl(tab.url)) {
+            const owner = createSidePanelRequestOwner(tab, reason);
+            await setVintedIdlePageState(tab, reason, owner);
             return;
         }
+        if (isPokoinSidePanelOpenForTab(tab)) {
+            await autoAnalyzeOpenVintedSidePanel(tab, reason);
+            return;
+        }
+        const owner = createSidePanelRequestOwner(tab, reason);
         await setVintedWaitingForPreviewState(tab, reason, owner);
+        return;
+    }
+    if (isCardmarketUrl(tab.url)) {
+        clearTimeout(sidePanelRefreshTimers.get(tab.id));
+        sidePanelRefreshTimers.delete(tab.id);
+        if (
+            isPokoinSidePanelOpenForTab(tab)
+            && typeof isCardmarketSinglesProductUrl === 'function'
+            && isCardmarketSinglesProductUrl(tab.url)
+        ) {
+            await autoAnalyzeOpenCardmarketSidePanel(tab, reason);
+        }
         return;
     }
     if (isEbayUrl(tab.url)) {
@@ -4924,6 +8268,124 @@ async function scheduleSidePanelRefresh(tab, reason = 'navigation') {
     }, 700));
 }
 
+async function commitResolvedSidePanelState({
+    pageInfo,
+    rows,
+    error,
+    debug,
+    owner,
+    tab,
+    requestContext,
+    resolveStartedAt,
+}) {
+    rows = uniqueRowsById(Array.isArray(rows) ? rows : []);
+    if (
+        typeof uniqueRowsByLeftoverTile === 'function'
+        && (
+            pageInfo?.structuredCard?.listingKind === 'album'
+            || pageInfo?.vintedPayload?.listingKind === 'album'
+            || pageInfo?.marketplacePayload?.listingKind === 'album'
+        )
+    ) {
+        rows = uniqueRowsByLeftoverTile(rows, printLangsIndex);
+    }
+    // Search rows produced from listing text are provisional while the local
+    // image recognizer is running. Keep them private until scan-merge decides
+    // whether to use the recognized rows or the post-scan chip fallback.
+    const suppressProvisionalRows = Boolean(debug.listingScanPending);
+    const publishedRows = suppressProvisionalRows ? [] : rows;
+    const best = publishedRows[0] || null;
+    const blueprintId = best?.card_id ? String(best.card_id) : '';
+    const pokoinUrl = pageInfo.cardtraderBlueprintId
+        ? cardTraderDirectPokoinUrl(
+            pageInfo.cardtraderBlueprintId,
+            await resolvePokoinPublicIdFromCardTrader({
+                blueprintId: pageInfo.cardtraderBlueprintId,
+                url: pageInfo.url,
+                title: pageInfo.title,
+            }),
+        )
+        : sidePanelStatePokoinUrl(best);
+    debug.provisionalRowCount = suppressProvisionalRows ? rows.length : 0;
+    debug.rowCount = publishedRows.length;
+    debug.bestId = blueprintId;
+    debug.phaseTimings.totalMs = Date.now() - resolveStartedAt;
+    debug.sidePanelRequestId = owner?.requestId || null;
+    debug.sidePanelReason = owner?.reason || '';
+    debug.chipSearchCompleted = !debug.listingScanPending;
+    debug.awaitingChipSearch = suppressProvisionalRows;
+    if (!debug.matchStage || debug.matchStage === 'tokens' || debug.matchStage === 'awaiting-tokens') {
+        debug.matchStage = debug.listingScanPending
+            ? 'tokens'
+            : 'resolved';
+    }
+
+    void recordExtensionDebugEvent('background.side-panel-commit', {
+        requestId: owner?.requestId || null,
+        reason: owner?.reason || '',
+        url: pageInfo?.url || tab?.url || '',
+        matchStage: debug.matchStage || '',
+        listingScanPending: Boolean(debug.listingScanPending),
+        suppressProvisionalRows,
+        provisionalRowCount: Number(debug.provisionalRowCount) || 0,
+        internalRows: extensionDebugRowSummaries(rows),
+        publishedRows: extensionDebugRowSummaries(publishedRows),
+        error: error || '',
+    });
+
+    if (requestContext.expectedUrl && !sameUrlWithoutHash(requestContext.expectedUrl, pageInfo.url || tab?.url || '')) {
+        console.log('ℹ️ [Background] Ignored stale side panel refresh for changed tab URL');
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'expected URL changed');
+        }
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+
+    if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
+        markStaleSidePanelOwner(owner, 'result behind current side panel owner');
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+
+    const { sidePanelState: latestSidePanelState } = await chrome.storage.session.get('sidePanelState');
+    const latestStateUrl = latestSidePanelState?.pageInfo?.url || '';
+    if (
+        latestSidePanelState?.updatedAt > resolveStartedAt &&
+        latestStateUrl &&
+        !sameUrlWithoutHash(latestStateUrl, pageInfo.url || tab?.url || '') &&
+        isSupportedMarketplaceUrl(latestStateUrl)
+    ) {
+        console.log('ℹ️ [Background] Ignored stale side panel result behind newer page state');
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'newer page state exists');
+        }
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+    if (
+        isLockedCardTraderDirectState(latestSidePanelState, latestStateUrl) &&
+        !pageInfo.cardtraderBlueprintId &&
+        !sameCardTraderDirectBlueprint(latestStateUrl, pageInfo.url || tab?.url || '')
+    ) {
+        console.log('ℹ️ [Background] Ignored stale refresh behind CardTrader direct state');
+        if (owner) {
+            markStaleSidePanelOwner(owner, 'CardTrader direct state owns panel');
+        }
+        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
+    }
+
+    await setSidePanelState({
+        updatedAt: Date.now(),
+        pageInfo,
+        rows: publishedRows,
+        best,
+        blueprintId,
+        pokoinUrl,
+        error,
+        debug,
+    }, owner);
+
+    return { pageInfo, rows: publishedRows, best, blueprintId, pokoinUrl, error, debug };
+}
+
 async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     await ensureRuntimeStorageCurrent();
     const resolveStartedAt = Date.now();
@@ -5023,6 +8485,8 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
     }
     let rows = [];
     let error = pageInfoError;
+    let pendingListingScanPromise = null;
+    let pendingScanKind = '';
     const debug = {
         version: 2,
         ...runtimeDebugMetadata(),
@@ -5040,11 +8504,15 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         error,
         phaseTimings,
         vintedTokenReadyDriven: Boolean(requestContext.vintedTokenReadyDriven),
+        ebayTokenReadyDriven: Boolean(requestContext.ebayTokenReadyDriven),
         vintedPreviewSignature: requestContext.vintedPreviewSignature || '',
         vintedPreviewSource: requestContext.vintedPreviewSource || '',
     };
 
-    if (!pageInfo.unsupported && pageInfo.title) {
+    const scannableMarketplacePhotos = hasScannableMarketplacePhotos(marketplacePayload);
+    debug.scannableMarketplacePhotos = scannableMarketplacePhotos;
+    debug.emptyTitlePhotoScan = !pageInfo.title && scannableMarketplacePhotos;
+    if (shouldResolveSidePanelPage(pageInfo, marketplacePayload)) {
         try {
             debug.searched = true;
             if (pageInfo.cardtraderBlueprintId) {
@@ -5059,6 +8527,11 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     name: directName,
                     searchName: directName,
                 };
+                const directPublicId = await resolvePokoinPublicIdFromCardTrader({
+                    blueprintId: pageInfo.cardtraderBlueprintId,
+                    url: pageInfo.url,
+                    title: directName,
+                });
                 rows = [{
                     card_id: pageInfo.cardtraderBlueprintId,
                     name: directName,
@@ -5066,9 +8539,24 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     card_number: pageInfo.structuredCard?.collectorNumber || '',
                     source: 'cardtrader_url',
                     search_rank: 999999,
+                    canonicalUrl: cardTraderDirectPokoinUrl(pageInfo.cardtraderBlueprintId, directPublicId),
                 }];
                 debug.cardtraderBlueprintId = pageInfo.cardtraderBlueprintId;
             } else {
+                let listingKind = marketplacePayload?.listingKind || pageInfo.structuredCard?.listingKind || 'unknown';
+                const skipListingScan = Boolean(requestContext.skipListingScan);
+                const forceListingScan = Boolean(requestContext.forceListingScan);
+                const preferChipSearch = skipListingScan || forceListingScan;
+                const listingScanPromise = skipListingScan
+                    ? null
+                    : startListingScanEnrichment(
+                        pageInfo.structuredCard,
+                        marketplacePayload,
+                        pageInfo.originalTitle || '',
+                        { force: forceListingScan, tab }
+                    );
+                debug.skipListingScan = skipListingScan;
+                debug.forceListingScan = forceListingScan;
                 let exactIdentity = hasExactStructuredIdentity(pageInfo.structuredCard);
                 let exactFastPath = hasExactSearchFastPath(pageInfo.structuredCard);
                 const nameResolutionTitle = titleForNameResolution(
@@ -5082,8 +8570,12 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     primaryClues: effectivePrimaryClues,
                     title: nameResolutionTitle,
                     selectedClueSignature: selectedClueSignature(effectiveRequestClues, effectivePrimaryClues),
+                    listingKind,
                 };
-                if (shouldResolveNameBeforeExactSearch(pageInfo.structuredCard, nameResolutionOptions)) {
+                if (
+                    !shouldDeferChipSearchForListingScan(listingScanPromise, pageInfo.structuredCard, listingKind, { preferChipSearch }) &&
+                    shouldResolveNameBeforeExactSearch(pageInfo.structuredCard, nameResolutionOptions)
+                ) {
                     try {
                         const promotedResolution = await promoteStructuredNameFromCardvaultTitle(
                             nameResolutionTitle,
@@ -5104,7 +8596,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     }
                     markPhase('preExactNameResolutionMs');
                 }
-                if (exactFastPath) {
+                if (!shouldDeferChipSearchForListingScan(listingScanPromise, pageInfo.structuredCard, listingKind, { preferChipSearch }) && exactFastPath) {
                     try {
                         const extensionSearchResult = await searchExtensionCard(pageInfo.structuredCard);
                         rows = extensionSearchResult.rows;
@@ -5119,7 +8611,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     markPhase('extensionSearchMs');
                 }
 
-                if (!hasGoodEnoughExactRows(rows, pageInfo.structuredCard)) {
+                if (!shouldDeferChipSearchForListingScan(listingScanPromise, pageInfo.structuredCard, listingKind, { preferChipSearch }) && !hasGoodEnoughExactRows(rows, pageInfo.structuredCard)) {
                     if (shouldUseCollectorFirstRecovery(pageInfo.structuredCard)) {
                         try {
                             const collectorRecovery = await searchExtensionCard(collectorOnlyStructuredCard(pageInfo.structuredCard));
@@ -5136,13 +8628,15 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                         }
                     }
                     try {
-                        const nameResolution = debug.nameResolution?.name
-                            ? debug.nameResolution
-                            : await resolveNameFromCardvaultTitle(
-                            nameResolutionTitle,
-                            pageInfo.structuredCard,
-                            nameResolutionOptions
-                        );
+                        const nameResolution = (typeof shouldSkipAlbumSpeciesCollapse === 'function' && shouldSkipAlbumSpeciesCollapse(listingKind))
+                            ? { name: '' }
+                            : (debug.nameResolution?.name
+                                ? debug.nameResolution
+                                : await resolveNameFromCardvaultTitle(
+                                    nameResolutionTitle,
+                                    pageInfo.structuredCard,
+                                    nameResolutionOptions
+                                ));
                         debug.nameResolution = nameResolution;
                         if (shouldUseResolvedCardName(nameResolution.name, pageInfo.structuredCard)) {
                             pageInfo.structuredCard = {
@@ -5174,7 +8668,7 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     }
                 }
 
-                if (shouldRunAutocompleteFallback(rows, pageInfo.structuredCard)) {
+                if (!shouldDeferChipSearchForListingScan(listingScanPromise, pageInfo.structuredCard, listingKind, { preferChipSearch }) && shouldRunAutocompleteFallback(rows, pageInfo.structuredCard)) {
                     try {
                         const searchResult = exactIdentity
                             ? await searchCardvaultForStructuredCard(pageInfo.title, pageInfo.structuredCard)
@@ -5192,6 +8686,9 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
                     }
                     markPhase('autocompleteFallbackMs');
                 }
+                pendingListingScanPromise = listingScanPromise;
+                pendingScanKind = listingKind;
+                debug.listingScanPending = Boolean(listingScanPromise);
             }
         } catch (searchError) {
             error = searchError.message || 'Cardvault search failed.';
@@ -5199,108 +8696,97 @@ async function resolveActiveTabForSidePanel(tab, requestContext = {}) {
         }
     }
 
-    const best = rows[0] || null;
-    const blueprintId = best?.card_id ? String(best.card_id) : '';
-    const pokoinUrl = sidePanelStatePokoinUrl(best);
-    debug.rowCount = rows.length;
-    debug.bestId = blueprintId;
-    debug.phaseTimings.totalMs = Date.now() - resolveStartedAt;
-    debug.sidePanelRequestId = owner?.requestId || null;
-    debug.sidePanelReason = owner?.reason || '';
-
-    if (requestContext.expectedUrl && !sameUrlWithoutHash(requestContext.expectedUrl, pageInfo.url || tab?.url || '')) {
-        console.log('ℹ️ [Background] Ignored stale side panel refresh for changed tab URL');
-        if (owner) {
-            markStaleSidePanelOwner(owner, 'expected URL changed');
-        }
-        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
-    }
-
-    if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
-        markStaleSidePanelOwner(owner, 'result behind current side panel owner');
-        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
-    }
-
-    const { sidePanelState: latestSidePanelState } = await chrome.storage.session.get('sidePanelState');
-    const latestStateUrl = latestSidePanelState?.pageInfo?.url || '';
-    if (
-        latestSidePanelState?.updatedAt > resolveStartedAt &&
-        latestStateUrl &&
-        !sameUrlWithoutHash(latestStateUrl, pageInfo.url || tab?.url || '') &&
-        isSupportedMarketplaceUrl(latestStateUrl)
-    ) {
-        console.log('ℹ️ [Background] Ignored stale side panel result behind newer page state');
-        if (owner) {
-            markStaleSidePanelOwner(owner, 'newer page state exists');
-        }
-        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
-    }
-    if (
-        isLockedCardTraderDirectState(latestSidePanelState, latestStateUrl) &&
-        !pageInfo.cardtraderBlueprintId &&
-        !sameCardTraderDirectBlueprint(latestStateUrl, pageInfo.url || tab?.url || '')
-    ) {
-        console.log('ℹ️ [Background] Ignored stale refresh behind CardTrader direct state');
-        if (owner) {
-            markStaleSidePanelOwner(owner, 'CardTrader direct state owns panel');
-        }
-        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug, stale: true };
-    }
-
-    await setSidePanelState({
-        updatedAt: Date.now(),
+    const committed = await commitResolvedSidePanelState({
         pageInfo,
         rows,
-        best,
-        blueprintId,
-        pokoinUrl,
         error,
         debug,
-    }, owner);
+        owner,
+        tab,
+        requestContext,
+        resolveStartedAt,
+    });
+    if (committed.stale) {
+        return committed;
+    }
+    const { best, blueprintId, pokoinUrl } = committed;
+
+    followThroughListingScan(pendingListingScanPromise, {
+        initialRows: rows,
+        structuredCard: pageInfo.structuredCard,
+        listingKind: pendingScanKind,
+        debug,
+        onMerged: async (merged) => {
+            pageInfo.structuredCard = {
+                ...(pageInfo.structuredCard || {}),
+                ...(merged.structuredCard || {}),
+            };
+            debug.listingScanPending = false;
+            debug.matchStage = (typeof MATCH_STAGE === 'object' && MATCH_STAGE.SCAN_MERGE) || 'scan-merge';
+            debug.chipSearchCompleted = true;
+            const { sidePanelState: existingPanel } = await chrome.storage.session.get('sidePanelState');
+            if (!shouldReplaceSidePanelScanRows(existingPanel, merged.rows || [], merged)) {
+                await setSidePanelState({
+                    ...(existingPanel || {}),
+                    updatedAt: Date.now(),
+                    pageInfo: {
+                        ...(existingPanel?.pageInfo || {}),
+                        structuredCard: {
+                            ...(existingPanel?.pageInfo?.structuredCard || {}),
+                            ...(merged.structuredCard || {}),
+                        },
+                    },
+                    debug: {
+                        ...(existingPanel?.debug || {}),
+                        listingScanPending: false,
+                        matchStage: debug.matchStage,
+                        chipSearchCompleted: true,
+                        progressiveScanId: '',
+                    },
+                }, owner);
+                void schedulePriceEnrichment(existingPanel?.rows || [], async (enrichedRows) => {
+                    return applyEnrichedPokoinPricesToSidePanel(enrichedRows, pageInfo.url || tab?.url || '');
+                }, { limit: priceEnrichmentLimitForKind(merged.listingKind) });
+                return;
+            }
+            await commitResolvedSidePanelState({
+                pageInfo,
+                rows: merged.rows,
+                error,
+                debug,
+                owner,
+                tab,
+                requestContext,
+                resolveStartedAt,
+            });
+            void schedulePriceEnrichment(merged.rows, async (enrichedRows) => {
+                return applyEnrichedPokoinPricesToSidePanel(enrichedRows, pageInfo.url || tab?.url || '');
+            }, { limit: priceEnrichmentLimitForKind(merged.listingKind) });
+        },
+    });
 
     if (pageInfo.cardtraderBlueprintId) {
-        return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug };
+        return committed;
     }
 
-    void schedulePriceEnrichment(rows, async (enrichedRows) => {
-        if (owner && !isSidePanelOwnerCurrent(owner, pageInfo.url || tab?.url || '')) {
-            markStaleSidePanelOwner(owner, 'price enrichment owner no longer current');
-            return enrichedRows;
-        }
-        const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
-        const currentUrl = currentSidePanelState?.pageInfo?.url || '';
-        const currentBlueprintId = currentSidePanelState?.blueprintId || currentSidePanelState?.best?.card_id || '';
-        if (
-            !sameUrlWithoutHash(currentUrl, pageInfo.url || tab?.url || '') ||
-            String(currentBlueprintId || '') !== String(blueprintId || '')
-        ) {
-            return enrichedRows;
-        }
-        const enrichedBest = enrichedRows[0] || null;
-        await setSidePanelState({
-            updatedAt: Date.now(),
-            pageInfo,
-            rows: enrichedRows,
-            best: enrichedBest,
-            blueprintId,
-            pokoinUrl,
-            error,
-            debug: {
-                ...debug,
-                priceEnriched: true,
-            },
-        }, owner);
-    });
+    if (!pendingListingScanPromise) {
+        void schedulePriceEnrichment(rows, async (enrichedRows) => {
+            return applyEnrichedPokoinPricesToSidePanel(enrichedRows, pageInfo.url || tab?.url || '');
+        }, { limit: priceEnrichmentLimitForKind(pendingScanKind || pageInfo.structuredCard?.listingKind) });
+    }
 
     observeCardmarketScrapeSoon({ pageInfo, rows, best, blueprintId, pokoinUrl, error, debug }, {
         promoteVerifiedLink: Boolean(requestContext.promoteVerifiedLink),
     });
 
-    return { pageInfo, rows, best, blueprintId, pokoinUrl, error, debug };
+    return committed;
 }
 
 // Handle messages from content script
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request?.action === 'onDeviceIdentifyAlbum' || request?.action === 'onDeviceScanReady' || request?.action === 'onDeviceIdentifyAlbumPhoto') {
+        return undefined;
+    }
     console.log('📨 [Background] Message received:', request);
     
     if (request.action === 'updateIcon') {
@@ -5359,6 +8845,33 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         requestPokoinAuthToken()
             .then((result) => sendResponse({ success: true, ...result }))
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to request Pokoin auth token.' }));
+    } else if (request.action === 'getPokoinAuthSession') {
+        getPokoinAuthSession()
+            .then((session) => sendResponse({ success: true, ...session }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to read Pokoin auth session.' }));
+    } else if (request.action === 'openForegroundTab') {
+        openForegroundTab(request.url)
+            .then((result) => sendResponse(result))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to open tab.' }));
+    } else if (request.action === 'openSilverMarketplaceTab') {
+        openSilverMarketplaceTab(request)
+            .then((result) => sendResponse(result))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to open marketplace tab.' }));
+    } else if (request.action === 'savePokoinWatchlist') {
+        savePokoinWatchlist(request.cardId, request.watchlistAction)
+            .then((result) => sendResponse(result))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to save wishlist.' }));
+    } else if (request.action === 'captureVisibleTabPreview') {
+        captureActiveTabJpeg({ quality: 50 })
+            .then(async ({ dataUrl }) => sendResponse({
+                success: true,
+                screenshotDataUrl: await jpegThumbnailDataUrl(dataUrl),
+            }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to capture the visible tab.' }));
+    } else if (request.action === 'scanVisibleTab') {
+        scanVisibleTabForCards()
+            .then((result) => sendResponse({ success: true, ...result }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to scan the visible tab.' }));
     } else if (request.action === 'resolveActiveTabForSidePanel') {
         getActiveTab()
             .then(async (tab) => {
@@ -5367,6 +8880,28 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
                 const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
                 if (isVintedUrl(tab.url || '')) {
+                    if (isVintedIdlePageUrl(tab.url || '')) {
+                        const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-idle' : 'resolve-vinted-idle');
+                        await setVintedIdlePageState(tab, request.forceRefresh ? 'side-panel-refresh-vinted-idle' : 'resolve-vinted-idle', owner);
+                        return {
+                            pageInfo: {
+                                title: '',
+                                url: tab.url || '',
+                                hostname: safeUrlHostname(tab.url),
+                                vintedIdle: true,
+                            },
+                            rows: [],
+                            best: null,
+                            blueprintId: '',
+                            pokoinUrl: '',
+                            error: '',
+                            debug: sidePanelOwnerDebug(owner, {
+                                vintedIdle: true,
+                                matchStage: (typeof MATCH_STAGE === 'object' && MATCH_STAGE.IDLE) || 'idle',
+                                searched: false,
+                            }),
+                        };
+                    }
                     const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
                     if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
                         const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-canonical' : 'resolve-vinted-canonical');
@@ -5376,7 +8911,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         });
                     }
                     const owner = createSidePanelRequestOwner(tab, request.forceRefresh ? 'refresh-vinted-waiting' : 'resolve-vinted-waiting');
-                    await setVintedWaitingForPreviewState(tab, request.forceRefresh ? 'side-panel-refresh-awaiting-vinted-preview' : 'awaiting-vinted-preview', owner);
+                    await setVintedWaitingForPreviewState(
+                        tab,
+                        request.forceRefresh ? 'side-panel-refresh-awaiting-vinted-preview' : 'awaiting-vinted-preview',
+                        owner,
+                        { startRequest: Boolean(request.forceRefresh) }
+                    );
                     return {
                         pageInfo: {
                             title: tab.title || '',
@@ -5417,7 +8957,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             });
     } else if (request.action === 'searchCardForTitle') {
         ensureRuntimeStorageCurrent()
-            .then(() => {
+            .then(async () => {
+                await printLangsReady;
                 const tab = sender.tab;
                 const directCardTraderBlueprintId = cardtraderBlueprintIdFromUrl(request.url || tab?.url || '');
                 const marketplacePayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
@@ -5487,23 +9028,44 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         previewSignature: request.previewSignature || '',
                         selectionRevision: request.selectionRevision ?? marketplacePayload?.selectionRevision ?? '',
                         searchSignature,
+                        searchTrigger: request.searchTrigger || '',
+                        skipListingScan: Boolean(request.skipListingScan),
+                        forceListingScan: Boolean(request.forceListingScan),
                     });
                     backgroundSearchInFlight.set(recentSearchKey, Promise.resolve()
                 .then(async () => {
                     if (directCardTraderBlueprintId) {
                         const directName = cleanCardTraderDirectName(title || tab?.title || '', request.url || tab?.url || '', directCardTraderBlueprintId);
+                        const directPublicId = await resolvePokoinPublicIdFromCardTrader({
+                            blueprintId: directCardTraderBlueprintId,
+                            url: request.url || tab?.url || '',
+                            title: directName,
+                        });
                         return [legacyResultFromRow({
                             card_id: directCardTraderBlueprintId,
                             name: directName,
                             source: 'cardtrader_url',
                             search_rank: 999999,
+                            canonicalUrl: cardTraderDirectPokoinUrl(directCardTraderBlueprintId, directPublicId),
                         })];
                     }
-                    if (!title) {
+                    if (!title && !(typeof shouldIdentifyListingPhotos === 'function' && shouldIdentifyListingPhotos(marketplacePayload))) {
                         return [];
                     }
                     const cardmarketContext = cardmarketContextFromRequest(request, requestUrl);
                     const structuredCard = marketplacePayload?.structuredCard || scrapeStructuredCardFields(title, cardmarketContext);
+                    let listingKind = marketplacePayload?.listingKind || structuredCard.listingKind || 'unknown';
+                    const skipListingScan = Boolean(request.skipListingScan);
+                    const forceListingScan = Boolean(request.forceListingScan);
+                    const preferChipSearch = skipListingScan || forceListingScan;
+                    const listingScanPromise = skipListingScan
+                        ? null
+                        : startListingScanEnrichment(
+                            structuredCard,
+                            marketplacePayload,
+                            request.originalTitle || marketplacePayload?.originalTitle || '',
+                            { force: forceListingScan, tab }
+                        );
                     let exactIdentity = hasExactStructuredIdentity(structuredCard);
                     let exactFastPath = hasExactSearchFastPath(structuredCard);
                     let rows = [];
@@ -5516,8 +9078,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         primaryClues,
                         title: nameResolutionTitle,
                         selectedClueSignature: selectedClueSignature(clues, primaryClues),
+                        listingKind,
                     };
-                    if (shouldResolveNameBeforeExactSearch(structuredCard, nameResolutionOptions)) {
+                    if (
+                        !shouldDeferChipSearchForListingScan(listingScanPromise, structuredCard, listingKind, { preferChipSearch }) &&
+                        shouldResolveNameBeforeExactSearch(structuredCard, nameResolutionOptions)
+                    ) {
                         const promotedResolution = await promoteStructuredNameFromCardvaultTitle(
                             nameResolutionTitle,
                             structuredCard,
@@ -5530,12 +9096,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             exactFastPath = hasExactSearchFastPath(structuredCard);
                         }
                     }
-                    if (exactFastPath) {
+                    if (!shouldDeferChipSearchForListingScan(listingScanPromise, structuredCard, listingKind, { preferChipSearch }) && exactFastPath) {
                         searchResult = await searchExtensionCard(structuredCard);
                         rows = searchResult.rows;
                     }
 
-                    if (rows.length === 0 || (exactIdentity && !hasGoodEnoughExactRows(rows, structuredCard))) {
+                    if (!shouldDeferChipSearchForListingScan(listingScanPromise, structuredCard, listingKind, { preferChipSearch }) && (rows.length === 0 || (exactIdentity && !hasGoodEnoughExactRows(rows, structuredCard)))) {
                         if (shouldUseCollectorFirstRecovery(structuredCard)) {
                             try {
                                 const collectorRecovery = await searchExtensionCard(collectorOnlyStructuredCard(structuredCard));
@@ -5548,14 +9114,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             }
                         }
                         const structuredContext = isCardmarketUrl(requestUrl) ? structuredCard : null;
-                        const nameResolution = preExactNameResolution?.name
-                            ? preExactNameResolution
-                            : await resolveNameFromCardvaultTitle(
-                                nameResolutionTitle,
-                                structuredContext || structuredCard,
-                                nameResolutionOptions
-                            );
-                        if (shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
+                        const nameResolution = (typeof shouldSkipAlbumSpeciesCollapse === 'function' && shouldSkipAlbumSpeciesCollapse(listingKind))
+                            ? { name: '' }
+                            : (preExactNameResolution?.name
+                                ? preExactNameResolution
+                                : await resolveNameFromCardvaultTitle(
+                                    nameResolutionTitle,
+                                    structuredContext || structuredCard,
+                                    nameResolutionOptions
+                                ));
+                        if (nameResolution.name && shouldUseResolvedCardName(nameResolution.name, structuredCard)) {
                             structuredCard.name = nameResolution.name;
                             structuredCard.searchName = searchNameWithVariation(nameResolution.name, structuredCard.variation || '');
                         }
@@ -5565,7 +9133,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         }
                     }
 
-                    if (shouldRunAutocompleteFallback(rows, structuredCard)) {
+                    if (!shouldDeferChipSearchForListingScan(listingScanPromise, structuredCard, listingKind, { preferChipSearch }) && shouldRunAutocompleteFallback(rows, structuredCard)) {
                         try {
                             const fallbackSearch = exactIdentity
                                 ? await searchCardvaultForStructuredCard(title, structuredCard)
@@ -5579,6 +9147,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         }
                     }
 
+                    rows = await enrichRowsWithPokoinVersionSets(rows);
                     const legacyRows = rows.map(legacyResultFromRow);
                     void schedulePriceEnrichment(rows);
                     if (isCardmarketUrl(requestUrl) && legacyRows.length > 0) {
@@ -5598,10 +9167,64 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             console.warn('⚠️ [Background] Cardmarket observation failed:', error);
                         });
                     }
-                    return legacyRows;
+                    return {
+                        legacyRows,
+                        listingScanPromise,
+                        rows,
+                        structuredCard,
+                        listingKind,
+                    };
                 })
-                .then((results) => {
+                .then((payload) => {
+                    const results = Array.isArray(payload) ? payload : payload.legacyRows;
                     recentSearchCacheSet(backgroundSearchResultCache, recentSearchKey, results);
+                    if (!Array.isArray(payload) && payload.listingScanPromise) {
+                        followThroughListingScan(payload.listingScanPromise, {
+                            initialRows: payload.rows,
+                            structuredCard: payload.structuredCard,
+                            listingKind: payload.listingKind,
+                            onMerged: async (merged) => {
+                                merged.rows = await enrichRowsWithPokoinVersionSets(merged.rows);
+                                merged.overlayRows = await enrichRowsWithPokoinVersionSets(merged.overlayRows);
+                                const mergedLegacy = merged.rows.map(legacyResultFromRow);
+                                const overlayLegacy = (Array.isArray(merged.overlayRows) ? merged.overlayRows : [])
+                                    .map(legacyResultFromRow);
+                                recentSearchCacheSet(backgroundSearchResultCache, recentSearchKey, overlayLegacy);
+                                void recordExtensionDebugEvent('background.listing-scan-merged', {
+                                    source: marketplacePayload?.source || safeUrlHostname(requestUrl) || 'marketplace',
+                                    url: requestUrl,
+                                    listingKey: marketplacePayload?.listingKey || '',
+                                    searchSignature,
+                                    rowCount: mergedLegacy.length,
+                                    overlayRowCount: overlayLegacy.length,
+                                    uniqueHitCount: merged.listingScan?.uniqueHitCount || 0,
+                                    hits: (merged.listingScan?.uniqueHits || []).map((hit) => ({
+                                        name: hit.name || '',
+                                        collector: hit.collector_number || '',
+                                        score: Number(hit.score) || 0,
+                                    })),
+                                });
+                                if (tab?.id && typeof chrome.tabs?.sendMessage === 'function') {
+                                    try {
+                                        await chrome.tabs.sendMessage(tab.id, {
+                                            action: 'pokoinListingScanMerged',
+                                            url: requestUrl,
+                                            listingKey: marketplacePayload?.listingKey || '',
+                                            searchSignature,
+                                            results: overlayLegacy,
+                                            listingKind: merged.listingKind || '',
+                                        });
+                                    } catch (notifyError) {
+                                        void recordExtensionDebugEvent('background.listing-scan-notify-failed', {
+                                            url: requestUrl,
+                                            error: notifyError.message || String(notifyError || ''),
+                                        });
+                                    }
+                                }
+                                await commitOverlayScanRowsToSidePanel(tab, requestUrl, merged);
+                            },
+                        });
+                    }
                     void recordExtensionDebugEvent('background.search-complete', {
                         source: marketplacePayload?.source || safeUrlHostname(requestUrl) || 'marketplace',
                         url: requestUrl,
@@ -5626,6 +9249,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to search card.' }));
             })
             .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to initialize runtime state.' }));
+    } else if (request.action === 'ensureSidePanelOpen') {
+        const senderTab = sender.tab;
+        if (!senderTab?.id) {
+            sendResponse({ success: false, error: 'No sender tab found.' });
+            return false;
+        }
+        const openPromise = chrome.sidePanel?.open
+            ? chrome.sidePanel.open({ tabId: senderTab.id })
+            : Promise.resolve();
+        Promise.resolve(openPromise)
+            .then(() => {
+                markPokoinSidePanelOpened({ tabId: senderTab.id, windowId: senderTab.windowId });
+                sendResponse({ success: true });
+            })
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to open side panel.' }));
+        return true;
     } else if (request.action === 'openSidePanelForCurrentTab') {
         const senderTab = sender.tab;
         if (!senderTab?.id) {
@@ -5669,6 +9308,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 });
                 openOwner = owner;
                 await openSidePanelPromise;
+                if (isVintedIdlePageUrl(currentUrl)) {
+                    return setVintedIdlePageState({
+                        ...tab,
+                        id: senderTab.id,
+                        url: currentUrl,
+                        title: currentTitle,
+                    }, 'open-vinted-idle', owner);
+                }
                 const marketplacePayload = normalizeMarketplacePayload(request.vintedPayload || request.ebayPayload || request.marketplacePayload);
                 const isSelectedOverlayOpen = ['vinted', 'ebay'].includes(marketplacePayload?.source) && marketplacePayload.selectedClues?.length > 0;
                 const requestClues = marketplacePayload?.selectedClues || normalizeRequestClues(request.selectedClues || request.clues);
@@ -5708,7 +9355,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         id: senderTab.id,
                         url: currentUrl || tab.url || senderTab.url || '',
                         title: request.title || currentTitle || tab.title || '',
-                    }, recentVintedCanonical, owner, { reason: 'open-recent-vinted-cache' });
+                    }, canonicalWithOverlayView(recentVintedCanonical, request, selectedCandidateRow, previewRows), owner, { reason: 'open-recent-vinted-cache' });
                 }
                 if (
                     recentEbayCanonical?.previewRows?.length > 0 &&
@@ -5719,13 +9366,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         id: senderTab.id,
                         url: currentUrl || tab.url || senderTab.url || '',
                         title: request.title || currentTitle || tab.title || '',
-                    }, recentEbayCanonical, owner, { reason: 'open-recent-ebay-cache' });
+                    }, canonicalWithOverlayView(recentEbayCanonical, request, selectedCandidateRow, previewRows), owner, { reason: 'open-recent-ebay-cache' });
                 }
                 if (vintedCanonical) {
-                    rememberVintedCanonicalPreview({
-                        ...vintedCanonical,
-                        selectedCandidateId: selectedCandidateRow?.card_id || vintedCanonical.selectedCandidateId || '',
-                    });
+                    rememberVintedCanonicalPreview(canonicalWithOverlayView(
+                        vintedCanonical,
+                        request,
+                        selectedCandidateRow,
+                        previewRows
+                    ));
                 }
                 const ebayCanonical = ebayCanonicalFromRequest(request, {
                     ...tab,
@@ -5733,10 +9382,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     url: currentUrl || tab.url || senderTab.url || '',
                 });
                 if (ebayCanonical?.previewRows?.length > 0) {
-                    rememberEbayCanonicalPreview({
-                        ...ebayCanonical,
-                        selectedCandidateId: selectedCandidateRow?.card_id || ebayCanonical.selectedCandidateId || '',
-                    });
+                    rememberEbayCanonicalPreview(canonicalWithOverlayView(
+                        ebayCanonical,
+                        request,
+                        selectedCandidateRow,
+                        previewRows
+                    ));
                 }
                 if (directCardTraderBlueprintId) {
                     const cachedDirectState = !request.forceRefresh
@@ -5756,11 +9407,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         }, cachedDirectState, owner, { reason: 'open-cardtrader-direct-cache' });
                     }
                     const directName = cleanCardTraderDirectName(currentTitle, currentUrl, directCardTraderBlueprintId);
+                    const directPublicId = await resolvePokoinPublicIdFromCardTrader({
+                        blueprintId: directCardTraderBlueprintId,
+                        url: currentUrl,
+                        title: directName,
+                    });
+                    const directPokoinUrl = cardTraderDirectPokoinUrl(directCardTraderBlueprintId, directPublicId);
                     const directRow = {
                         card_id: directCardTraderBlueprintId,
                         name: directName,
                         source: 'cardtrader_url',
                         search_rank: 999999,
+                        canonicalUrl: directPokoinUrl,
                     };
                     const directResult = {
                         pageInfo: {
@@ -5778,7 +9436,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         rows: [directRow],
                         best: directRow,
                         blueprintId: String(directCardTraderBlueprintId),
-                        pokoinUrl: sidePanelStatePokoinUrl(directRow),
+                        pokoinUrl: directPokoinUrl,
                         error: '',
                         debug: {
                             version: 2,
@@ -5840,6 +9498,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             rowCount: 1,
                             bestId: String(selectedCandidateRow.card_id),
                             selectedCandidateId: String(selectedCandidateRow.card_id),
+                            openPokoinDesk: false,
                             error: '',
                         },
                     };
@@ -5851,8 +9510,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     return selectedResult;
                 }
                 if (previewRows.length > 0) {
-                    const selectedPreviewRow = selectedCandidateRow
-                        ? previewRows.find((row) => String(row.card_id) === String(selectedCandidateRow.card_id)) || selectedCandidateRow
+                    const desk = overlayDeskFlags({
+                        selectedCandidateId: selectedCandidateRow?.card_id || '',
+                        openAllCards: request.openAllCards,
+                    });
+                    const selectedPreviewRow = desk.selectedCandidateId
+                        ? previewRows.find((row) => String(row.card_id) === String(desk.selectedCandidateId)) || selectedCandidateRow
                         : null;
                     const bestPreviewRow = selectedPreviewRow || previewRows[0];
                     const orderedPreviewRows = previewRows;
@@ -5870,7 +9533,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             ebayPayload: marketplacePayload?.source === 'ebay' ? marketplacePayload : null,
                             marketplacePayload,
                             previewSignature: request.previewSignature || '',
-                            selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
+                            selectedCandidateId: desk.selectedCandidateId,
                             selectionRevision: Number(request.selectionRevision || 0),
                         },
                         rows: orderedPreviewRows,
@@ -5891,7 +9554,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                             searched: false,
                             rowCount: orderedPreviewRows.length,
                             bestId: String(bestPreviewRow.card_id),
-                            selectedCandidateId: selectedCandidateRow?.card_id ? String(selectedCandidateRow.card_id) : '',
+                            selectedCandidateId: desk.selectedCandidateId,
+                            openAllCards: desk.openAllCards,
+                            openPokoinDesk: desk.openPokoinDesk,
                             pinnedPreviewRows: true,
                             pinnedVintedPreview: request.previewSource === 'vinted_overlay' || /^vinted\|/.test(request.previewSignature || ''),
                             pinnedEbayPreview: request.previewSource === 'ebay_overlay' || /^ebay\|/.test(request.previewSignature || ''),
@@ -5911,32 +9576,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         ...previewResult,
                     }, owner);
                     void schedulePriceEnrichment(orderedPreviewRows, async (enrichedRows) => {
-                        if (!isSidePanelOwnerCurrent(owner, currentUrl)) {
-                            markStaleSidePanelOwner(owner, 'preview price enrichment owner no longer current');
-                            return enrichedRows;
-                        }
-                        const { sidePanelState: currentSidePanelState } = await chrome.storage.session.get('sidePanelState');
-                        if (
-                            !currentSidePanelState?.debug?.pinnedPreviewRows ||
-                            !sameUrlWithoutHash(currentSidePanelState.pageInfo?.url || '', currentUrl) ||
-                            String(currentSidePanelState.blueprintId || '') !== String(bestPreviewRow.card_id || '')
-                        ) {
-                            return enrichedRows;
-                        }
-                        const enrichedBest = enrichedRows.find((row) => String(row.card_id) === String(bestPreviewRow.card_id)) || enrichedRows[0] || null;
-                        await setSidePanelState({
-                            updatedAt: Date.now(),
-                            ...previewResult,
-                            rows: enrichedRows,
-                            best: enrichedBest,
-                            blueprintId: enrichedBest?.card_id ? String(enrichedBest.card_id) : '',
-                            pokoinUrl: sidePanelStatePokoinUrl(enrichedBest),
-                            debug: {
-                                ...previewResult.debug,
-                                priceEnriched: true,
-                            },
-                        }, owner);
-                        return enrichedRows;
+                        return applyEnrichedPokoinPricesToSidePanel(enrichedRows, currentUrl);
                     });
                     return previewResult;
                 }
@@ -6007,6 +9647,22 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 }
                 sendResponse({ success: false, error: error.message || 'Unable to open side panel.' });
             });
+    } else if (request.action === 'vintedIdlePage') {
+        const tab = sender.tab;
+        const url = request.url || tab?.url || '';
+        if (!isVintedIdlePageUrl(url)) {
+            sendResponse({ success: true, ignored: true });
+            return true;
+        }
+        const idleTab = {
+            ...(tab || {}),
+            url,
+        };
+        const owner = createSidePanelRequestOwner(idleTab, 'content-vinted-idle');
+        setVintedIdlePageState(idleTab, 'content-vinted-idle', owner)
+            .then(() => sendResponse({ success: true, idle: true }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Unable to idle Vinted page.' }));
+        return true;
     } else if (request.action === 'marketplaceNavigationChanged') {
         const tab = sender.tab;
         scheduleSidePanelRefresh(tab, 'content-navigation')
@@ -6043,8 +9699,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     previewRowCount: canonicalRequest?.previewRows?.length || 0,
                     tokensReady: Boolean(request.tokensReady),
                 });
-                if (!canonical || !hasPreviewRows) {
+                if (!canonical) {
                     return { success: true, ignored: true, reason: 'missing-ebay-canonical-preview' };
+                }
+                const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
+                if (sidePanelOwnedByOtherTab(sidePanelState, currentUrl, senderTab)) {
+                    return { success: true, ignored: true, reason: 'side-panel-owned-by-other-url' };
                 }
                 const canonicalTab = {
                     ...currentTab,
@@ -6052,19 +9712,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     url: currentUrl,
                     title: request.title || currentTab.title || '',
                 };
+                if (!hasPreviewRows && request.tokensReady) {
+                    const owner = createSidePanelRequestOwner(canonicalTab, 'ebay-tokens-ready');
+                    await writeEbayTokensStage(canonicalTab, canonical, owner);
+                    const result = await resolveEbayCanonicalTokensForSidePanel(canonicalTab, canonical, owner, {
+                        reason: 'ebay-tokens-chip-search',
+                        forceRefresh: true,
+                        skipListingScan: Boolean(request.skipListingScan),
+                        forceListingScan: Boolean(request.forceListingScan),
+                    });
+                    return { success: true, result, reason: 'ebay-tokens-chip-search' };
+                }
+                if (!hasPreviewRows) {
+                    return { success: true, ignored: true, reason: 'missing-ebay-canonical-preview' };
+                }
                 const applyKey = !request.forceRefresh ? ebayCanonicalApplyKey(canonicalTab, canonical) : '';
                 if (applyKey && ebayCanonicalApplyInFlight.has(applyKey)) {
                     return ebayCanonicalApplyInFlight.get(applyKey)
                         .then((result) => ({ success: true, result }));
-                }
-                const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
-                const sidePanelUrl = sidePanelState?.pageInfo?.url || '';
-                if (
-                    sidePanelUrl &&
-                    !sameUrlWithoutHash(sidePanelUrl, currentUrl) &&
-                    isSupportedMarketplaceUrl(sidePanelUrl)
-                ) {
-                    return { success: true, ignored: true, reason: 'side-panel-owned-by-other-url' };
                 }
                 const owner = createSidePanelRequestOwner(canonicalTab, 'ebay-preview-ready');
                 const applyPromise = applyEbayCanonicalToSidePanel(canonicalTab, canonical, owner, {
@@ -6095,14 +9760,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                 if (!isVintedUrl(currentUrl) || !sameUrlWithoutHash(currentUrl, currentTab.url || currentUrl)) {
                     return { success: true, ignored: true, reason: 'stale-vinted-preview-url' };
                 }
+                if (isVintedIdlePageUrl(currentUrl)) {
+                    const idleTab = {
+                        ...currentTab,
+                        id: senderTab.id,
+                        url: currentUrl,
+                    };
+                    const owner = createSidePanelRequestOwner(idleTab, 'vinted-idle-page');
+                    await setVintedIdlePageState(idleTab, 'vinted-preview-on-idle-page', owner);
+                    return { success: true, idle: true, reason: 'vinted-idle-page' };
+                }
                 const canonicalRequest = vintedCanonicalFromRequest(request, {
                     ...currentTab,
                     id: senderTab.id,
                     url: currentUrl,
                 });
+                const previousCanonical = latestVintedCanonicalPreview({
+                    ...currentTab,
+                    id: senderTab.id,
+                    url: currentUrl,
+                });
+                const previousImageCount = typeof uniqueListingImageUrls === 'function'
+                    ? uniqueListingImageUrls(previousCanonical?.vintedPayload?.listingImageUrls || []).length
+                    : (previousCanonical?.vintedPayload?.listingImageUrls || []).length;
+                const nextImageCount = typeof uniqueListingImageUrls === 'function'
+                    ? uniqueListingImageUrls(canonicalRequest?.vintedPayload?.listingImageUrls || []).length
+                    : (canonicalRequest?.vintedPayload?.listingImageUrls || []).length;
+                const galleryGrew = nextImageCount > previousImageCount;
                 const hasPreviewRows = canonicalRequest?.previewRows?.length > 0;
+                const canonicalReady = vintedCanonicalReadyForAnalysis(canonicalRequest);
                 const canonical = rememberVintedCanonicalPreview(canonicalRequest, {
-                    clearWaitTimer: hasPreviewRows,
+                    clearWaitTimer: hasPreviewRows || canonicalReady,
                 });
                 void recordExtensionDebugEvent('preview.ready', {
                     source: 'vinted',
@@ -6113,12 +9801,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                     selectedClues: request.selectedClues || request.clues || [],
                     previewRowCount: canonicalRequest?.previewRows?.length || 0,
                     tokensReady: Boolean(request.tokensReady),
+                    imageCount: nextImageCount,
+                    previousImageCount,
+                    galleryGrew,
                 });
                 if (!canonical) {
                     return { success: true, ignored: true, reason: 'missing-vinted-canonical-preview' };
                 }
                 if (!hasPreviewRows && request.tokensReady) {
-                    return { success: true, deferred: true, reason: 'awaiting-vinted-preview-rows' };
+                    if (!canonicalReady) {
+                        void recordExtensionDebugEvent('preview.incomplete', {
+                            source: 'vinted',
+                            url: currentUrl,
+                            listingKey: request.listingKey || '',
+                            reason: 'generic-or-empty-title-before-listing-gallery',
+                            imageCount: canonical?.vintedPayload?.listingImageUrls?.length || 0,
+                        });
+                        return { success: true, ignored: true, reason: 'awaiting-vinted-gallery' };
+                    }
+                    const canonicalTab = {
+                        ...currentTab,
+                        id: senderTab.id,
+                        url: currentUrl,
+                        title: request.title || currentTab.title || '',
+                    };
+                    const owner = createSidePanelRequestOwner(canonicalTab, galleryGrew ? 'vinted-gallery-grown' : 'vinted-tokens-ready');
+                    await writeVintedTokensStage(canonicalTab, canonical, owner);
+                    const result = await resolveVintedCanonicalTokensForSidePanel(canonicalTab, canonical, owner, {
+                        reason: galleryGrew ? 'vinted-listing-gallery-grown' : 'vinted-tokens-chip-search',
+                        forceRefresh: true,
+                        skipListingScan: Boolean(request.skipListingScan) && !galleryGrew,
+                        forceListingScan: Boolean(request.forceListingScan) || galleryGrew,
+                    });
+                    return { success: true, result, reason: galleryGrew ? 'vinted-listing-gallery-grown' : 'vinted-tokens-chip-search' };
                 }
                 const canonicalTab = {
                     ...currentTab,
@@ -6132,12 +9847,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
                         .then((result) => ({ success: true, result }));
                 }
                 const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
-                const sidePanelUrl = sidePanelState?.pageInfo?.url || '';
-                if (
-                    sidePanelUrl &&
-                    !sameUrlWithoutHash(sidePanelUrl, currentUrl) &&
-                    isSupportedMarketplaceUrl(sidePanelUrl)
-                ) {
+                if (sidePanelOwnedByOtherTab(sidePanelState, currentUrl, senderTab)) {
                     return { success: true, ignored: true, reason: 'side-panel-owned-by-other-url' };
                 }
                 const owner = createSidePanelRequestOwner(canonicalTab, 'vinted-preview-ready');
@@ -6163,21 +9873,106 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (!changeInfo.url && changeInfo.status !== 'complete') {
         return;
     }
+    if (isSupportedMarketplaceUrl(tab?.url || '')) {
+        void warmOnDeviceScanner();
+    }
     scheduleSidePanelRefresh(tab, changeInfo.url ? 'tab-url' : 'tab-complete');
 });
 
 chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     try {
         const tab = await chrome.tabs.get(tabId);
+        if (isSupportedMarketplaceUrl(tab?.url || '')) {
+            void warmOnDeviceScanner();
+        }
         await scheduleSidePanelRefresh(tab, 'activated');
     } catch (error) {
         console.warn('⚠️ [Background] Unable to refresh after tab activation:', error);
     }
 });
 
+chrome.tabs.onRemoved?.addListener?.((tabId) => {
+    if (!openSidePanelTabIds.delete(tabId)) {
+        return;
+    }
+    lastAutoAnalyzedVintedUrlByTab.delete(tabId);
+    void persistPokoinSidePanelOpenState();
+});
+
+// onOpened/onClosed only exist in recent Chrome versions. The side-panel
+// document also keeps a port registered so navigation auto-analysis works on
+// older Chrome releases and after a service-worker restart.
+if (chrome.runtime?.onConnect?.addListener) {
+    chrome.runtime.onConnect.addListener((port) => {
+        if (port?.name !== 'pokoin-side-panel-lifecycle') {
+            return;
+        }
+        sidePanelLifecyclePorts.set(port, {});
+        port.onMessage?.addListener?.((message = {}) => {
+            if (message.action !== 'registerSidePanelLifecycle') {
+                return;
+            }
+            const changed = registerPokoinSidePanelLifecyclePort(port, message);
+            if (!changed || !Number.isInteger(message.tabId)) {
+                return;
+            }
+            void chrome.tabs.get(message.tabId)
+                .then(async (tab) => {
+                    await autoAnalyzeOpenVintedSidePanel(tab, 'side-panel-lifecycle');
+                    await autoAnalyzeOpenCardmarketSidePanel(tab, 'side-panel-lifecycle');
+                })
+                .catch(() => {});
+        });
+        port.onDisconnect?.addListener?.(() => {
+            forgetPokoinSidePanelLifecyclePort(port);
+        });
+    });
+}
+
+if (chrome.sidePanel?.onOpened?.addListener) {
+    chrome.sidePanel.onOpened.addListener((info = {}) => {
+        markPokoinSidePanelOpened(info);
+        void recordExtensionDebugEvent('side-panel.opened', {
+            tabId: info.tabId ?? null,
+            windowId: info.windowId ?? null,
+            path: info.path || '',
+        });
+        void (async () => {
+            const tab = Number.isInteger(info.tabId)
+                ? await chrome.tabs.get(info.tabId).catch(() => null)
+                : (await chrome.tabs.query({ active: true, windowId: info.windowId })).find(Boolean);
+            if (tab && isVintedUrl(tab.url || '')) {
+                await autoAnalyzeOpenVintedSidePanel(tab, 'side-panel-opened');
+            } else if (tab && isCardmarketUrl(tab.url || '')) {
+                await autoAnalyzeOpenCardmarketSidePanel(tab, 'side-panel-opened');
+            }
+        })().catch((error) => {
+            void recordExtensionDebugEvent('side-panel.open-analysis-failed', {
+                tabId: info.tabId ?? null,
+                windowId: info.windowId ?? null,
+                error: error.message || String(error || ''),
+            });
+        });
+    });
+}
+
+if (chrome.sidePanel?.onClosed?.addListener) {
+    chrome.sidePanel.onClosed.addListener((info = {}) => {
+        markPokoinSidePanelClosed(info);
+        void recordExtensionDebugEvent('side-panel.closed', {
+            tabId: info.tabId ?? null,
+            windowId: info.windowId ?? null,
+            path: info.path || '',
+        });
+    });
+}
+
 chrome.action.onClicked.addListener(async (tab) => {
     const owner = createSidePanelRequestOwner(tab, 'action-click');
     try {
+        if (isSupportedMarketplaceUrl(tab?.url || '')) {
+            void warmOnDeviceScanner();
+        }
         if (chrome.sidePanel?.setOptions && tab?.id) {
             await chrome.sidePanel.setOptions({
                 tabId: tab.id,
@@ -6190,14 +9985,20 @@ chrome.action.onClicked.addListener(async (tab) => {
             await chrome.sidePanel.open({ tabId: tab.id });
         }
 
+        markPokoinSidePanelOpened({ tabId: tab.id, windowId: tab.windowId });
+
         const { sidePanelState } = await chrome.storage.session.get('sidePanelState');
         if (isVintedUrl(tab?.url || '')) {
-            const canonical = latestVintedCanonicalPreview(tab, sidePanelState);
-            if (canonical?.vintedPayload || canonical?.previewRows?.length > 0) {
-                await applyVintedCanonicalToSidePanel(tab, canonical, owner, { reason: 'action-click' });
+            if (isVintedIdlePageUrl(tab?.url || '')) {
+                await setVintedIdlePageState(tab, 'action-click-vinted-idle', owner);
                 return;
             }
-            await setVintedWaitingForPreviewState(tab, 'action-click-awaiting-vinted-preview', owner);
+            await autoAnalyzeOpenVintedSidePanel(tab, 'action-click-open-panel');
+            return;
+        }
+
+        if (isCardmarketUrl(tab?.url || '')) {
+            await autoAnalyzeOpenCardmarketSidePanel(tab, 'action-click-open-panel');
             return;
         }
 
@@ -6274,6 +10075,7 @@ chrome.action.onClicked.addListener(async (tab) => {
 // Initialization
 chrome.runtime.onInstalled.addListener(() => {
     console.log('🃏 Pokemon Card Trader Linker - Extension installed');
+    void recordExtensionDebugEvent('background.installed', { extensionVersion: EXTENSION_VERSION });
     updateIcon('default');
     if (chrome.sidePanel?.setPanelBehavior) {
         chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
@@ -6283,5 +10085,11 @@ chrome.runtime.onInstalled.addListener(() => {
 // Startup hook
 chrome.runtime.onStartup.addListener(() => {
     console.log('🃏 Pokemon Card Trader Linker - Extension started');
+    void recordExtensionDebugEvent('background.browser-startup', { extensionVersion: EXTENSION_VERSION });
     updateIcon('default');
 }); 
+
+void recordExtensionDebugEvent('background.worker-start', {
+    extensionVersion: EXTENSION_VERSION,
+    startedAt: Date.now(),
+});

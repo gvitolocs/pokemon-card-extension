@@ -166,6 +166,8 @@ class TitleExtractor {
             'porygon-z': 'porygon-z',
             'porygon z': 'porygon-z',
             'porygonz': 'porygon-z',
+            'porygon 2': 'porygon2',
+            'porygon-2': 'porygon2',
             'ho-oh': 'ho-oh',
             'ho oh': 'ho-oh',
             'hooh': 'ho-oh',
@@ -211,7 +213,7 @@ class TitleExtractor {
             'rhyhorn', 'rhydon', 'chansey', 'tangela', 'kangaskhan', 'horsea', 'seadra',
             'goldeen', 'seaking', 'staryu', 'starmie', 'mr. mime', 'scyther', 'jynx',
             'electabuzz', 'magmar', 'pinsir', 'tauros', 'magikarp', 'gyarados', 'lapras',
-            'ditto', 'vaporeon', 'jolteon', 'flareon', 'omanyte', 'omastar', 'kabuto', 'kabutops',
+            'lapras', 'ditto', 'porygon', 'porygon2', 'vaporeon', 'jolteon', 'flareon', 'omanyte', 'omastar', 'kabuto', 'kabutops',
             'aerodactyl', 'snorlax', 'articuno', 'zapdos', 'moltres', 'dratini', 'dragonair', 'dragonite',
             'mewtwo', 'mew'
         ];
@@ -232,7 +234,8 @@ class TitleExtractor {
 
         // If not found in special cases, scan general list
         if (!pokemonName) {
-            for (const name of pokemonNames) {
+            const namesByLength = [...pokemonNames].sort((left, right) => right.length - left.length);
+            for (const name of namesByLength) {
                 if (titleLower.includes(name)) {
                     pokemonName = name;
                     break;

@@ -37,25 +37,11 @@ class ExtensionCore {
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
                 console.log('⚡ [CardTrader] DOM loaded, restarting observer...');
-                // Trigger event to restart observer
                 document.dispatchEvent(new CustomEvent('cardtrader-dom-ready'));
             });
         }
         
-        // Backup: check every 50ms for new elements
-        const checkInterval = setInterval(() => {
-            if (document.body) {
-                console.log('⚡ [CardTrader] Periodic check - starting observer...');
-                document.dispatchEvent(new CustomEvent('cardtrader-check-periodic'));
-            }
-        }, 50);
-        
-        // Stop periodic checks after 5 seconds
-        setTimeout(() => {
-            clearInterval(checkInterval);
-        }, 5000);
-        
-        // Final backup: force start after 200ms
+        // One-shot backup if the first pass raced DOM construction
         setTimeout(() => {
             console.log('⚡ [CardTrader] Final forced observer start...');
             document.dispatchEvent(new CustomEvent('cardtrader-force-start'));

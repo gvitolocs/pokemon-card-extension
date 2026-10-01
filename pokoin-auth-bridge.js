@@ -45,6 +45,8 @@
             token: data.token,
             expiresAt: data.expiresAt || data.expirationTime || null,
             issuedAt: data.issuedAt || null,
+            uid: data.uid || '',
+            email: data.email || '',
         };
     }
 

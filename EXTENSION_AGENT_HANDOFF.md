@@ -15,24 +15,6 @@ The extension is now centered on a selected-key-first workflow:
 
 ## Recent Extension Changes
 
-- **12.0.33 desk postMessage:** Do not `allow="popups"`. Do not `postMessage(..., 'https://pokoin.com')` into an empty iframe (that is the side panel origin). Inject the Firebase session only after the iframe has navigated to pokoin.com, with target origin `*`.
-- **12.0.32 CT/CM/VT new tab:** Best Deal pills in the credentialless desk iframe cannot `window.open`. MAIN-world `pokoin-desk-embed.js` captures CT/CM/VT clicks and the service worker opens `chrome.tabs.create`. Even Pokoin `public_id` maps to CardTrader `ct_id = public_id / 2` with no apex API.
-- **12.0.31 all listing photos:** Auto-identify crops each visible gallery img from the tab screenshot and fetches the rest of the listing URLs, then album-merges uniqueHits. Scan tab stays a viewport screenshot; auto now runs on every listing photo instead of singles top1.
-- **12.0.30 listing photo fetch in the service worker:** Auto listing identify was empty while Scan tab worked. Offscreen is COEP `require-corp`; Vinted CDN photos have no CORP/ACAO, so `fetch(imageUrl)` there returns nothing. The worker now fetches listing JPEGs/WebPs and posts JSON-safe `{base64,type}` into offscreen, same wire format as Scan tab.
-- **12.0.29 Vinted every country + framed desk:** Overlay/content scripts include vinted.dk and the other country marketplaces. CardTrader leftover JPEG `{ct_id}_` confirms the Pokoin public_id. Iframe URLs add `pokoin_embed=1`. pokoin-web must be deployed so the framed desk uses in-memory Firebase, Firestore REST, api.pokoin.com, and never swaps the card for WorkingOnIt.
-- **12.0.28 CardTrader desk iframe paint:** Clicking Pokoin.com on a CardTrader card unhides the side-panel iframe before assigning `src`. Navigating a `display:none` credentialless iframe left the panel black after the button click.
-- **12.0.27 CardTrader Scan tab + Cardmarket singles autoscan:** Scan tab reads visible photos on CardTrader and Cardmarket from the page MAIN world when `captureVisibleTab` still wants `all_urls` or `activeTab`. Cardmarket product URLs under `/Products/Singles/{expansion}/{card}` send listing photos for on-device identify when the side panel is open. Expansion-only and catalog Singles URLs do not auto-identify.
-- **12.0.26 listing gallery auto-scan:** Open-panel identify uses this listing’s `__NEXT_DATA__` photos (not related-item JSON) and re-runs when more gallery imgs appear after the first og:image/thumb pass. A later 1-photo scan cannot replace a fuller gallery result.
-- **12.0.25 desk session + Scan tab keep + abort no-retry:** The in-panel Pokoin desk stays credentialless (COEP). The side panel and `pokoin-desk-session.js` post the stored Firebase ID token + uid into that iframe. pokoin-web must be deployed so `AuthProvider` keeps that injected session when Firebase user is null. Scan tab viewport rows are not replaced by later listing identify on the same URL. `single-top1-fill` requires score ≥ 0.65. Cardvault `AbortError` is not retried.
-- **12.0.24 Desktop drop:** Same Scan tab host set as 12.0.23. Mac Load unpacked folder is `~/Desktop/pokemon-card-extension-12.0.24` (copied through Pi).
-- **12.0.23 marketplace Scan tab:** No `<all_urls>`. Scan tab works on Vinted, eBay, Instagram, and Facebook by reading visible photos when Chrome still blocks `captureVisibleTab` from a side-panel click.
-- **12.0.22 leftover JP from live version-set:** Album EN/JP/CN buttons keep `GET /api/marketplace-version-set` packs. Bundled `print-langs.json` no longer wipes a JP sibling the overlay already showed.
-- **12.0.21 card-back catalog + no zombie second tile:** Bundled Pokemon Card Back Milo rows; ignore them like Blank Filler. Front+back singles stay one card. Late listing-scan / last-median hops must not add a second leftover tile.
-- **12.0.20 in-panel Pokoin desk:** One leftover match, a selected overlay row, and CardTrader pages iframe the western EN Pokoin desk inside the side panel. Never leftover-embed. Never auto-open a Pokoin tab. Overlay ALL with two or more tiles stays the art-cut grid. `pokoin-origin` allows `chrome-extension:` framing.
-- **12.0.16 open-panel auto-scan:** Vinted listing scan starts when the side panel is open, even if the overlay stays collapsed. Open vs closed is persisted (`pokoin-side-panel-lifecycle`, session tab ids, local `pokoinSidePanelPreferredOpen`). Closed panel does not search on navigation.
-- **12.0.15 leftover images + scan colors:** Side-panel leftover/CDN art uses `crossorigin=anonymous` under COEP `require-corp`. Overlay Pokoin button is red while scanning and green when results are ready; unmatched stays muted blue.
-- **12.0.7 screenshot permission + Milo evidence:** The side-panel screenshot action requests only the current marketplace origin when Chrome has withheld site access, then retries capture from the same user gesture. Visible-tab and listing rows use the requested 0.65 display floor, while diagnostics retain Milo's top-eight candidates per detected box—including below-threshold alternatives.
-- **12.0.6 user-gated Vinted analysis:** Navigation and opening the panel no longer start the Vinted overlay request or its failure timer. Before the user starts analysis, the panel says `Ready to analyze` and exposes both `Load listing information` and `Analyze Chrome tab screenshot`; loading and timeout states are reserved for an in-flight button action.
 - **12.0.5 full local diagnostics:** The bounded, sanitized session log now keeps 1,200 events and traces scan IDs/timings, recognizer and chip-fallback candidates, side-panel commits/writes, and every render decision. Vinted forwards all processor lifecycle events so brief correct results can be compared with later overwrites without sending browsing data to a server.
 - **12.0.4 scan-first side panel:** Automatic title/chip hydration can no longer bypass the listing-photo scan. Provisional clue rows stay hidden until scan merge, and the empty panel offers explicit listing-information and Chrome-screenshot actions with accurate progress labels.
 - **12.0.3 hot scanner and direct image transport:** Supported marketplace tabs prewarm the offscreen YOLO/Milo sessions and bundled catalogue. Normal listing scans send their HTTPS image URLs to the offscreen document, which downloads them directly; JSON-safe Base64 remains only for captured screenshots and blob-only inputs.
@@ -230,11 +212,11 @@ node --test tests/extension-workflow.test.js
 
 Expected: all tests pass.
 
-When runtime files change, bump the `manifest.json` patch version first (currently `12.0.7`) so `chrome://extensions`, the overlay `Pokoin.com v…` label, and the side-panel eyebrow show a new number after Reload. Then rebuild:
+When runtime files change, bump the `manifest.json` patch version first (currently `12.0.5`) so `chrome://extensions`, the overlay `Pokoin.com v…` label, and the side-panel eyebrow show a new number after Reload. Then rebuild:
 
 ```bash
 rm -f dist/pokemon-card-extension-2.0.0.zip
-zip -r dist/pokemon-card-extension-2.0.0.zip manifest.json content.js pokoin-auth-bridge.js pokoin-desk-session.js pokoin-desk-embed.js assets icons config processors core ui data utils ui-pages scan docs README.md -x "*.DS_Store" "*/.DS_Store" "._*" "*/._*" "docs/POKOIN_AUTH_CARDMARKET_BLOCKER.md"
+zip -r dist/pokemon-card-extension-2.0.0.zip manifest.json content.js pokoin-auth-bridge.js assets icons config processors core ui data utils ui-pages scan docs README.md -x "*.DS_Store" "*/.DS_Store" "._*" "*/._*" "docs/POKOIN_AUTH_CARDMARKET_BLOCKER.md"
 node --test tests/extension-workflow.test.js
 ```
 

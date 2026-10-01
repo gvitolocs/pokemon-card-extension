@@ -1,0 +1,5 @@
+Load unpacked this folder (contains manifest.json, config/, ui-pages/).
+Version: 12.0.33
+Mac path: /Users/giuseppe/mnt/nezopt/Projects/pokemon-card-extension
+See docs/DESKTOP_RELOAD.md
+Canonical product notes: Pi Obsidian /home/nes/Obsidian/Pokoin (not Desktop).

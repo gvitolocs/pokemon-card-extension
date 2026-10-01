@@ -12,7 +12,7 @@ It is kept for context, but the active project structure is documented in:
 
 - There is no active `standalone-config.js` in this repository.
 - Runtime configuration is currently spread across `config/` and runtime logic in `content.js`.
-- Card matching is handled by Pokoin/Cardvault APIs through `content.js` and `config/background.js`.
+- Card matching is handled by Pokoin/Cardvault APIs through `config/background.js`. Leftover `content.js` search helpers that still run send `searchCardForTitle`. Dead page-origin fetch helpers are listed in `docs/LEFTOVERS.md`.
 
 ## If You Need a Fully Standalone Profile
 

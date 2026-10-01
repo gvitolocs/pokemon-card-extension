@@ -16,11 +16,16 @@ class CardmarketProcessor {
         return chrome.runtime.getURL('assets/pokoin-512.png');
     }
 
+    pokoinExtensionVersionSuffix() {
+        const version = chrome?.runtime?.getManifest?.()?.version || '';
+        return version ? ` v${version}` : '';
+    }
+
     setPokoinButtonLabel(button, matchCount = null, styles = {}) {
         const suffix = Number.isFinite(matchCount) ? ` (${matchCount})` : '';
         button.innerHTML = `
             <img src="${this.pokoinIconUrl()}" alt="" aria-hidden="true">
-            <span>Pokoin.com${suffix}</span>
+            <span>Pokoin.com${this.pokoinExtensionVersionSuffix()}${suffix}</span>
         `;
         this.applyPokoinButtonStyles(button, styles);
     }
@@ -63,6 +68,7 @@ class CardmarketProcessor {
             action: 'searchCardForTitle',
             title,
             url: window.location.href,
+            ...this.buildMarketplacePayload({ title, key: this.stableProductKey() }),
         });
         const results = response?.success && Array.isArray(response.results) ? response.results : [];
         void this.recordExtensionDebugEvent(response?.success ? 'processor.search-complete' : 'processor.search-failed', {
@@ -113,6 +119,52 @@ class CardmarketProcessor {
         }
     }
 
+    isCardmarketSinglesProductPage(url = window.location.href) {
+        if (typeof isCardmarketSinglesProductUrl === 'function') {
+            return isCardmarketSinglesProductUrl(url);
+        }
+        try {
+            const parsed = new URL(url, window.location.href);
+            if (!parsed.hostname.toLowerCase().includes('cardmarket')) {
+                return false;
+            }
+            const parts = parsed.pathname.split('/').filter(Boolean);
+            const singles = parts.findIndex((part) => /^Singles$/i.test(part));
+            return singles >= 0 && Boolean(parts[singles + 1] && parts[singles + 2]);
+        } catch (error) {
+            return /\/Products\/Singles\/[^/]+\/[^/]+/i.test(String(url || ''));
+        }
+    }
+
+    extractCardmarketListingImageUrls() {
+        if (!this.isCardmarketSinglesProductPage()) {
+            return [];
+        }
+        if (typeof extractListingImageUrlsFromDocument === 'function') {
+            return extractListingImageUrlsFromDocument(document, {
+                source: 'cardmarket',
+                pageUrl: window.location.href,
+            });
+        }
+        return [];
+    }
+
+    buildMarketplacePayload(context = {}) {
+        const listingImageUrls = this.extractCardmarketListingImageUrls();
+        const enableListingScan = this.isCardmarketSinglesProductPage();
+        return {
+            marketplacePayload: {
+                source: 'cardmarket',
+                listingKey: context.key || this.stableProductKey(),
+                originalTitle: context.title || '',
+                searchTitle: context.title || '',
+                listingKind: 'singles',
+                listingImageUrls,
+                enableListingScan,
+            },
+        };
+    }
+
     async searchProductWithBackground(context) {
         const structuredRequest = this.buildStructuredRequestContext(context);
         void this.recordExtensionDebugEvent('processor.search-start', {
@@ -120,11 +172,13 @@ class CardmarketProcessor {
             listingKey: context.key || this.stableProductKey(),
             selectedClues: structuredRequest.clues || [],
         });
+        const marketplacePayload = this.buildMarketplacePayload(context);
         const response = await chrome.runtime.sendMessage({
             action: 'searchCardForTitle',
             title: context.title,
             url: window.location.href,
             ...structuredRequest,
+            ...marketplacePayload,
             cardmarketReady: true,
         });
         const results = response?.success && Array.isArray(response.results) ? response.results : [];
@@ -141,7 +195,6 @@ class CardmarketProcessor {
     buildSidePanelPreviewRowsPayload(context = {}) {
         const rows = this.productPreviewRowsByKey.get(context.key || this.stableProductKey()) || [];
         const previewRows = rows
-            .slice(0, 8)
             .map((result) => {
                 const cardId = result.card_id || result.blueprint_id || result.cardId || result.blueprintId;
                 if (!cardId) {
@@ -182,6 +235,7 @@ class CardmarketProcessor {
             url: window.location.href,
             title: context.title,
             ...this.buildStructuredRequestContext(context),
+            ...this.buildMarketplacePayload(context),
             ...previewPayload,
             cardmarketReady: true,
         }).catch((error) => {
@@ -189,11 +243,27 @@ class CardmarketProcessor {
         });
     }
 
-    attachSidePanelClick(button) {
+    attachSidePanelClick(button, options = {}) {
+        let searchInFlight = null;
         button.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
-            this.openPokoinSidePanel();
+            const open = () => this.openPokoinSidePanel();
+            if (!options.searchOnClick) {
+                open();
+                return;
+            }
+            if (!searchInFlight) {
+                searchInFlight = this.searchCardInDatabase(options.titleInfo, options.title)
+                    .then((results) => {
+                        if (results?.length) {
+                            this.applyPokoinButtonState(button, 'matched', this.countHighConfidenceMatches(results));
+                        }
+                        return results;
+                    })
+                    .catch(() => []);
+            }
+            return Promise.resolve(searchInFlight).then(() => open());
         });
     }
 
@@ -515,6 +585,8 @@ class CardmarketProcessor {
                         targetButton.style.boxShadow = 'none';
                     });
                 }
+            }).finally(() => {
+                this.inFlightProductSearches.delete(context.key);
             });
             
             // Mark page as processed
@@ -608,7 +680,6 @@ class CardmarketProcessor {
             // Create button
             const button = document.createElement('button');
             button.setAttribute('data-pokemon-linker-button', 'true');
-            this.applyPokoinButtonState(button, 'loading');
             button.style.cssText = `
                 margin-top: 8px;
                 margin-left: 8px;
@@ -616,19 +687,17 @@ class CardmarketProcessor {
                 font-size: 17px;
                 min-width: 100px;
             `;
-            this.applyPokoinButtonState(button, 'loading');
-            this.attachSidePanelClick(button);
+            this.applyPokoinButtonState(button, 'idle');
+            this.attachSidePanelClick(button, {
+                searchOnClick: true,
+                title,
+                titleInfo,
+            });
             
             // Insert button
             const inserted = this.insertLinkContainer(listingElement, button);
             if (inserted) {
                 console.log(`✅ [CME] Added button for ${titleInfo.pokemonName || title}`);
-                
-                // Search database
-                const results = await this.searchCardInDatabase(titleInfo, title);
-                if (results && results.length > 0) {
-                    this.applyPokoinButtonState(button, 'matched', this.countHighConfidenceMatches(results));
-                }
             }
             
             listingElement.setAttribute('data-pokemon-linker-processed', 'true');
@@ -735,4 +804,43 @@ class CardmarketProcessor {
 }
 
 // Export for global usage
-window.CardmarketProcessor = CardmarketProcessor; 
+window.CardmarketProcessor = CardmarketProcessor;
+
+if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
+    chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
+        if (request?.action !== 'pokoinRequestMatchTokens') {
+            return undefined;
+        }
+        if (!String(window.location.hostname || '').includes('cardmarket')) {
+            return undefined;
+        }
+        const processor = window.cardmarketProcessor;
+        if (!processor) {
+            sendResponse?.({ success: false });
+            return false;
+        }
+        if (typeof processor.isCardmarketSinglesProductPage === 'function' && !processor.isCardmarketSinglesProductPage()) {
+            sendResponse?.({ success: true, idle: true });
+            return false;
+        }
+        const context = typeof processor.getReadyProductContext === 'function'
+            ? processor.getReadyProductContext()
+            : null;
+        if (context && typeof processor.searchProductWithBackground === 'function') {
+            if (!processor.inFlightProductSearches.has(context.key)) {
+                const searchPromise = processor.searchProductWithBackground(context);
+                processor.inFlightProductSearches.set(context.key, searchPromise);
+                searchPromise.finally(() => {
+                    processor.inFlightProductSearches.delete(context.key);
+                });
+            }
+            sendResponse?.({ success: true });
+            return false;
+        }
+        if (typeof processor.scheduleProductPageProcessing === 'function') {
+            processor.scheduleProductPageProcessing('service-worker-request');
+        }
+        sendResponse?.({ success: true });
+        return false;
+    });
+} 

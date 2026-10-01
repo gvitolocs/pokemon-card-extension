@@ -6,7 +6,10 @@ Use this folder for technical and maintenance docs:
 
 - `EXTENSION_WORKFLOW.md`: button, overlay, side-panel, and matching rules
 - `EXTENSION_AGENT_HANDOFF.md`: current runtime, APIs, auth, and remaining work
-- `INSTALLATION.md`: install and verify the extension locally
+- `LEFTOVERS.md`: unused fetch helpers, inert fallbacks, unused modules, and UI that is not in the MV3 action
+- `CURRENT_PIPELINE.md`: live identify, album vs singles, side-panel copy, versions
+- `CARDTRADER_MODEL.md`: **target product model** — JP expansion → western release of that same card; each printing keeps its own page; western embed is display-only
+- `DESKTOP_RELOAD.md`: why Chrome still shows an old version and how to Load unpacked
 - `MODULAR_STRUCTURE.md`: module boundaries and responsibilities
 - `API_INTEGRATION.md`: Pokoin/Cardvault APIs and auth-bridge token shapes
 - `POKOIN_AUTH_CARDMARKET_BLOCKER.md`: resolved Cardmarket observation postmortem plus live checklist

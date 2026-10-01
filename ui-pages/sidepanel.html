@@ -10,27 +10,39 @@
     <header class="header">
         <div class="brand">
             <img src="../assets/pokoin-512.png" alt="" class="brand-icon">
-            <div>
-                <p class="eyebrow">Pokoin match</p>
-                <h1 id="cardName">Resolving card...</h1>
-            </div>
+                <div class="brand-copy">
+                    <p class="eyebrow">Pokoin match <span id="extensionVersion" class="extension-version"></span></p>
+                    <div class="title-row">
+                        <h1 id="cardName">Pokoin match</h1>
+                        <p id="listingTotal" class="listing-total" hidden></p>
+                    </div>
+                </div>
         </div>
-        <button id="refreshBtn" type="button">Refresh</button>
+        <button id="tabScanBtn" type="button" aria-label="Scan the visible tab for cards" title="Scan visible tab">
+            <img id="tabScanPreview" alt="Current tab" hidden>
+            <span id="tabScanFallback" class="tab-scan-fallback">Scan tab</span>
+        </button>
     </header>
 
     <main class="panel">
-        <section id="status" class="status">Finding Pokoin matches...</section>
+        <section id="status" class="status" hidden></section>
+
+        <section id="emptyActions" class="empty-actions" hidden aria-label="Analyze this tab">
+            <button id="loadListingBtn" class="empty-action primary" type="button">Load listing information</button>
+            <button id="analyzeScreenshotBtn" class="empty-action" type="button">Analyze Chrome tab screenshot</button>
+        </section>
 
         <section id="candidatesSection" class="candidates" aria-label="Candidate cards" hidden>
             <div id="candidateList"></div>
         </section>
 
         <section id="frameSection" class="frame-section" hidden>
-            <iframe id="pokoinFrame" title="Pokoin card detail"></iframe>
+            <iframe id="pokoinFrame" title="Pokoin card detail" credentialless></iframe>
         </section>
 
     </main>
 
+    <script src="../utils/PrintLangs.js"></script>
     <script src="sidepanel.js"></script>
 </body>
 </html>
