@@ -667,3 +667,35 @@ body.album-card-view .candidate-tile.leftover-stack .art-cut {
     font-size: 11px;
     font-weight: 700;
 }
+
+.pt-connect {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.55);
+}
+
+.pt-copy {
+    min-width: 0;
+}
+
+.pt-status {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 12px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.pt-status.error {
+    color: #fca5a5;
+}
+
+.pt-connect button {
+    flex: 0 0 auto;
+}

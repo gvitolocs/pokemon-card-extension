@@ -19850,7 +19850,7 @@ test('side panel shows the Chrome extension version and hides debug runtime dump
     const sidePanelSource = readRepoFile('ui-pages/sidepanel.js');
     const manifest = JSON.parse(readRepoFile('manifest.json'));
 
-    assert.equal(manifest.version, '12.0.35');
+    assert.equal(manifest.version, '12.0.36');
     assert.equal(manifest.permissions.includes('tabs'), true);
     assert.equal(manifest.host_permissions.includes('https://cdn.pokoin.com/*'), true);
     assert.equal(manifest.host_permissions.includes('<all_urls>'), false);
@@ -22658,4 +22658,87 @@ test('Vinted diagnostics forward high-value events to extension debug log in run
     assert.equal(debugMessage.details.source, 'vinted');
     assert.equal(debugMessage.details.searchSignature, 'vinted|reshiram');
     assert.deepEqual(debugMessage.details.selectedChipCategories, ['name:Reshiram']);
+});
+
+function powerToolsSandbox({ cookie = '', storedPokoinToken = 'pokoin-bearer-token-123456', apiStatus = 200, apiBody } = {}) {
+    const sandbox = loadBackgroundHelpers([
+        'connectPowerTools',
+        'getPowerToolsStatus',
+        'isPowerToolsSessionCookie',
+        'readPowerToolsSessionCookie',
+    ]);
+    sandbox.setInterval = setInterval;
+    sandbox.clearInterval = clearInterval;
+    const calls = { fetch: [], tabs: [], cookieListeners: [] };
+    let jar = cookie;
+    sandbox.chrome.cookies = {
+        get: async ({ url, name }) => {
+            assert.equal(url, 'https://new.tcgpowertools.com/');
+            assert.equal(name, 'jwt');
+            return jar ? { name: 'jwt', value: jar, domain: '.tcgpowertools.com' } : null;
+        },
+        onChanged: {
+            addListener: (fn) => calls.cookieListeners.push(fn),
+            removeListener: (fn) => { calls.cookieListeners = calls.cookieListeners.filter((row) => row !== fn); },
+        },
+    };
+    sandbox.chrome.tabs.create = async (options) => {
+        calls.tabs.push(options.url);
+        // The seller signs in on the Power Tools tab.
+        setTimeout(() => {
+            jar = 'fresh.session.jwt';
+            calls.cookieListeners.forEach((fn) => fn({ removed: false, cookie: { name: 'jwt', value: jar, domain: '.tcgpowertools.com' } }));
+        }, 5);
+        return { id: 77 };
+    };
+    sandbox.chrome.storage.session.get = async () => (storedPokoinToken
+        ? { pokoinAuthSession: { token: storedPokoinToken, expiresAt: Date.now() + 3600 * 1000 } }
+        : {});
+    sandbox.fetch = async (url, init = {}) => {
+        calls.fetch.push({ url, init });
+        return {
+            ok: apiStatus >= 200 && apiStatus < 300,
+            status: apiStatus,
+            json: async () => apiBody || { ok: true, status: { connected: true, account: { username: 'seller@example.com' } } },
+        };
+    };
+    return { sandbox, calls };
+}
+
+test('Power Tools connect sends the existing session cookie to Pokoin with the Pokoin bearer', async () => {
+    const { sandbox, calls } = powerToolsSandbox({ cookie: 'existing.session.jwt' });
+    const result = await sandbox.connectPowerTools();
+    assert.equal(result.openedSignIn, false);
+    assert.equal(result.status.connected, true);
+    assert.deepEqual(calls.tabs, [], 'already signed in: no Power Tools tab');
+    assert.equal(calls.fetch.length, 1);
+    assert.equal(calls.fetch[0].url, 'https://api.pokoin.com/api/powertools-connect');
+    assert.equal(calls.fetch[0].init.method, 'POST');
+    assert.equal(calls.fetch[0].init.headers.Authorization, 'Bearer pokoin-bearer-token-123456');
+    assert.deepEqual(JSON.parse(calls.fetch[0].init.body), { session: 'existing.session.jwt' });
+});
+
+test('Power Tools connect opens Power Tools sign-in when there is no session yet', async () => {
+    const { sandbox, calls } = powerToolsSandbox({ cookie: '' });
+    const result = await sandbox.connectPowerTools();
+    assert.equal(result.openedSignIn, true);
+    assert.deepEqual(calls.tabs, ['https://new.tcgpowertools.com/signin']);
+    assert.deepEqual(JSON.parse(calls.fetch[0].init.body), { session: 'fresh.session.jwt' });
+    assert.equal(calls.cookieListeners.length, 0, 'cookie listener removed after sign-in');
+});
+
+test('Power Tools status never opens tabs when Pokoin is signed out', async () => {
+    const { sandbox, calls } = powerToolsSandbox({ storedPokoinToken: '' });
+    const status = await sandbox.getPowerToolsStatus();
+    assert.equal(status.pokoinSignedOut, true);
+    assert.deepEqual(calls.tabs, []);
+    assert.equal(calls.fetch.length, 0);
+});
+
+test('only the tcgpowertools.com jwt cookie counts as a Power Tools session', () => {
+    const { sandbox } = powerToolsSandbox();
+    assert.equal(sandbox.isPowerToolsSessionCookie({ name: 'jwt', value: 'a.b.c', domain: '.tcgpowertools.com' }), true);
+    assert.equal(sandbox.isPowerToolsSessionCookie({ name: 'jwt', value: 'a.b.c', domain: 'evil-tcgpowertools.com' }), false);
+    assert.equal(sandbox.isPowerToolsSessionCookie({ name: 'jwt', value: 'deleted', domain: '.tcgpowertools.com' }), false);
+    assert.equal(sandbox.isPowerToolsSessionCookie({ name: '_ga', value: 'x', domain: '.tcgpowertools.com' }), false);
 });

@@ -6306,6 +6306,153 @@ async function openPokoinAuthBridge() {
     return pokoinAuthBridgeInFlight;
 }
 
+// Power Tools (new.tcgpowertools.com) connect: on the seller's click only, read
+// the Power Tools session cookie and hand it to Pokoin, which validates and
+// stores it encrypted. The extension never stores the session itself and never
+// reads it in the background without that click.
+const POWERTOOLS_ORIGIN = 'https://new.tcgpowertools.com';
+const POWERTOOLS_SIGNIN_URL = `${POWERTOOLS_ORIGIN}/signin`;
+const POWERTOOLS_SESSION_COOKIE = 'jwt';
+const POWERTOOLS_CONNECT_ENDPOINT = `${POKOIN_API_ORIGIN}/api/powertools-connect`;
+const POWERTOOLS_LOGIN_WAIT_MS = 5 * 60 * 1000;
+const POKOIN_AUTH_WAIT_MS = 30 * 1000;
+let powerToolsConnectInFlight = null;
+
+async function readPowerToolsSessionCookie() {
+    if (!chrome.cookies?.get) {
+        throw new Error('This extension version cannot read the Power Tools session. Reload the extension.');
+    }
+    const cookie = await chrome.cookies.get({ url: `${POWERTOOLS_ORIGIN}/`, name: POWERTOOLS_SESSION_COOKIE });
+    const value = String(cookie?.value || '').trim();
+    return value && value !== 'deleted' ? value : '';
+}
+
+function isPowerToolsSessionCookie(cookie = {}) {
+    const domain = String(cookie.domain || '').replace(/^\./, '').toLowerCase();
+    return cookie.name === POWERTOOLS_SESSION_COOKIE &&
+        (domain === 'tcgpowertools.com' || domain.endsWith('.tcgpowertools.com')) &&
+        Boolean(cookie.value) && cookie.value !== 'deleted';
+}
+
+/** Open Power Tools sign-in and resolve with the session once the seller signs in there. */
+function waitForPowerToolsLogin(timeoutMs = POWERTOOLS_LOGIN_WAIT_MS) {
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        let settledCleanup = null;
+        const finish = (error, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            settledCleanup?.();
+            chrome.cookies.onChanged.removeListener(onChanged);
+            if (error) reject(error);
+            else resolve(value);
+        };
+        const onChanged = (change) => {
+            if (!change?.removed && isPowerToolsSessionCookie(change?.cookie)) {
+                finish(null, change.cookie.value);
+            }
+        };
+        const timer = setTimeout(
+            () => finish(new Error('Power Tools sign-in timed out. Sign in on the Power Tools tab, then click Connect again.')),
+            timeoutMs,
+        );
+        // Cookie events can be filtered by the parent .tcgpowertools.com domain;
+        // a 1 s poll catches the session either way.
+        const poll = setInterval(() => {
+            readPowerToolsSessionCookie()
+                .then((value) => { if (value) finish(null, value); })
+                .catch(() => {});
+        }, 1000);
+        const clearPoll = () => clearInterval(poll);
+        chrome.cookies.onChanged.addListener(onChanged);
+        Promise.resolve(chrome.tabs?.create?.({ url: POWERTOOLS_SIGNIN_URL, active: true }))
+            .catch((error) => finish(error));
+        settledCleanup = clearPoll;
+    });
+}
+
+/** Pokoin bearer for the signed-in Pokoin user; opens the auth bridge and waits when needed. */
+async function getPokoinBearerForPowerTools(waitMs = POKOIN_AUTH_WAIT_MS) {
+    const stored = await getStoredPokoinAuthToken();
+    if (stored) return stored;
+    await requestPokoinAuthToken();
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const token = await getStoredPokoinAuthToken();
+        if (token) return token;
+    }
+    throw new Error('Sign in to pokoin.com in this browser first, then click Connect again.');
+}
+
+async function powerToolsApi(method, body, { interactive = true } = {}) {
+    const bearer = interactive ? await getPokoinBearerForPowerTools() : await getStoredPokoinAuthToken();
+    if (!bearer) {
+        return { connected: false, pokoinSignedOut: true };
+    }
+    const response = await fetch(POWERTOOLS_CONNECT_ENDPOINT, {
+        method,
+        headers: {
+            Accept: 'application/json',
+            Authorization: `Bearer ${bearer}`,
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        cache: 'no-store',
+    });
+    let payload = {};
+    try {
+        payload = await response.json();
+    } catch (error) {
+        payload = {};
+    }
+    if (!response.ok) {
+        const error = new Error(payload.error || `Pokoin answered ${response.status}.`);
+        error.code = payload.code || '';
+        throw error;
+    }
+    return payload.status || null;
+}
+
+/** Never opens tabs: answers pokoinSignedOut when there is no stored Pokoin session yet. */
+async function getPowerToolsStatus() {
+    return powerToolsApi('GET', null, { interactive: false });
+}
+
+async function connectPowerTools() {
+    if (powerToolsConnectInFlight) return powerToolsConnectInFlight;
+    powerToolsConnectInFlight = (async () => {
+        let session = await readPowerToolsSessionCookie();
+        let openedSignIn = false;
+        if (!session) {
+            openedSignIn = true;
+            session = await waitForPowerToolsLogin();
+        }
+        let status = null;
+        try {
+            status = await powerToolsApi('POST', { session });
+        } catch (error) {
+            // A stale cookie: let the seller sign in again once, then retry.
+            if (openedSignIn || error.code !== 'powertools_session_expired' && !/did not accept/i.test(error.message || '')) {
+                throw error;
+            }
+            openedSignIn = true;
+            session = await waitForPowerToolsLogin();
+            status = await powerToolsApi('POST', { session });
+        }
+        void recordExtensionDebugEvent('powertools.connected', { openedSignIn, connected: status?.connected === true });
+        return { status, openedSignIn };
+    })().finally(() => {
+        powerToolsConnectInFlight = null;
+    });
+    return powerToolsConnectInFlight;
+}
+
+async function disconnectPowerTools() {
+    return powerToolsApi('DELETE');
+}
+
 async function requestPokoinAuthToken() {
     if (pokoinAuthTokenRequestInFlight) {
         return pokoinAuthTokenRequestInFlight;
@@ -8841,6 +8988,18 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             .catch((error) => {
                 sendResponse({ success: false, error: error.message || 'Unable to store Pokoin auth token.' });
             });
+    } else if (request.action === 'powerToolsStatus') {
+        getPowerToolsStatus()
+            .then((status) => sendResponse({ success: true, status }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Power Tools status failed.' }));
+    } else if (request.action === 'powerToolsConnect') {
+        connectPowerTools()
+            .then((result) => sendResponse({ success: true, ...result }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Power Tools connect failed.', code: error.code || '' }));
+    } else if (request.action === 'powerToolsDisconnect') {
+        disconnectPowerTools()
+            .then((status) => sendResponse({ success: true, status }))
+            .catch((error) => sendResponse({ success: false, error: error.message || 'Power Tools disconnect failed.' }));
     } else if (request.action === 'requestPokoinAuthToken') {
         requestPokoinAuthToken()
             .then((result) => sendResponse({ success: true, ...result }))

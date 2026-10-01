@@ -21,6 +21,8 @@ const elements = {
     emptyActions: document.getElementById('emptyActions'),
     loadListingBtn: document.getElementById('loadListingBtn'),
     analyzeScreenshotBtn: document.getElementById('analyzeScreenshotBtn'),
+    powerToolsStatus: document.getElementById('powerToolsStatus'),
+    powerToolsBtn: document.getElementById('powerToolsBtn'),
 };
 
 function paintExtensionVersion() {
@@ -1756,3 +1758,59 @@ loadExpansionLogos()
     .catch(() => {
         // Candidate cards still render without set symbols.
     });
+
+
+// Power Tools connect: the seller clicks, the background reads the Power Tools
+// session (opening its sign-in when needed) and Pokoin stores it encrypted.
+let powerToolsConnected = false;
+
+function paintPowerTools(status, message = '') {
+    const text = elements.powerToolsStatus;
+    const button = elements.powerToolsBtn;
+    if (!text || !button) return;
+    powerToolsConnected = status?.connected === true;
+    if (message) {
+        text.textContent = message;
+    } else if (status?.pokoinSignedOut) {
+        text.textContent = 'Connect your Power Tools account to see its picking state on pokoin.com/mypokoin/zero.';
+    } else if (powerToolsConnected) {
+        const who = status.account?.username || 'your account';
+        text.textContent = status.cardtraderMatch === false
+            ? `Connected as ${who}, but linked to a different CardTrader seller than Pokoin.`
+            : `Connected as ${who}.`;
+    } else {
+        text.textContent = 'Not connected. Sign in to Power Tools in Chrome, then click Connect.';
+    }
+    text.classList.toggle('error', Boolean(message) && /fail|error|timed out|sign in to pokoin|cannot|did not/i.test(message));
+    button.hidden = false;
+    button.disabled = false;
+    button.textContent = powerToolsConnected ? 'Disconnect' : 'Connect';
+}
+
+async function loadPowerToolsStatus() {
+    try {
+        const response = await chrome.runtime.sendMessage({ action: 'powerToolsStatus' });
+        if (response?.success) paintPowerTools(response.status);
+        else paintPowerTools(null, response?.error || 'Power Tools status unavailable.');
+    } catch (error) {
+        paintPowerTools(null, 'Power Tools status unavailable.');
+    }
+}
+
+elements.powerToolsBtn?.addEventListener('click', async () => {
+    const button = elements.powerToolsBtn;
+    button.disabled = true;
+    const disconnecting = powerToolsConnected;
+    elements.powerToolsStatus.textContent = disconnecting
+        ? 'Disconnecting…'
+        : 'Connecting… If a Power Tools tab opens, sign in there.';
+    try {
+        const response = await chrome.runtime.sendMessage({ action: disconnecting ? 'powerToolsDisconnect' : 'powerToolsConnect' });
+        if (response?.success) paintPowerTools(response.status);
+        else paintPowerTools(null, response?.error || 'Power Tools connect failed.');
+    } catch (error) {
+        paintPowerTools(null, error?.message || 'Power Tools connect failed.');
+    }
+});
+
+void loadPowerToolsStatus();
